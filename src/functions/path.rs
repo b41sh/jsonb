@@ -17,7 +17,7 @@
 use std::collections::VecDeque;
 
 use crate::raw::JsonbItem;
-use crate::ValueType;
+use crate::JsonbType;
 use std::collections::BTreeMap;
 
 use crate::core::ArrayBuilder;
@@ -520,9 +520,9 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err()); // Returns an error
     /// ```
     pub fn delete_by_name(&self, name: &str) -> Result<OwnedJsonb> {
-        let value_type = self.value_type()?;
-        match value_type {
-            ValueType::Object(_) => {
+        let jsonb_type = self.jsonb_type()?;
+        match jsonb_type {
+            JsonbType::Object(_) => {
                 let mut object_iter = ObjectIterator::new(*self)?.unwrap();
                 let mut builder = ObjectBuilder::new();
                 for result in &mut object_iter {
@@ -533,7 +533,7 @@ impl RawJsonb<'_> {
                 }
                 Ok(builder.build()?)
             }
-            ValueType::Array(_) => {
+            JsonbType::Array(_) => {
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 let mut builder = ArrayBuilder::with_capacity(array_iter.len());
                 for item_result in &mut array_iter {
@@ -614,10 +614,10 @@ impl RawJsonb<'_> {
         &self,
         keypaths: I,
     ) -> Result<OwnedJsonb> {
-        let value_type = self.value_type()?;
+        let jsonb_type = self.jsonb_type()?;
         if matches!(
-            value_type,
-            ValueType::Null | ValueType::Boolean | ValueType::Number | ValueType::String
+            jsonb_type,
+            JsonbType::Null | JsonbType::Boolean | JsonbType::Number | JsonbType::String
         ) {
             return Err(Error::InvalidJsonType);
         }
@@ -692,9 +692,9 @@ impl RawJsonb<'_> {
         while let Some((current_item, next_del_index)) = items.pop_back() {
             let current_raw_jsonb = current_item.as_raw_jsonb().unwrap();
 
-            let value_type = current_raw_jsonb.value_type()?;
-            let current_del_jsonb = match value_type {
-                ValueType::Array(_) => {
+            let jsonb_type = current_raw_jsonb.jsonb_type()?;
+            let current_del_jsonb = match jsonb_type {
+                JsonbType::Array(_) => {
                     let array_iter = ArrayIterator::new(current_raw_jsonb)?.unwrap();
                     let mut builder = ArrayBuilder::with_capacity(array_iter.len());
                     for (i, item_result) in &mut array_iter.enumerate() {
@@ -707,7 +707,7 @@ impl RawJsonb<'_> {
                     }
                     builder.build()?
                 }
-                ValueType::Object(_) => {
+                JsonbType::Object(_) => {
                     let object_iter = ObjectIterator::new(current_raw_jsonb)?.unwrap();
                     let mut builder = ObjectBuilder::new();
                     for (i, result) in &mut object_iter.enumerate() {

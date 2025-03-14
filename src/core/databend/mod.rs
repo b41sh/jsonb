@@ -29,14 +29,14 @@ use core::ops::Range;
 
 use crate::error::*;
 use crate::RawJsonb;
-use crate::ValueType;
+use crate::JsonbType;
 
 use crate::OwnedJsonb;
 use byteorder::BigEndian;
 use byteorder::WriteBytesExt;
 
 impl RawJsonb<'_> {
-    pub fn value_type(&self) -> Result<ValueType> {
+    pub fn jsonb_type(&self) -> Result<JsonbType> {
         let mut index = 0;
         let (header_type, header_len) = self.read_header(index)?;
         index += 4;
@@ -45,16 +45,16 @@ impl RawJsonb<'_> {
                 let jentry = self.read_jentry(index)?;
 
                 match jentry.type_code {
-                    NULL_TAG => Ok(ValueType::Null),
-                    TRUE_TAG => Ok(ValueType::Boolean),
-                    FALSE_TAG => Ok(ValueType::Boolean),
-                    NUMBER_TAG => Ok(ValueType::Number),
-                    STRING_TAG => Ok(ValueType::String),
+                    NULL_TAG => Ok(JsonbType::Null),
+                    TRUE_TAG => Ok(JsonbType::Boolean),
+                    FALSE_TAG => Ok(JsonbType::Boolean),
+                    NUMBER_TAG => Ok(JsonbType::Number),
+                    STRING_TAG => Ok(JsonbType::String),
                     _ => Err(Error::InvalidJsonb),
                 }
             }
-            ARRAY_CONTAINER_TAG => Ok(ValueType::Array(header_len as usize)),
-            OBJECT_CONTAINER_TAG => Ok(ValueType::Object(header_len as usize)),
+            ARRAY_CONTAINER_TAG => Ok(JsonbType::Array(header_len as usize)),
+            OBJECT_CONTAINER_TAG => Ok(JsonbType::Object(header_len as usize)),
             _ => Err(Error::InvalidJsonb),
         }
     }
@@ -80,17 +80,17 @@ impl RawJsonb<'_> {
 }
 
 impl<'a> JsonbItem<'a> {
-    pub(crate) fn value_type(&self) -> Result<ValueType> {
+    pub(crate) fn jsonb_type(&self) -> Result<JsonbType> {
         match self {
-            JsonbItem::Null => Ok(ValueType::Null),
-            JsonbItem::Boolean(_) => Ok(ValueType::Boolean),
-            JsonbItem::Number(_) => Ok(ValueType::Number),
-            JsonbItem::String(_) => Ok(ValueType::String),
+            JsonbItem::Null => Ok(JsonbType::Null),
+            JsonbItem::Boolean(_) => Ok(JsonbType::Boolean),
+            JsonbItem::Number(_) => Ok(JsonbType::Number),
+            JsonbItem::String(_) => Ok(JsonbType::String),
             JsonbItem::Raw(raw) => {
-                raw.value_type()
+                raw.jsonb_type()
             }
             JsonbItem::Owned(owned) => {
-                owned.as_raw().value_type()
+                owned.as_raw().jsonb_type()
             }
         }
     }

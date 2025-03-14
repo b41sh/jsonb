@@ -15,7 +15,7 @@
 // This file contains functions that specifically operate on JSONB object values.
 
 use crate::raw::JsonbItem;
-use crate::ValueType;
+use crate::JsonbType;
 use std::collections::BTreeSet;
 use std::str::from_utf8;
 
@@ -470,9 +470,9 @@ impl RawJsonb<'_> {
     /// ```
     pub fn exists_all_keys<'a, I: Iterator<Item = &'a [u8]>>(&self, keys: I) -> Result<bool> {
         let mut self_keys = BTreeSet::new();
-        let value_type = self.value_type()?;
-        match value_type {
-            ValueType::Object(_) => {
+        let jsonb_type = self.jsonb_type()?;
+        match jsonb_type {
+            JsonbType::Object(_) => {
                 let mut object_key_iter = ObjectKeyIterator::new(*self)?.unwrap();
                 for result in &mut object_key_iter {
                     let item = result?;
@@ -481,7 +481,7 @@ impl RawJsonb<'_> {
                     }
                 }
             }
-            ValueType::Array(_) => {
+            JsonbType::Array(_) => {
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 for result in &mut array_iter {
                     let item = result?;
@@ -549,9 +549,9 @@ impl RawJsonb<'_> {
     /// ```
     pub fn exists_any_keys<'a, I: Iterator<Item = &'a [u8]>>(&self, keys: I) -> Result<bool> {
         let mut self_keys = BTreeSet::new();
-        let value_type = self.value_type()?;
-        match value_type {
-            ValueType::Object(_) => {
+        let jsonb_type = self.jsonb_type()?;
+        match jsonb_type {
+            JsonbType::Object(_) => {
                 let mut object_key_iter = ObjectKeyIterator::new(*self)?.unwrap();
                 for result in &mut object_key_iter {
                     let item = result?;
@@ -560,7 +560,7 @@ impl RawJsonb<'_> {
                     }
                 }
             }
-            ValueType::Array(_) => {
+            JsonbType::Array(_) => {
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 for result in &mut array_iter {
                     let item = result?;

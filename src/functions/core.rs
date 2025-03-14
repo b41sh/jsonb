@@ -19,7 +19,7 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 
 use crate::from_raw_jsonb;
-use crate::ValueType;
+use crate::JsonbType;
 
 use crate::core::ArrayIterator;
 use crate::core::ObjectIterator;
@@ -201,8 +201,8 @@ impl PartialOrd for RawJsonb<'_> {
                 }
             }
         */
-        let self_type = self.value_type().ok()?;
-        let other_type = other.value_type().ok()?;
+        let self_type = self.jsonb_type().ok()?;
+        let other_type = other.jsonb_type().ok()?;
 
         // First use JSONB type to determine the order,
         // different types must have different orders.
@@ -211,7 +211,7 @@ impl PartialOrd for RawJsonb<'_> {
         }
 
         match (self_type, other_type) {
-            (ValueType::Array(self_len), ValueType::Array(other_len)) => {
+            (JsonbType::Array(self_len), JsonbType::Array(other_len)) => {
                 let self_array_iter = ArrayIterator::new(*self).ok()?.unwrap();
                 let mut other_array_iter = ArrayIterator::new(*other).ok()?.unwrap();
                 for (self_res, other_res) in &mut self_array_iter.zip(&mut other_array_iter) {
@@ -225,7 +225,7 @@ impl PartialOrd for RawJsonb<'_> {
                 }
                 Some(self_len.cmp(&other_len))
             }
-            (ValueType::Object(self_len), ValueType::Object(other_len)) => {
+            (JsonbType::Object(self_len), JsonbType::Object(other_len)) => {
                 let self_object_iter = ObjectIterator::new(*self).ok()?.unwrap();
                 let mut other_object_iter = ObjectIterator::new(*other).ok()?.unwrap();
                 for (self_res, other_res) in &mut self_object_iter.zip(&mut other_object_iter) {
@@ -243,7 +243,7 @@ impl PartialOrd for RawJsonb<'_> {
                 }
                 Some(self_len.cmp(&other_len))
             }
-            (ValueType::String, ValueType::String) => {
+            (JsonbType::String, JsonbType::String) => {
                 let self_val: Result<String> = from_raw_jsonb(self);
                 let other_val: Result<String> = from_raw_jsonb(other);
                 match (self_val, other_val) {
@@ -251,7 +251,7 @@ impl PartialOrd for RawJsonb<'_> {
                     (_, _) => None,
                 }
             }
-            (ValueType::Number, ValueType::Number) => {
+            (JsonbType::Number, JsonbType::Number) => {
                 let self_val: Result<Number> = from_raw_jsonb(self);
                 let other_val: Result<Number> = from_raw_jsonb(other);
                 match (self_val, other_val) {
@@ -259,7 +259,7 @@ impl PartialOrd for RawJsonb<'_> {
                     (_, _) => None,
                 }
             }
-            (ValueType::Boolean, ValueType::Boolean) => {
+            (JsonbType::Boolean, JsonbType::Boolean) => {
                 let self_val: Result<bool> = from_raw_jsonb(self);
                 let other_val: Result<bool> = from_raw_jsonb(other);
                 match (self_val, other_val) {

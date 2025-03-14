@@ -122,7 +122,7 @@ where
 
 /// The value type of JSONB data.
 #[derive(Debug, Clone, Copy)]
-pub enum ValueType {
+pub enum JsonbType {
     /// The Null JSON type.
     Null,
     /// The Boolean JSON type.
@@ -137,45 +137,45 @@ pub enum ValueType {
     Object(usize),
 }
 
-impl Eq for ValueType {}
+impl Eq for JsonbType {}
 
-impl PartialEq for ValueType {
+impl PartialEq for JsonbType {
     fn eq(&self, other: &Self) -> bool {
         self.partial_cmp(other) == Some(Ordering::Equal)
     }
 }
 
-impl PartialOrd for ValueType {
+impl PartialOrd for JsonbType {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
-            (ValueType::Null, ValueType::Null) => Some(Ordering::Equal),
-            (ValueType::Null, _) => Some(Ordering::Greater),
-            (_, ValueType::Null) => Some(Ordering::Less),
+            (JsonbType::Null, JsonbType::Null) => Some(Ordering::Equal),
+            (JsonbType::Null, _) => Some(Ordering::Greater),
+            (_, JsonbType::Null) => Some(Ordering::Less),
 
-            (ValueType::Array(_), ValueType::Array(_)) => None,
-            (ValueType::Array(_), _) => Some(Ordering::Greater),
-            (_, ValueType::Array(_)) => Some(Ordering::Less),
+            (JsonbType::Array(_), JsonbType::Array(_)) => None,
+            (JsonbType::Array(_), _) => Some(Ordering::Greater),
+            (_, JsonbType::Array(_)) => Some(Ordering::Less),
 
-            (ValueType::Object(_), ValueType::Object(_)) => None,
-            (ValueType::Object(_), _) => Some(Ordering::Greater),
-            (_, ValueType::Object(_)) => Some(Ordering::Less),
+            (JsonbType::Object(_), JsonbType::Object(_)) => None,
+            (JsonbType::Object(_), _) => Some(Ordering::Greater),
+            (_, JsonbType::Object(_)) => Some(Ordering::Less),
 
-            (ValueType::String, ValueType::String) => None,
-            (ValueType::String, _) => Some(Ordering::Greater),
-            (_, ValueType::String) => Some(Ordering::Less),
+            (JsonbType::String, JsonbType::String) => None,
+            (JsonbType::String, _) => Some(Ordering::Greater),
+            (_, JsonbType::String) => Some(Ordering::Less),
 
-            (ValueType::Number, ValueType::Number) => None,
-            (ValueType::Number, _) => Some(Ordering::Greater),
-            (_, ValueType::Number) => Some(Ordering::Less),
+            (JsonbType::Number, JsonbType::Number) => None,
+            (JsonbType::Number, _) => Some(Ordering::Greater),
+            (_, JsonbType::Number) => Some(Ordering::Less),
 
-            (ValueType::Boolean, ValueType::Boolean) => None,
+            (JsonbType::Boolean, JsonbType::Boolean) => None,
         }
     }
 }
 
 //#[derive(Debug, Clone, Copy, PartialEq)]
 //#[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum JsonbItem<'a> {
     Null,
     Boolean(bool),
@@ -195,23 +195,14 @@ impl PartialEq for JsonbItem<'_> {
 
 impl PartialOrd for JsonbItem<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let self_type = self.value_type().ok()?;
-        let other_type = other.value_type().ok()?;
+        let self_type = self.jsonb_type().ok()?;
+        let other_type = other.jsonb_type().ok()?;
 
         // First use JSONB type to determine the order,
         // different types must have different orders.
         if let Some(ord) = self_type.partial_cmp(&other_type) {
             return Some(ord);
         }
-
-/**
-            (JsonbItem::Owned(self_owned), JsonbItem::Raw(other_raw)) => {
-                self_owned.as_raw().partial_cmp(&other_raw)
-            }
-            (JsonbItem::Owned(self_owned), JsonbItem::Owned(other_owned)) => {
-                self_owned.as_raw().partial_cmp(&other_owned.as_raw())
-            }
-*/
 
         let self_item = if let JsonbItem::Owned(owned) = self {
             &JsonbItem::Raw(owned.as_raw())
@@ -228,11 +219,16 @@ impl PartialOrd for JsonbItem<'_> {
             (JsonbItem::Raw(self_raw), JsonbItem::Raw(other_raw)) => {
                 self_raw.partial_cmp(&other_raw)
             }
-            //(JsonbItem::Raw(self_raw), JsonbItem::Owned(other_owned)) => {
-            //    self_raw.partial_cmp(&other_owned.as_raw())
-            //}
+            // compare null, raw jsonb must not null
             (JsonbItem::Raw(self_raw), JsonbItem::Null) => {
                 Some(Ordering::Less)
+            }
+            (JsonbItem::Null, JsonbItem::Raw(other_raw)) => {
+                Some(Ordering::Greater)
+            }
+            // compare boolean
+            (JsonbItem::Boolean(self_val), JsonbItem::Boolean(other_val)) => {
+                self_val.partial_cmp(&other_val)
             }
             (JsonbItem::Raw(self_raw), JsonbItem::Boolean(other_val)) => {
                 let self_val: Result<bool> = from_raw_jsonb(&self_raw);
@@ -242,37 +238,61 @@ impl PartialOrd for JsonbItem<'_> {
                     None
                 }
             }
-            (JsonbItem::Raw(self_raw), JsonbItem::Number(other_data)) => {
+            (JsonbItem::Boolean(self_val), JsonbItem::Raw(other_raw)) => {
+                let other_val: Result<bool> = from_raw_jsonb(&other_raw);
+                if let Ok(other_val) = other_val {
+                    self_val.partial_cmp(&other_val)
+                } else {
+                    None
+                }
+            }
+            // compare number
+            (JsonbItem::Number(self_data), JsonbItem::Number(other_data)) => {
+                let self_num = Number::decode(self_data).ok()?;
                 let other_num = Number::decode(other_data).ok()?;
+                self_num.partial_cmp(&other_num)
+            }
+            (JsonbItem::Raw(self_raw), JsonbItem::Number(other_data)) => {
                 let self_num: Result<Number> = from_raw_jsonb(&self_raw);
+                let other_num = Number::decode(other_data).ok()?;
                 if let Ok(self_num) = self_num {
                     self_num.partial_cmp(&other_num)
                 } else {
                     None
                 }
             }
+            (JsonbItem::Number(self_data), JsonbItem::Raw(other_raw)) => {
+                let self_num = Number::decode(self_data).ok()?;
+                let other_num: Result<Number> = from_raw_jsonb(&other_raw);
+                if let Ok(other_num) = other_num {
+                    self_num.partial_cmp(&other_num)
+                } else {
+                    None
+                }
+            }
+            // compare string
+            (JsonbItem::String(self_data), JsonbItem::String(other_data)) => {
+                let self_str = unsafe {std::str::from_utf8_unchecked(self_data)};
+                let other_str = unsafe {std::str::from_utf8_unchecked(other_data)};
+                self_str.partial_cmp(&other_str)
+            }
             (JsonbItem::Raw(self_raw), JsonbItem::String(other_data)) => {
-                let other_str = unsafe {String::from_utf8_unchecked(other_data.to_vec())};
                 let self_str: Result<String> = from_raw_jsonb(&self_raw);
+                let other_str = unsafe {String::from_utf8_unchecked(other_data.to_vec())};
                 if let Ok(self_str) = self_str {
                     self_str.partial_cmp(&other_str)
                 } else {
                     None
                 }
             }
-
-            (JsonbItem::String(self_data), JsonbItem::String(other_data)) => {
-                let self_str = unsafe {std::str::from_utf8_unchecked(self_data)};
-                let other_str = unsafe {std::str::from_utf8_unchecked(other_data)};
-                self_str.partial_cmp(&other_str)
-            }
-            (JsonbItem::Number(self_data), JsonbItem::Number(other_data)) => {
-                let self_num = Number::decode(self_data).ok()?;
-                let other_num = Number::decode(other_data).ok()?;
-                self_num.partial_cmp(&other_num)
-            }
-            (JsonbItem::Boolean(self_val), JsonbItem::Boolean(other_val)) => {
-                self_val.partial_cmp(&other_val)
+            (JsonbItem::String(self_data), JsonbItem::Raw(other_raw)) => {
+                let self_str = unsafe {String::from_utf8_unchecked(self_data.to_vec())};
+                let other_str: Result<String> = from_raw_jsonb(&other_raw);
+                if let Ok(other_str) = other_str {
+                    self_str.partial_cmp(&other_str)
+                } else {
+                    None
+                }
             }
             (_, _) => None,
         }

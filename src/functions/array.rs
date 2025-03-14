@@ -22,7 +22,7 @@ use crate::error::*;
 
 use crate::OwnedJsonb;
 use crate::RawJsonb;
-use crate::ValueType;
+use crate::JsonbType;
 
 impl OwnedJsonb {
     /// Builds a JSONB array from a collection of RawJsonb values.
@@ -101,8 +101,8 @@ impl RawJsonb<'_> {
     /// assert_eq!(len, None);
     /// ```
     pub fn array_length(&self) -> Result<Option<usize>> {
-        let value_type = self.value_type()?;
-        if let ValueType::Array(len) = value_type {
+        let jsonb_type = self.jsonb_type()?;
+        if let JsonbType::Array(len) = jsonb_type {
             Ok(Some(len))
         } else {
             Ok(None)
