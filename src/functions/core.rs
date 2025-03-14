@@ -136,6 +136,12 @@ impl RawJsonb<'_> {
 
 impl Eq for RawJsonb<'_> {}
 
+impl PartialEq for RawJsonb<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
+    }
+}
+
 /// Implements `PartialOrd` for `RawJsonb`, allowing comparison of two `RawJsonb` values.
 ///
 /// The comparison logic handles different JSONB types (scalar, array, object) and considers null values.

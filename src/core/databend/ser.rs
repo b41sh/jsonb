@@ -473,21 +473,6 @@ impl ser::SerializeStructVariant for ArraySerializer<'_> {
     }
 }
 
-pub trait Deserialize<'de>: Sized {
-    // Required method
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-       where D: Deserializer<'de>;
-}
-
-impl Deserialize<'de> for Number {
-    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
-       where D: serde::Deserializer<'de>
-    {
-        match 
-
-    }
-}
-
 impl Serialize for RawJsonb<'_> {
     #[inline]
     fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
