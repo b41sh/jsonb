@@ -25,11 +25,10 @@ use crate::Error;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 
-use serde::ser::Error as SerError;
+use serde::ser;
+use serde::ser::Serialize;
 use serde::ser::SerializeMap;
 use serde::ser::SerializeSeq;
-
-use serde::ser::{self, Serialize};
 
 use byteorder::BigEndian;
 use byteorder::WriteBytesExt;
@@ -382,7 +381,7 @@ impl ser::SerializeMap for ObjectSerializer<'_> {
 
     fn end(self) -> Result<Self::Ok> {
         if self.keys.len() != self.values.len() {
-            return Err(SerError::custom(
+            return Err(ser::Error::custom(
                 "Invalid object keys and values length".to_string(),
             ));
         }
@@ -390,7 +389,7 @@ impl ser::SerializeMap for ObjectSerializer<'_> {
         for key in self.keys.into_iter() {
             let key_str_res: Result<String> = from_raw_jsonb(&key.as_raw());
             let Ok(key_str) = key_str_res else {
-                return Err(SerError::custom("Invalid object key".to_string()));
+                return Err(ser::Error::custom("Invalid object key".to_string()));
             };
             key_strs.push(key_str);
         }
@@ -480,20 +479,13 @@ impl Serialize for RawJsonb<'_> {
         S: serde::Serializer,
     {
         let mut index = 0;
-        let header = self
-            .read_u32(index)
-            .map_err(|e| SerError::custom(format!("{e}")))?;
+        let (header_type, header_len) = self.read_header(index).map_err(|e| ser::Error::custom(format!("{e}")))?;
         index += 4;
-        let header_type = header & CONTAINER_HEADER_TYPE_MASK;
-        let header_len = header & CONTAINER_HEADER_LEN_MASK;
 
         match header_type {
             SCALAR_CONTAINER_TAG => {
-                let jentry_encoded = self
-                    .read_u32(index)
-                    .map_err(|e| SerError::custom(format!("{e}")))?;
+                let jentry = self.read_jentry(index).map_err(|e| ser::Error::custom(format!("{e}")))?;
                 index += 4;
-                let jentry = JEntry::decode_jentry(jentry_encoded);
 
                 match jentry.type_code {
                     NULL_TAG => serializer.serialize_unit(),
@@ -504,7 +496,7 @@ impl Serialize for RawJsonb<'_> {
                         let payload_end = index + jentry.length as usize;
 
                         let num = Number::decode(&self.data[payload_start..payload_end])
-                            .map_err(|e| SerError::custom(format!("{e}")))?;
+                            .map_err(|e| ser::Error::custom(format!("{e}")))?;
 
                         match num {
                             Number::Int64(i) => serializer.serialize_i64(i),
@@ -523,9 +515,9 @@ impl Serialize for RawJsonb<'_> {
                     }
                     CONTAINER_TAG => {
                         // Scalar header can't have contianer jentry tag
-                        Err(SerError::custom("Invalid jsonb".to_string()))
+                        Err(ser::Error::custom("Invalid jsonb".to_string()))
                     }
-                    _ => Err(SerError::custom("Invalid jsonb".to_string())),
+                    _ => Err(ser::Error::custom("Invalid jsonb".to_string())),
                 }
             }
             ARRAY_CONTAINER_TAG => {
@@ -533,11 +525,8 @@ impl Serialize for RawJsonb<'_> {
 
                 let mut payload_start = index + 4 * header_len as usize;
                 for _ in 0..header_len {
-                    let jentry_encoded = self
-                        .read_u32(index)
-                        .map_err(|e| SerError::custom(format!("{e}")))?;
+                    let jentry = self.read_jentry(index).map_err(|e| ser::Error::custom(format!("{e}")))?;
                     index += 4;
-                    let jentry = JEntry::decode_jentry(jentry_encoded);
 
                     let payload_end = payload_start + jentry.length as usize;
                     match jentry.type_code {
@@ -546,7 +535,7 @@ impl Serialize for RawJsonb<'_> {
                         FALSE_TAG => serialize_seq.serialize_element(&false)?,
                         NUMBER_TAG => {
                             let num = Number::decode(&self.data[payload_start..payload_end])
-                                .map_err(|e| SerError::custom(format!("{e}")))?;
+                                .map_err(|e| ser::Error::custom(format!("{e}")))?;
                             match num {
                                 Number::Int64(i) => serialize_seq.serialize_element(&i)?,
                                 Number::UInt64(i) => serialize_seq.serialize_element(&i)?,
@@ -567,7 +556,7 @@ impl Serialize for RawJsonb<'_> {
                             serialize_seq.serialize_element(&inner_raw_jsonb)?;
                         }
                         _ => {
-                            return Err(SerError::custom("Invalid jsonb".to_string()));
+                            return Err(ser::Error::custom("Invalid jsonb".to_string()));
                         }
                     }
                     payload_start = payload_end;
@@ -580,11 +569,8 @@ impl Serialize for RawJsonb<'_> {
                 let mut keys = VecDeque::with_capacity(header_len as usize);
                 let mut payload_start = index + 8 * header_len as usize;
                 for _ in 0..header_len {
-                    let jentry_encoded = self
-                        .read_u32(index)
-                        .map_err(|e| SerError::custom(format!("{e}")))?;
+                    let jentry = self.read_jentry(index).map_err(|e| ser::Error::custom(format!("{e}")))?;
                     index += 4;
-                    let jentry = JEntry::decode_jentry(jentry_encoded);
 
                     let payload_end = payload_start + jentry.length as usize;
                     match jentry.type_code {
@@ -597,18 +583,15 @@ impl Serialize for RawJsonb<'_> {
                             keys.push_back(s);
                         }
                         _ => {
-                            return Err(SerError::custom("Invalid jsonb".to_string()));
+                            return Err(ser::Error::custom("Invalid jsonb".to_string()));
                         }
                     }
                     payload_start = payload_end;
                 }
 
                 for _ in 0..header_len {
-                    let jentry_encoded = self
-                        .read_u32(index)
-                        .map_err(|e| SerError::custom(format!("{e}")))?;
+                    let jentry = self.read_jentry(index).map_err(|e| ser::Error::custom(format!("{e}")))?;
                     index += 4;
-                    let jentry = JEntry::decode_jentry(jentry_encoded);
 
                     let payload_end = payload_start + jentry.length as usize;
                     let k = keys.pop_front().unwrap();
@@ -618,7 +601,7 @@ impl Serialize for RawJsonb<'_> {
                         FALSE_TAG => serialize_map.serialize_entry(&k, &false)?,
                         NUMBER_TAG => {
                             let num = Number::decode(&self.data[payload_start..payload_end])
-                                .map_err(|e| SerError::custom(format!("{e}")))?;
+                                .map_err(|e| ser::Error::custom(format!("{e}")))?;
                             match num {
                                 Number::Int64(i) => serialize_map.serialize_entry(&k, &i)?,
                                 Number::UInt64(i) => serialize_map.serialize_entry(&k, &i)?,
@@ -639,14 +622,14 @@ impl Serialize for RawJsonb<'_> {
                             serialize_map.serialize_entry(&k, &inner_raw_jsonb)?;
                         }
                         _ => {
-                            return Err(SerError::custom("Invalid jsonb".to_string()));
+                            return Err(ser::Error::custom("Invalid jsonb".to_string()));
                         }
                     }
                     payload_start = payload_end;
                 }
                 serialize_map.end()
             }
-            _ => Err(SerError::custom("Invalid jsonb".to_string())),
+            _ => Err(ser::Error::custom("Invalid jsonb".to_string())),
         }
     }
 }
