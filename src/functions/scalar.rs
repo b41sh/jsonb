@@ -107,7 +107,6 @@ impl RawJsonb<'_> {
     /// ```
     pub fn as_null(&self) -> Result<Option<()>> {
         let res: Result<()> = from_raw_jsonb(self);
-        println!("res={:?}", res);
         match res {
             Ok(_) => Ok(Some(())),
             Err(Error::UnexpectedType) => Ok(None),

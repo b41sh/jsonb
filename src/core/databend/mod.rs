@@ -80,6 +80,21 @@ impl RawJsonb<'_> {
 }
 
 impl<'a> JsonbItem<'a> {
+    pub(crate) fn value_type(&self) -> Result<ValueType> {
+        match self {
+            JsonbItem::Null => Ok(ValueType::Null),
+            JsonbItem::Boolean(_) => Ok(ValueType::Boolean),
+            JsonbItem::Number(_) => Ok(ValueType::Number),
+            JsonbItem::String(_) => Ok(ValueType::String),
+            JsonbItem::Raw(raw) => {
+                raw.value_type()
+            }
+            JsonbItem::Owned(owned) => {
+                owned.as_raw().value_type()
+            }
+        }
+    }
+
     pub(crate) fn from_raw_jsonb(raw_jsonb: RawJsonb<'a>) -> Result<JsonbItem<'a>> {
         let (header_type, _) = raw_jsonb.read_header(0)?;
         match header_type {
