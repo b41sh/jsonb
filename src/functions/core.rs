@@ -18,6 +18,12 @@ use core::convert::TryInto;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
+use crate::from_raw_jsonb;
+use crate::ValueType;
+
+use crate::core::ArrayIterator;
+use crate::core::ObjectIterator;
+
 use crate::constants::*;
 use crate::error::*;
 use crate::jentry::JEntry;
@@ -145,55 +151,50 @@ impl Eq for RawJsonb<'_> {}
 #[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for RawJsonb<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-
-
-
-
-/**
-        let left = self.data;
-        let right = other.data;
-        let left_header = read_u32(left, 0).ok()?;
-        let right_header = read_u32(right, 0).ok()?;
-        match (
-            left_header & CONTAINER_HEADER_TYPE_MASK,
-            right_header & CONTAINER_HEADER_TYPE_MASK,
-        ) {
-            (SCALAR_CONTAINER_TAG, SCALAR_CONTAINER_TAG) => {
-                let left_encoded = read_u32(left, 4).ok()?;
-                let left_jentry = JEntry::decode_jentry(left_encoded);
-                let right_encoded = read_u32(right, 4).ok()?;
-                let right_jentry = JEntry::decode_jentry(right_encoded);
-                compare_scalar(&left_jentry, &left[8..], &right_jentry, &right[8..])
-            }
-            (ARRAY_CONTAINER_TAG, ARRAY_CONTAINER_TAG) => {
-                compare_array(left_header, &left[4..], right_header, &right[4..])
-            }
-            (OBJECT_CONTAINER_TAG, OBJECT_CONTAINER_TAG) => {
-                compare_object(left_header, &left[4..], right_header, &right[4..])
-            }
-            (SCALAR_CONTAINER_TAG, ARRAY_CONTAINER_TAG | OBJECT_CONTAINER_TAG) => {
-                let left_encoded = read_u32(left, 4).ok()?;
-                let left_jentry = JEntry::decode_jentry(left_encoded);
-                match left_jentry.type_code {
-                    NULL_TAG => Some(Ordering::Greater),
-                    _ => Some(Ordering::Less),
+        /**
+                let left = self.data;
+                let right = other.data;
+                let left_header = read_u32(left, 0).ok()?;
+                let right_header = read_u32(right, 0).ok()?;
+                match (
+                    left_header & CONTAINER_HEADER_TYPE_MASK,
+                    right_header & CONTAINER_HEADER_TYPE_MASK,
+                ) {
+                    (SCALAR_CONTAINER_TAG, SCALAR_CONTAINER_TAG) => {
+                        let left_encoded = read_u32(left, 4).ok()?;
+                        let left_jentry = JEntry::decode_jentry(left_encoded);
+                        let right_encoded = read_u32(right, 4).ok()?;
+                        let right_jentry = JEntry::decode_jentry(right_encoded);
+                        compare_scalar(&left_jentry, &left[8..], &right_jentry, &right[8..])
+                    }
+                    (ARRAY_CONTAINER_TAG, ARRAY_CONTAINER_TAG) => {
+                        compare_array(left_header, &left[4..], right_header, &right[4..])
+                    }
+                    (OBJECT_CONTAINER_TAG, OBJECT_CONTAINER_TAG) => {
+                        compare_object(left_header, &left[4..], right_header, &right[4..])
+                    }
+                    (SCALAR_CONTAINER_TAG, ARRAY_CONTAINER_TAG | OBJECT_CONTAINER_TAG) => {
+                        let left_encoded = read_u32(left, 4).ok()?;
+                        let left_jentry = JEntry::decode_jentry(left_encoded);
+                        match left_jentry.type_code {
+                            NULL_TAG => Some(Ordering::Greater),
+                            _ => Some(Ordering::Less),
+                        }
+                    }
+                    (ARRAY_CONTAINER_TAG | OBJECT_CONTAINER_TAG, SCALAR_CONTAINER_TAG) => {
+                        let right_encoded = read_u32(right, 4).ok()?;
+                        let right_jentry = JEntry::decode_jentry(right_encoded);
+                        match right_jentry.type_code {
+                            NULL_TAG => Some(Ordering::Less),
+                            _ => Some(Ordering::Greater),
+                        }
+                    }
+                    (ARRAY_CONTAINER_TAG, OBJECT_CONTAINER_TAG) => Some(Ordering::Greater),
+                    (OBJECT_CONTAINER_TAG, ARRAY_CONTAINER_TAG) => Some(Ordering::Less),
+                    (_, _) => None,
                 }
             }
-            (ARRAY_CONTAINER_TAG | OBJECT_CONTAINER_TAG, SCALAR_CONTAINER_TAG) => {
-                let right_encoded = read_u32(right, 4).ok()?;
-                let right_jentry = JEntry::decode_jentry(right_encoded);
-                match right_jentry.type_code {
-                    NULL_TAG => Some(Ordering::Less),
-                    _ => Some(Ordering::Greater),
-                }
-            }
-            (ARRAY_CONTAINER_TAG, OBJECT_CONTAINER_TAG) => Some(Ordering::Greater),
-            (OBJECT_CONTAINER_TAG, ARRAY_CONTAINER_TAG) => Some(Ordering::Less),
-            (_, _) => None,
-        }
-    }
-*/
-
+        */
         let self_type = self.value_type().ok()?;
         let other_type = other.value_type().ok()?;
 
@@ -205,9 +206,8 @@ impl PartialOrd for RawJsonb<'_> {
 
         match (self_type, other_type) {
             (ValueType::Array(self_len), ValueType::Array(other_len)) => {
-                let mut self_array_iter = ArrayIterator::new(*self).unwrap();
-                let mut other_array_iter = ArrayIterator::new(*other).unwrap();
-
+                let self_array_iter = ArrayIterator::new(*self).ok()?.unwrap();
+                let mut other_array_iter = ArrayIterator::new(*other).ok()?.unwrap();
                 for (self_res, other_res) in &mut self_array_iter.zip(&mut other_array_iter) {
                     let self_item = self_res.ok()?;
                     let other_item = other_res.ok()?;
@@ -219,32 +219,51 @@ impl PartialOrd for RawJsonb<'_> {
                 }
                 Some(self_len.cmp(&other_len))
             }
-            (ValueType::Object(_), ValueType::Object(_)) => {
-                todo!()
+            (ValueType::Object(self_len), ValueType::Object(other_len)) => {
+                let self_object_iter = ObjectIterator::new(*self).ok()?.unwrap();
+                let mut other_object_iter = ObjectIterator::new(*other).ok()?.unwrap();
+                for (self_res, other_res) in &mut self_object_iter.zip(&mut other_object_iter) {
+                    let (self_key, self_val) = self_res.ok()?;
+                    let (other_key, other_val) = other_res.ok()?;
+
+                    let key_ord = self_key.partial_cmp(&other_key)?;
+                    if key_ord != Ordering::Equal {
+                        return Some(key_ord);
+                    }
+                    let val_ord = self_val.partial_cmp(&other_val)?;
+                    if val_ord != Ordering::Equal {
+                        return Some(val_ord);
+                    }
+                }
+                Some(self_len.cmp(&other_len))
             }
             (ValueType::String, ValueType::String) => {
                 let self_val: Result<String> = from_raw_jsonb(self);
                 let other_val: Result<String> = from_raw_jsonb(other);
                 match (self_val, other_val) {
-                    (Ok(self_val), Ok(other_val)) => self_val.partial_cmp(other_val),
-                    (_, _) => None
+                    (Ok(self_val), Ok(other_val)) => self_val.partial_cmp(&other_val),
+                    (_, _) => None,
                 }
             }
             (ValueType::Number, ValueType::Number) => {
-                todo!()
+                let self_val: Result<Number> = from_raw_jsonb(self);
+                let other_val: Result<Number> = from_raw_jsonb(other);
+                match (self_val, other_val) {
+                    (Ok(self_val), Ok(other_val)) => self_val.partial_cmp(&other_val),
+                    (_, _) => None,
+                }
             }
             (ValueType::Boolean, ValueType::Boolean) => {
                 let self_val: Result<bool> = from_raw_jsonb(self);
                 let other_val: Result<bool> = from_raw_jsonb(other);
                 match (self_val, other_val) {
-                    (Ok(self_val), Ok(other_val)) => self_val.partial_cmp(other_val),
-                    (_, _) => None
+                    (Ok(self_val), Ok(other_val)) => self_val.partial_cmp(&other_val),
+                    (_, _) => None,
                 }
             }
-            (_, _) => {
-                None
-            }
+            (_, _) => None,
         }
+    }
 }
 
 /// Implements `Ord` for `RawJsonb`, allowing comparison of two `RawJsonb` values using the total ordering.

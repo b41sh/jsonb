@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+
 use crate::core::Deserializer;
 use crate::error::*;
 use crate::to_owned_jsonb;
@@ -136,6 +138,12 @@ pub enum ValueType {
 
 impl Eq for ValueType {}
 
+impl PartialEq for ValueType {
+    fn eq(&self, other: &Self) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
+    }
+}
+
 impl PartialOrd for ValueType {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
@@ -147,19 +155,19 @@ impl PartialOrd for ValueType {
             (ValueType::Array(_), _) => Some(Ordering::Greater),
             (_, ValueType::Array(_)) => Some(Ordering::Less),
 
-            (ValueType::Object(_), ValueType:Object(_)) => None,
+            (ValueType::Object(_), ValueType::Object(_)) => None,
             (ValueType::Object(_), _) => Some(Ordering::Greater),
             (_, ValueType::Object(_)) => Some(Ordering::Less),
 
-            (ValueType::String, ValueType:String) => None,
+            (ValueType::String, ValueType::String) => None,
             (ValueType::String, _) => Some(Ordering::Greater),
             (_, ValueType::String) => Some(Ordering::Less),
 
-            (ValueType::Number, ValueType:Number) => None,
+            (ValueType::Number, ValueType::Number) => None,
             (ValueType::Number, _) => Some(Ordering::Greater),
             (_, ValueType::Number) => Some(Ordering::Less),
 
-            (ValueType::Boolean, ValueType:Boolean) => None,
+            (ValueType::Boolean, ValueType::Boolean) => None,
         }
     }
 }
