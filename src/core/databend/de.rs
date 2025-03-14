@@ -589,20 +589,17 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
                 self.set_jentry(key_jentry);
                 let key = self.read_string()?;
-
                 let value_payload_offset = self.index;
-                let value = Some((value_jentry, value_payload_offset));
-
-                let value = visitor.visit_enum(EnumDeserializer::new(self, key, value))?;
+                let value = visitor.visit_enum(EnumDeserializer::new(
+                    self,
+                    key,
+                    value_jentry,
+                    value_payload_offset,
+                ))?;
                 self.index = origin_index + key_length + value_length;
                 Ok(value)
             }
-            SCALAR_CONTAINER_TAG => {
-                let _key_jentry = self.read_jentry()?;
-                let key = self.read_string()?;
-                visitor.visit_enum(EnumDeserializer::new(self, key, None))
-            }
-            ARRAY_CONTAINER_TAG => Err(Error::UnexpectedType),
+            SCALAR_CONTAINER_TAG | ARRAY_CONTAINER_TAG => Err(Error::UnexpectedType),
             _ => Err(Error::InvalidJsonb),
         }
     }
@@ -733,12 +730,23 @@ impl<'de, 'a> de::MapAccess<'de> for ObjectDeserializer<'a, 'de> {
 struct EnumDeserializer<'a, 'de: 'a> {
     de: &'a mut Deserializer<'de>,
     key: String,
-    value: Option<(JEntry, usize)>,
+    jentry: JEntry,
+    payload_offset: usize,
 }
 
 impl<'a, 'de> EnumDeserializer<'a, 'de> {
-    fn new(de: &'a mut Deserializer<'de>, key: String, value: Option<(JEntry, usize)>) -> Self {
-        EnumDeserializer { de, key, value }
+    fn new(
+        de: &'a mut Deserializer<'de>,
+        key: String,
+        jentry: JEntry,
+        payload_offset: usize,
+    ) -> Self {
+        EnumDeserializer {
+            de,
+            key,
+            jentry,
+            payload_offset,
+        }
     }
 }
 
@@ -759,15 +767,10 @@ impl<'de, 'a> de::VariantAccess<'de> for EnumDeserializer<'a, 'de> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {
-        match self.value {
-            Some((value_jentry, _)) => {
-                if value_jentry.type_code == NULL_TAG {
-                    Ok(())
-                } else {
-                    Err(Error::UnexpectedType)
-                }
-            }
-            None => Ok(()),
+        if self.jentry.type_code == NULL_TAG {
+            Ok(())
+        } else {
+            Err(Error::UnexpectedType)
         }
     }
 
@@ -775,39 +778,27 @@ impl<'de, 'a> de::VariantAccess<'de> for EnumDeserializer<'a, 'de> {
     where
         T: de::DeserializeSeed<'de>,
     {
-        match self.value {
-            Some((value_jentry, value_payload_offset)) => {
-                self.de
-                    .set_jentry_with_index(value_jentry, value_payload_offset);
-                seed.deserialize(&mut *self.de)
-            }
-            None => Err(Error::UnexpectedType),
-        }
+        self.de
+            .set_jentry_with_index(self.jentry, self.payload_offset);
+        seed.deserialize(&mut *self.de)
     }
 
     fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        match self.value {
-            Some((value_jentry, value_payload_offset)) => {
-                self.de
-                    .set_jentry_with_index(value_jentry.clone(), value_payload_offset);
-                if value_jentry.type_code == CONTAINER_TAG {
-                    let (header_type, header_len) = self.de.read_header()?;
-                    match header_type {
-                        ARRAY_CONTAINER_TAG => {
-                            let jentries = self.de.read_array_jentries(header_len as usize)?;
-                            visitor.visit_seq(ArrayDeserializer::new(self.de, jentries))
-                        }
-                        SCALAR_CONTAINER_TAG | OBJECT_CONTAINER_TAG => Err(Error::UnexpectedType),
-                        _ => Err(Error::InvalidJsonb),
-                    }
-                } else {
-                    Err(Error::UnexpectedType)
+        if self.jentry.type_code == CONTAINER_TAG {
+            let (header_type, header_len) = self.de.read_header()?;
+            match header_type {
+                ARRAY_CONTAINER_TAG => {
+                    let jentries = self.de.read_array_jentries(header_len as usize)?;
+                    visitor.visit_seq(ArrayDeserializer::new(self.de, jentries))
                 }
+                SCALAR_CONTAINER_TAG | OBJECT_CONTAINER_TAG => Err(Error::UnexpectedType),
+                _ => Err(Error::InvalidJsonb),
             }
-            None => Err(Error::UnexpectedType),
+        } else {
+            Err(Error::UnexpectedType)
         }
     }
 
@@ -815,43 +806,37 @@ impl<'de, 'a> de::VariantAccess<'de> for EnumDeserializer<'a, 'de> {
     where
         V: Visitor<'de>,
     {
-        match self.value {
-            Some((value_jentry, value_payload_offset)) => {
-                self.de
-                    .set_jentry_with_index(value_jentry.clone(), value_payload_offset);
-                if value_jentry.type_code == CONTAINER_TAG {
-                    let (header_type, header_len) = self.de.read_header()?;
-                    match header_type {
-                        OBJECT_CONTAINER_TAG => {
-                            let (key_jentries, value_jentries) =
-                                self.de.read_object_jentries(header_len as usize)?;
+        self.de
+            .set_jentry_with_index(self.jentry.clone(), self.payload_offset);
+        if self.jentry.type_code == CONTAINER_TAG {
+            let (header_type, header_len) = self.de.read_header()?;
+            match header_type {
+                OBJECT_CONTAINER_TAG => {
+                    let (key_jentries, value_jentries) =
+                        self.de.read_object_jentries(header_len as usize)?;
 
-                            let origin_index = self.de.index;
-                            let key_length: usize =
-                                key_jentries.iter().map(|j| j.length as usize).sum();
-                            let value_length: usize =
-                                value_jentries.iter().map(|j| j.length as usize).sum();
-                            let key_payload_offset = self.de.index;
-                            let value_payload_offset = self.de.index + key_length;
+                    let origin_index = self.de.index;
+                    let key_length: usize = key_jentries.iter().map(|j| j.length as usize).sum();
+                    let value_length: usize =
+                        value_jentries.iter().map(|j| j.length as usize).sum();
+                    let key_payload_offset = self.de.index;
+                    let value_payload_offset = self.de.index + key_length;
 
-                            let value = visitor.visit_map(ObjectDeserializer::new(
-                                self.de,
-                                key_payload_offset,
-                                key_jentries,
-                                value_payload_offset,
-                                value_jentries,
-                            ))?;
-                            self.de.index = origin_index + key_length + value_length;
-                            Ok(value)
-                        }
-                        SCALAR_CONTAINER_TAG | ARRAY_CONTAINER_TAG => Err(Error::UnexpectedType),
-                        _ => Err(Error::UnexpectedType),
-                    }
-                } else {
-                    Err(Error::UnexpectedType)
+                    let value = visitor.visit_map(ObjectDeserializer::new(
+                        self.de,
+                        key_payload_offset,
+                        key_jentries,
+                        value_payload_offset,
+                        value_jentries,
+                    ))?;
+                    self.de.index = origin_index + key_length + value_length;
+                    Ok(value)
                 }
+                SCALAR_CONTAINER_TAG | ARRAY_CONTAINER_TAG => Err(Error::UnexpectedType),
+                _ => Err(Error::UnexpectedType),
             }
-            None => Err(Error::UnexpectedType),
+        } else {
+            Err(Error::UnexpectedType)
         }
     }
 }

@@ -201,8 +201,14 @@ impl PartialOrd for RawJsonb<'_> {
                 }
             }
         */
+        let self_0 = self.to_string();
+        let other_0 = other.to_string();
+        println!("\n\n self={:?} other={:?}", self_0, other_0);
+
         let self_type = self.jsonb_type().ok()?;
         let other_type = other.jsonb_type().ok()?;
+
+        println!("self_type={:?} other_type={:?}", self_type, other_type);
 
         // First use JSONB type to determine the order,
         // different types must have different orders.
@@ -254,6 +260,10 @@ impl PartialOrd for RawJsonb<'_> {
             (JsonbType::Number, JsonbType::Number) => {
                 let self_val: Result<Number> = from_raw_jsonb(self);
                 let other_val: Result<Number> = from_raw_jsonb(other);
+                println!("self_data={:?}", self.data);
+                println!("other_data={:?}", other.data);
+                println!("self_val={:?}", self_val);
+                println!("other_val={:?}", other_val);
                 match (self_val, other_val) {
                     (Ok(self_val), Ok(other_val)) => self_val.partial_cmp(&other_val),
                     (_, _) => None,
