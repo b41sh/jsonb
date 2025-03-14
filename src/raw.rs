@@ -175,7 +175,7 @@ impl PartialOrd for JsonbType {
 
 //#[derive(Debug, Clone, Copy, PartialEq)]
 //#[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) enum JsonbItem<'a> {
     Null,
     Boolean(bool),
@@ -220,12 +220,8 @@ impl PartialOrd for JsonbItem<'_> {
                 self_raw.partial_cmp(&other_raw)
             }
             // compare null, raw jsonb must not null
-            (JsonbItem::Raw(self_raw), JsonbItem::Null) => {
-                Some(Ordering::Less)
-            }
-            (JsonbItem::Null, JsonbItem::Raw(other_raw)) => {
-                Some(Ordering::Greater)
-            }
+            (JsonbItem::Raw(_), JsonbItem::Null) => Some(Ordering::Less),
+            (JsonbItem::Null, JsonbItem::Raw(_)) => Some(Ordering::Greater),
             // compare boolean
             (JsonbItem::Boolean(self_val), JsonbItem::Boolean(other_val)) => {
                 self_val.partial_cmp(&other_val)
@@ -272,13 +268,13 @@ impl PartialOrd for JsonbItem<'_> {
             }
             // compare string
             (JsonbItem::String(self_data), JsonbItem::String(other_data)) => {
-                let self_str = unsafe {std::str::from_utf8_unchecked(self_data)};
-                let other_str = unsafe {std::str::from_utf8_unchecked(other_data)};
+                let self_str = unsafe { std::str::from_utf8_unchecked(self_data) };
+                let other_str = unsafe { std::str::from_utf8_unchecked(other_data) };
                 self_str.partial_cmp(&other_str)
             }
             (JsonbItem::Raw(self_raw), JsonbItem::String(other_data)) => {
                 let self_str: Result<String> = from_raw_jsonb(&self_raw);
-                let other_str = unsafe {String::from_utf8_unchecked(other_data.to_vec())};
+                let other_str = unsafe { String::from_utf8_unchecked(other_data.to_vec()) };
                 if let Ok(self_str) = self_str {
                     self_str.partial_cmp(&other_str)
                 } else {
@@ -286,7 +282,7 @@ impl PartialOrd for JsonbItem<'_> {
                 }
             }
             (JsonbItem::String(self_data), JsonbItem::Raw(other_raw)) => {
-                let self_str = unsafe {String::from_utf8_unchecked(self_data.to_vec())};
+                let self_str = unsafe { String::from_utf8_unchecked(self_data.to_vec()) };
                 let other_str: Result<String> = from_raw_jsonb(&other_raw);
                 if let Ok(other_str) = other_str {
                     self_str.partial_cmp(&other_str)

@@ -28,8 +28,8 @@ use crate::raw::JsonbItem;
 use core::ops::Range;
 
 use crate::error::*;
-use crate::RawJsonb;
 use crate::JsonbType;
+use crate::RawJsonb;
 
 use crate::OwnedJsonb;
 use byteorder::BigEndian;
@@ -86,12 +86,8 @@ impl<'a> JsonbItem<'a> {
             JsonbItem::Boolean(_) => Ok(JsonbType::Boolean),
             JsonbItem::Number(_) => Ok(JsonbType::Number),
             JsonbItem::String(_) => Ok(JsonbType::String),
-            JsonbItem::Raw(raw) => {
-                raw.jsonb_type()
-            }
-            JsonbItem::Owned(owned) => {
-                owned.as_raw().jsonb_type()
-            }
+            JsonbItem::Raw(raw) => raw.jsonb_type(),
+            JsonbItem::Owned(owned) => owned.as_raw().jsonb_type(),
         }
     }
 

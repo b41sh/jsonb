@@ -92,6 +92,6 @@ pub use owned::OwnedJsonb;
 pub use parser::parse_lazy_value;
 pub use parser::parse_value;
 pub use raw::from_raw_jsonb;
-pub use raw::RawJsonb;
 pub use raw::JsonbType;
+pub use raw::RawJsonb;
 pub use value::*;

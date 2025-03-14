@@ -32,9 +32,9 @@ use crate::functions::core::read_u32;
 use crate::jentry::JEntry;
 use crate::number::Number;
 
+use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
-use crate::JsonbType;
 
 impl RawJsonb<'_> {
     /// Determines the type of a JSONB value.

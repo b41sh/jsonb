@@ -20,8 +20,8 @@ use crate::error::*;
 use crate::from_raw_jsonb;
 use crate::number::Number;
 
-use crate::RawJsonb;
 use crate::JsonbType;
+use crate::RawJsonb;
 
 impl RawJsonb<'_> {
     /// Checks if the JSONB value is null.

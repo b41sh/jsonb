@@ -20,9 +20,9 @@ use crate::core::ArrayIterator;
 
 use crate::error::*;
 
+use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
-use crate::JsonbType;
 
 impl OwnedJsonb {
     /// Builds a JSONB array from a collection of RawJsonb values.
