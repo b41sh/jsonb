@@ -118,7 +118,7 @@ where
 }
 
 /// The value type of JSONB data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum ValueType {
     /// The Null JSON type.
     Null,
@@ -132,6 +132,36 @@ pub enum ValueType {
     Array(usize),
     /// The Object JSON type with the length of key and value pairs.
     Object(usize),
+}
+
+impl Eq for ValueType {}
+
+impl PartialOrd for ValueType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (ValueType::Null, ValueType::Null) => Some(Ordering::Equal),
+            (ValueType::Null, _) => Some(Ordering::Greater),
+            (_, ValueType::Null) => Some(Ordering::Less),
+
+            (ValueType::Array(_), ValueType::Array(_)) => None,
+            (ValueType::Array(_), _) => Some(Ordering::Greater),
+            (_, ValueType::Array(_)) => Some(Ordering::Less),
+
+            (ValueType::Object(_), ValueType:Object(_)) => None,
+            (ValueType::Object(_), _) => Some(Ordering::Greater),
+            (_, ValueType::Object(_)) => Some(Ordering::Less),
+
+            (ValueType::String, ValueType:String) => None,
+            (ValueType::String, _) => Some(Ordering::Greater),
+            (_, ValueType::String) => Some(Ordering::Less),
+
+            (ValueType::Number, ValueType:Number) => None,
+            (ValueType::Number, _) => Some(Ordering::Greater),
+            (_, ValueType::Number) => Some(Ordering::Less),
+
+            (ValueType::Boolean, ValueType:Boolean) => None,
+        }
+    }
 }
 
 //#[derive(Debug, Clone, Copy, PartialEq)]

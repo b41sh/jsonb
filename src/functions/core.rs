@@ -145,6 +145,11 @@ impl Eq for RawJsonb<'_> {}
 #[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for RawJsonb<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+
+
+
+
+/**
         let left = self.data;
         let right = other.data;
         let left_header = read_u32(left, 0).ok()?;
@@ -187,6 +192,59 @@ impl PartialOrd for RawJsonb<'_> {
             (_, _) => None,
         }
     }
+*/
+
+        let self_type = self.value_type().ok()?;
+        let other_type = other.value_type().ok()?;
+
+        // First use JSONB type to determine the order,
+        // different types must have different orders.
+        if let Some(ord) = self_type.partial_cmp(&other_type) {
+            return Some(ord);
+        }
+
+        match (self_type, other_type) {
+            (ValueType::Array(self_len), ValueType::Array(other_len)) => {
+                let mut self_array_iter = ArrayIterator::new(*self).unwrap();
+                let mut other_array_iter = ArrayIterator::new(*other).unwrap();
+
+                for (self_res, other_res) in &mut self_array_iter.zip(&mut other_array_iter) {
+                    let self_item = self_res.ok()?;
+                    let other_item = other_res.ok()?;
+
+                    let ord = self_item.partial_cmp(&other_item)?;
+                    if ord != Ordering::Equal {
+                        return Some(ord);
+                    }
+                }
+                Some(self_len.cmp(&other_len))
+            }
+            (ValueType::Object(_), ValueType::Object(_)) => {
+                todo!()
+            }
+            (ValueType::String, ValueType::String) => {
+                let self_val: Result<String> = from_raw_jsonb(self);
+                let other_val: Result<String> = from_raw_jsonb(other);
+                match (self_val, other_val) {
+                    (Ok(self_val), Ok(other_val)) => self_val.partial_cmp(other_val),
+                    (_, _) => None
+                }
+            }
+            (ValueType::Number, ValueType::Number) => {
+                todo!()
+            }
+            (ValueType::Boolean, ValueType::Boolean) => {
+                let self_val: Result<bool> = from_raw_jsonb(self);
+                let other_val: Result<bool> = from_raw_jsonb(other);
+                match (self_val, other_val) {
+                    (Ok(self_val), Ok(other_val)) => self_val.partial_cmp(other_val),
+                    (_, _) => None
+                }
+            }
+            (_, _) => {
+                None
+            }
+        }
 }
 
 /// Implements `Ord` for `RawJsonb`, allowing comparison of two `RawJsonb` values using the total ordering.

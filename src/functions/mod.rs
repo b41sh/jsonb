@@ -18,3 +18,37 @@ mod object;
 mod operator;
 mod path;
 mod scalar;
+
+--
+|
+---
+
+https://github.com/databendlabs/jsonb/pull/77
+看下这个 PR，把编码相关的操作提取出来，简化了函数的实现
+代码结构变成了这样
+├── core
+│   ├── databend
+│   │   ├── builder.rs
+│   │   ├── de.rs
+│   │   ├── iterator.rs
+│   │   ├── mod.rs
+│   │   └── ser.rs
+│   ├── mod.rs
+│   └── sqlite
+│       └── mod.rs
+├── functions
+│   ├── array.rs
+│   ├── core.rs
+│   ├── mod.rs
+│   ├── object.rs
+│   ├── operator.rs
+│   ├── path.rs
+│   └── scalar.rs
+├── jsonpath
+│   ├── mod.rs
+│   ├── parser.rs
+│   ├── path.rs
+│   └── selector.rs
+├── owned.rs
+├── raw.rs
+    ...
