@@ -27,9 +27,6 @@ use crate::raw::JsonbItem;
 
 use crate::constants::*;
 use crate::error::*;
-use crate::functions::core::jentry_compare_level;
-use crate::functions::core::read_u32;
-use crate::jentry::JEntry;
 use crate::number::Number;
 
 use crate::JsonbType;
@@ -574,142 +571,90 @@ impl RawJsonb<'_> {
     /// assert!(comparable8 < comparable9);
     /// ```
     pub fn convert_to_comparable(&self) -> Vec<u8> {
-        let value = self.data;
-        let mut buf = Vec::new();
-        let depth = 0;
-        let header = read_u32(value, 0).unwrap_or_default();
-        match header & CONTAINER_HEADER_TYPE_MASK {
-            SCALAR_CONTAINER_TAG => {
-                let encoded = match read_u32(value, 4) {
-                    Ok(encoded) => encoded,
-                    Err(_) => {
-                        return buf;
-                    }
-                };
-                let jentry = JEntry::decode_jentry(encoded);
-                Self::scalar_convert_to_comparable(depth, &jentry, &value[8..], &mut buf);
-            }
-            ARRAY_CONTAINER_TAG => {
-                buf.push(depth);
-                buf.push(ARRAY_LEVEL);
-                let length = (header & CONTAINER_HEADER_LEN_MASK) as usize;
-                Self::array_convert_to_comparable(depth + 1, length, &value[4..], &mut buf);
-            }
-            OBJECT_CONTAINER_TAG => {
-                buf.push(depth);
-                buf.push(OBJECT_LEVEL);
-                let length = (header & CONTAINER_HEADER_LEN_MASK) as usize;
-                Self::object_convert_to_comparable(depth + 1, length, &value[4..], &mut buf);
-            }
-            _ => {}
+        let mut buf = Vec::with_capacity(self.len());
+        if let Ok(()) = self.convert_to_comparable(0, &mut buf) {
+            buf
+        } else {
+            vec![]
         }
-        buf
     }
 
-    fn scalar_convert_to_comparable(depth: u8, jentry: &JEntry, value: &[u8], buf: &mut Vec<u8>) {
-        buf.push(depth);
-        let level = jentry_compare_level(jentry);
-        match jentry.type_code {
-            CONTAINER_TAG => {
-                let header = match read_u32(value, 0) {
-                    Ok(header) => header,
-                    Err(_) => {
-                        return;
-                    }
-                };
-                let length = (header & CONTAINER_HEADER_LEN_MASK) as usize;
-                match header & CONTAINER_HEADER_TYPE_MASK {
-                    ARRAY_CONTAINER_TAG => {
-                        buf.push(ARRAY_LEVEL);
-                        Self::array_convert_to_comparable(depth + 1, length, &value[4..], buf);
-                    }
-                    OBJECT_CONTAINER_TAG => {
-                        buf.push(OBJECT_LEVEL);
-                        Self::object_convert_to_comparable(depth + 1, length, &value[4..], buf);
-                    }
-                    _ => {}
+    fn convert_to_comparable_impl(&self, depth: u8, buf: &mut Vec<u8>) -> Result<()> {
+        let jsonb_type = self.jsonb_type()?;
+        match jsonb_type {
+            JsonbType::Array(_) => {
+                buf.push(depth);
+                buf.push(ARRAY_LEVEL);
+                let array_iter = ArrayIterator::new(*self)?.unwrap() {
+                for result in &mut array_iter {
+                    let item = result?;
+                    let _ = self.jsonb_item_to_comparable_impl(depth + 1, item, buf)?;
+                }
+            }
+            JsonbType::Object(_) => {
+                buf.push(depth);
+                buf.push(OBJECT_LEVEL);
+                let object_iter = ObjectIterator::new(*self)?.unwrap();
+                for result in &mut object_iter {
+                    let (key, val_item) = result?;
+                    let key_item = JsonbItem::String(key.as_bytes());
+                    //buf.push(depth + 1);
+                    //buf.push(STRING_LEVEL);
+                    //buf.extend_from_slice(key.as_bytes());
+                    //buf.push(0);
+                    let _ = self.jsonb_item_to_comparable_impl(depth + 1, key_item, buf)?;
+                    let _ = self.jsonb_item_to_comparable_impl(depth + 1, val_item, buf)?;
                 }
             }
             _ => {
-                buf.push(level);
-                match jentry.type_code {
-                    STRING_TAG => {
-                        let length = jentry.length as usize;
-                        buf.extend_from_slice(&value[..length]);
-                    }
-                    NUMBER_TAG => {
-                        let length = jentry.length as usize;
-                        if let Ok(num) = Number::decode(&value[..length]) {
-                            let n = num.as_f64().unwrap();
-                            // https://github.com/rust-lang/rust/blob/9c20b2a8cc7588decb6de25ac6a7912dcef24d65/library/core/src/num/f32.rs#L1176-L1260
-                            let s = n.to_bits() as i64;
-                            let v = s ^ (((s >> 63) as u64) >> 1) as i64;
-                            let mut b = v.to_be_bytes();
-                            // Toggle top "sign" bit to ensure consistent sort order
-                            b[0] ^= 0x80;
-                            buf.extend_from_slice(&b);
-                        }
-                    }
-                    _ => {}
-                }
+                let item = JsonbItem::from_raw_jsonb(*self)?;
+                let _ = self.jsonb_item_to_comparable_impl(depth, item, buf)?;
             }
         }
+        Ok(())
     }
 
-    fn array_convert_to_comparable(depth: u8, length: usize, value: &[u8], buf: &mut Vec<u8>) {
-        let mut jentry_offset = 0;
-        let mut val_offset = 4 * length;
-        for _ in 0..length {
-            let encoded = match read_u32(value, jentry_offset) {
-                Ok(encoded) => encoded,
-                Err(_) => {
-                    return;
+    fn jsonb_item_to_comparable_impl(&self, depth: u8, item: JsonbItem<'_>, buf: &mut Vec<u8>) -> Result<()> {
+        match item {
+            JsonbItem::Null => {
+                buf.push(depth);
+                buf.push(NULL_LEVEL);
+            }
+            JsonbType::Boolean(v) => {
+                buf.push(depth);
+                if v {
+                    buf.push(TRUE_LEVEL);
+                } else {
+                    buf.push(FALSE_LEVEL);
                 }
-            };
-            let jentry = JEntry::decode_jentry(encoded);
-            Self::scalar_convert_to_comparable(depth, &jentry, &value[val_offset..], buf);
-            jentry_offset += 4;
-            val_offset += jentry.length as usize;
+            }
+            JsonbType::Number(data) => {
+                buf.push(depth);
+                buf.push(NUMBER_LEVEL);
+                let num = Number::decode(&data)?;
+                let n = num.as_f64().unwrap();
+                // https://github.com/rust-lang/rust/blob/9c20b2a8cc7588decb6de25ac6a7912dcef24d65/library/core/src/num/f32.rs#L1176-L1260
+                let s = n.to_bits() as i64;
+                let v = s ^ (((s >> 63) as u64) >> 1) as i64;
+                let mut b = v.to_be_bytes();
+                // Toggle top "sign" bit to ensure consistent sort order
+                b[0] ^= 0x80;
+                buf.extend_from_slice(&b);
+            }
+            JsonbType::String(data) => {
+                buf.push(depth);
+                buf.push(STRING_LEVEL);
+                buf.extend_from_slice(&data);
+                buf.push(0);
+            }
+            JsonbType::RawJsonb(raw) => {
+                return raw.convert_to_comparable_impl(depth, buf);
+            }
+            JsonbType::OwnedJsonb(owned) => {
+                let raw = owned.as_raw();
+                return raw.convert_to_comparable_impl(depth, buf);
+            }
         }
-    }
-
-    fn object_convert_to_comparable(depth: u8, length: usize, value: &[u8], buf: &mut Vec<u8>) {
-        let mut jentry_offset = 0;
-        let mut val_offset = 8 * length;
-
-        // read all key jentries first
-        let mut key_jentries: VecDeque<JEntry> = VecDeque::with_capacity(length);
-        for _ in 0..length {
-            let encoded = match read_u32(value, jentry_offset) {
-                Ok(encoded) => encoded,
-                Err(_) => {
-                    return;
-                }
-            };
-            let key_jentry = JEntry::decode_jentry(encoded);
-
-            jentry_offset += 4;
-            val_offset += key_jentry.length as usize;
-            key_jentries.push_back(key_jentry);
-        }
-
-        let mut key_offset = 8 * length;
-        for _ in 0..length {
-            let key_jentry = key_jentries.pop_front().unwrap();
-            Self::scalar_convert_to_comparable(depth, &key_jentry, &value[key_offset..], buf);
-
-            let encoded = match read_u32(value, jentry_offset) {
-                Ok(encoded) => encoded,
-                Err(_) => {
-                    return;
-                }
-            };
-            let val_jentry = JEntry::decode_jentry(encoded);
-            Self::scalar_convert_to_comparable(depth, &val_jentry, &value[val_offset..], buf);
-
-            jentry_offset += 4;
-            key_offset += key_jentry.length as usize;
-            val_offset += val_jentry.length as usize;
-        }
+        Ok(())
     }
 }

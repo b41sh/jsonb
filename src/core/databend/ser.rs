@@ -93,26 +93,6 @@ impl Serializer {
     }
 }
 
-/// Serialize a value into a JSONB byte array
-pub fn to_owned_jsonb<T>(value: &T) -> Result<OwnedJsonb>
-where
-    T: Serialize,
-{
-    let mut serializer = Serializer::default();
-    value.serialize(&mut serializer)?;
-    Ok(OwnedJsonb::new(serializer.buffer))
-}
-
-/// Serialize a value into a JSONB byte array
-pub fn to_vec2<T>(value: &T) -> Result<Vec<u8>>
-where
-    T: Serialize,
-{
-    let mut serializer = Serializer::default();
-    value.serialize(&mut serializer)?;
-    Ok(serializer.buffer)
-}
-
 impl<'a> ser::Serializer for &'a mut Serializer {
     type Ok = ();
 

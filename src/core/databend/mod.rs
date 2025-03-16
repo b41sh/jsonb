@@ -16,7 +16,11 @@ mod builder;
 mod de;
 mod iterator;
 mod ser;
+mod constants;
+mod jentry;
 
+pub(self) use constants::*;
+pub(self) use jentry::JEntry;
 pub(crate) use builder::*;
 pub use de::*;
 pub(crate) use iterator::*;

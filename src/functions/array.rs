@@ -27,11 +27,12 @@ use crate::RawJsonb;
 impl OwnedJsonb {
     /// Builds a JSONB array from a collection of RawJsonb values.
     ///
-    /// This function constructs a new JSONB array from an iterator of `RawJsonb` values.  The resulting `OwnedJsonb` represents the binary encoding of the array.  The input iterator must be an `ExactSizeIterator` to allow for efficient pre-allocation of the output buffer.
+    /// This function constructs a new JSONB array from an iterator of `RawJsonb` values. 
+    /// The resulting `OwnedJsonb` represents the binary encoding of the array.
     ///
     /// # Arguments
     ///
-    /// * `items` - An iterator of `RawJsonb` values representing the elements of the array.  Must be an `ExactSizeIterator`.
+    /// * `items` - An iterator of `RawJsonb` values representing the elements of the array.
     ///
     /// # Returns
     ///
@@ -78,6 +79,7 @@ impl OwnedJsonb {
 }
 
 impl RawJsonb<'_> {
+    /// @todo 重写
     /// Returns the number of elements in a JSONB array.
     ///
     /// This function checks the header of the JSONB data to determine if it represents an array.
@@ -175,9 +177,10 @@ impl RawJsonb<'_> {
     /// Returns a JSONB array with duplicate elements removed.
     ///
     /// This function takes a JSONB value as input and returns a new JSONB array containing only the unique elements from the input.
+    ///
     /// The behavior depends on the input type:
     ///
-    /// * **Array:** Returns a new array containing only the unique elements from the input array.  The order of elements in the output array is not guaranteed to be the same as the input array.
+    /// * **Array:** Returns a new array containing only the unique elements from the input array.
     /// * **Object:** Returns a new array containing the original object as its only element.
     /// * **Scalar:** Returns a new array containing the original scalar value as its only element.
     /// * **Invalid JSONB:** Returns an error.
@@ -246,7 +249,7 @@ impl RawJsonb<'_> {
     /// This function calculates the intersection of two JSONB arrays or checks if one JSONB value is contained within another.
     /// The behavior depends on the input types:
     ///
-    /// * **Array + Array:** Returns a new array containing only the elements that are present in *both* input arrays.  The order of elements is not guaranteed.  Duplicate elements are handled correctly; the multiplicity of elements in the intersection is the minimum of their multiplicities in the input arrays.
+    /// * **Array + Array:** Returns a new array containing only the elements that are present in *both* input arrays. The order of elements is not guaranteed. Duplicate elements are handled correctly; the multiplicity of elements in the intersection is the minimum of their multiplicities in the input arrays.
     /// * **Object/Scalar + Object/Scalar:** Returns a new array containing the `self` value only if it's present in the `other` value. This effectively checks for containment. The contained value must be completely equal to the other value, including any nested structures. For arrays, this containment check would require a recursive check for each element in both arrays.
     /// * **Invalid input:** Returns an error if either input is not an array, object, or scalar.
     ///
