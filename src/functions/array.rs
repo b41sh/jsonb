@@ -27,7 +27,7 @@ use crate::RawJsonb;
 impl OwnedJsonb {
     /// Builds a JSONB array from a collection of RawJsonb values.
     ///
-    /// This function constructs a new JSONB array from an iterator of `RawJsonb` values. 
+    /// This function constructs a new JSONB array from an iterator of `RawJsonb` values.
     /// The resulting `OwnedJsonb` represents the binary encoding of the array.
     ///
     /// # Arguments

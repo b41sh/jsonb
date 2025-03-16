@@ -14,9 +14,7 @@
 
 // This file contains the fundamental functions.
 
-use core::convert::TryInto;
 use std::cmp::Ordering;
-use std::collections::VecDeque;
 
 use crate::from_raw_jsonb;
 use crate::JsonbType;
@@ -24,9 +22,7 @@ use crate::JsonbType;
 use crate::core::ArrayIterator;
 use crate::core::ObjectIterator;
 
-use crate::constants::*;
 use crate::error::*;
-use crate::jentry::JEntry;
 use crate::number::Number;
 use serde::Serialize;
 
@@ -157,58 +153,8 @@ impl PartialEq for RawJsonb<'_> {
 #[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for RawJsonb<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        /**
-                let left = self.data;
-                let right = other.data;
-                let left_header = read_u32(left, 0).ok()?;
-                let right_header = read_u32(right, 0).ok()?;
-                match (
-                    left_header & CONTAINER_HEADER_TYPE_MASK,
-                    right_header & CONTAINER_HEADER_TYPE_MASK,
-                ) {
-                    (SCALAR_CONTAINER_TAG, SCALAR_CONTAINER_TAG) => {
-                        let left_encoded = read_u32(left, 4).ok()?;
-                        let left_jentry = JEntry::decode_jentry(left_encoded);
-                        let right_encoded = read_u32(right, 4).ok()?;
-                        let right_jentry = JEntry::decode_jentry(right_encoded);
-                        compare_scalar(&left_jentry, &left[8..], &right_jentry, &right[8..])
-                    }
-                    (ARRAY_CONTAINER_TAG, ARRAY_CONTAINER_TAG) => {
-                        compare_array(left_header, &left[4..], right_header, &right[4..])
-                    }
-                    (OBJECT_CONTAINER_TAG, OBJECT_CONTAINER_TAG) => {
-                        compare_object(left_header, &left[4..], right_header, &right[4..])
-                    }
-                    (SCALAR_CONTAINER_TAG, ARRAY_CONTAINER_TAG | OBJECT_CONTAINER_TAG) => {
-                        let left_encoded = read_u32(left, 4).ok()?;
-                        let left_jentry = JEntry::decode_jentry(left_encoded);
-                        match left_jentry.type_code {
-                            NULL_TAG => Some(Ordering::Greater),
-                            _ => Some(Ordering::Less),
-                        }
-                    }
-                    (ARRAY_CONTAINER_TAG | OBJECT_CONTAINER_TAG, SCALAR_CONTAINER_TAG) => {
-                        let right_encoded = read_u32(right, 4).ok()?;
-                        let right_jentry = JEntry::decode_jentry(right_encoded);
-                        match right_jentry.type_code {
-                            NULL_TAG => Some(Ordering::Less),
-                            _ => Some(Ordering::Greater),
-                        }
-                    }
-                    (ARRAY_CONTAINER_TAG, OBJECT_CONTAINER_TAG) => Some(Ordering::Greater),
-                    (OBJECT_CONTAINER_TAG, ARRAY_CONTAINER_TAG) => Some(Ordering::Less),
-                    (_, _) => None,
-                }
-            }
-        */
-        let self_0 = self.to_string();
-        let other_0 = other.to_string();
-        println!("\n\n self={:?} other={:?}", self_0, other_0);
-
         let self_type = self.jsonb_type().ok()?;
         let other_type = other.jsonb_type().ok()?;
-
-        println!("self_type={:?} other_type={:?}", self_type, other_type);
 
         // First use JSONB type to determine the order,
         // different types must have different orders.
@@ -291,6 +237,4 @@ impl Ord for RawJsonb<'_> {
             None => Ordering::Equal,
         }
     }
-}
-
 }

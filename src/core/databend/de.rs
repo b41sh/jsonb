@@ -13,18 +13,27 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::convert::TryFrom;
 
 use num_traits::FromPrimitive;
-use std::collections::VecDeque;
 
-use crate::constants::*;
-use crate::error::*;
-use crate::jentry::JEntry;
+use byteorder::BigEndian;
+use byteorder::ReadBytesExt;
+
+use super::constants::*;
+use super::jentry::JEntry;
+use crate::error::Error;
+use crate::error::Result;
 use crate::number::Number;
-use crate::Error;
+use crate::value::Object;
+use crate::value::Value;
 use crate::RawJsonb;
-use serde::de::{self, Deserialize, IntoDeserializer, Visitor};
+
+use serde::de;
+use serde::de::Deserialize;
+use serde::de::IntoDeserializer;
+use serde::de::Visitor;
 
 /// A structure that deserializes JSONB data into Rust values.
 pub struct Deserializer<'de> {
@@ -838,5 +847,127 @@ impl<'de, 'a> de::VariantAccess<'de> for EnumDeserializer<'a, 'de> {
         } else {
             Err(Error::UnexpectedType)
         }
+    }
+}
+
+#[repr(transparent)]
+pub struct Decoder<'a> {
+    buf: &'a [u8],
+}
+
+impl<'a> Decoder<'a> {
+    pub fn new(buf: &'a [u8]) -> Decoder<'a> {
+        Self { buf }
+    }
+
+    pub fn decode(&mut self) -> Result<Value<'a>> {
+        // Valid `JSONB` Value has at least one `Header`
+        if self.buf.len() < 4 {
+            return Err(Error::InvalidJsonb);
+        }
+        let value = self.decode_jsonb()?;
+        Ok(value)
+    }
+
+    // Read value type from the `Header`
+    // `Scalar` has one `JEntry`
+    // `Array` and `Object` store the numbers of elements
+    fn decode_jsonb(&mut self) -> Result<Value<'a>> {
+        let container_header = self.buf.read_u32::<BigEndian>()?;
+
+        match container_header & CONTAINER_HEADER_TYPE_MASK {
+            SCALAR_CONTAINER_TAG => {
+                let encoded = self.buf.read_u32::<BigEndian>()?;
+                let jentry = JEntry::decode_jentry(encoded);
+                self.decode_scalar(jentry)
+            }
+            ARRAY_CONTAINER_TAG => self.decode_array(container_header),
+            OBJECT_CONTAINER_TAG => self.decode_object(container_header),
+            _ => Err(Error::InvalidJsonbHeader),
+        }
+    }
+
+    // Decode `Value` based on the `JEntry`
+    // `Null` and `Boolean` don't need to read extra data
+    // `Number` and `String` `JEntry` stores the length or offset of the data,
+    // read them and decode to the `Value`
+    // `Array` and `Object` need to read nested data from the lower-level `Header`
+    fn decode_scalar(&mut self, jentry: JEntry) -> Result<Value<'a>> {
+        match jentry.type_code {
+            NULL_TAG => Ok(Value::Null),
+            TRUE_TAG => Ok(Value::Bool(true)),
+            FALSE_TAG => Ok(Value::Bool(false)),
+            STRING_TAG => {
+                let offset = jentry.length as usize;
+                let string = &self.buf.get(..offset).ok_or(Error::InvalidUtf8)?;
+                let s = unsafe { std::str::from_utf8_unchecked(string) };
+                self.buf = &self.buf[offset..];
+                Ok(Value::String(Cow::Borrowed(s)))
+            }
+            NUMBER_TAG => {
+                let offset = jentry.length as usize;
+                let number = &self.buf.get(..offset).ok_or(Error::InvalidJsonbNumber)?;
+                let n = Number::decode(number)?;
+                self.buf = &self.buf[offset..];
+                Ok(Value::Number(n))
+            }
+            CONTAINER_TAG => self.decode_jsonb(),
+            _ => Err(Error::InvalidJsonbJEntry),
+        }
+    }
+
+    // Decode the numbers of values from the `Header`,
+    // then read all `JEntries`, finally decode the `Value` by `JEntry`
+    fn decode_array(&mut self, container_header: u32) -> Result<Value<'a>> {
+        let length = (container_header & CONTAINER_HEADER_LEN_MASK) as usize;
+        let jentries = self.decode_jentries(length)?;
+        let mut values: Vec<Value> = Vec::with_capacity(length);
+        // decode all values
+        for jentry in jentries.into_iter() {
+            let value = self.decode_scalar(jentry)?;
+            values.push(value);
+        }
+
+        let value = Value::Array(values);
+        Ok(value)
+    }
+
+    // The basic process is the same as that of `Array`
+    // but first decode the keys and then decode the values
+    fn decode_object(&mut self, container_header: u32) -> Result<Value<'a>> {
+        let length = (container_header & CONTAINER_HEADER_LEN_MASK) as usize;
+        let mut jentries = self.decode_jentries(length * 2)?;
+
+        let mut keys: VecDeque<Value> = VecDeque::with_capacity(length);
+        // decode all keys first
+        for _ in 0..length {
+            let jentry = jentries.pop_front().unwrap();
+            let key = self.decode_scalar(jentry)?;
+            keys.push_back(key);
+        }
+
+        let mut obj = Object::new();
+        // decode all values
+        for _ in 0..length {
+            let key = keys.pop_front().unwrap();
+            let k = key.as_str().unwrap();
+            let jentry = jentries.pop_front().unwrap();
+            let value = self.decode_scalar(jentry)?;
+            obj.insert(k.to_string(), value);
+        }
+
+        let value = Value::Object(obj);
+        Ok(value)
+    }
+
+    // Decode `JEntries` for `Array` and `Object`
+    fn decode_jentries(&mut self, length: usize) -> Result<VecDeque<JEntry>> {
+        let mut jentries: VecDeque<JEntry> = VecDeque::with_capacity(length);
+        for _ in 0..length {
+            let encoded = self.buf.read_u32::<BigEndian>()?;
+            let jentry = JEntry::decode_jentry(encoded);
+            jentries.push_back(jentry);
+        }
+        Ok(jentries)
     }
 }

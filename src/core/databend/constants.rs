@@ -13,37 +13,32 @@
 // limitations under the License.
 
 // JSONB header constants
-pub(self) const ARRAY_PREFIX: u8 = 0x80;
-pub(self) const OBJECT_PREFIX: u8 = 0x40;
-pub(self) const SCALAR_PREFIX: u8 = 0x20;
+pub(super) const ARRAY_CONTAINER_TAG: u32 = 0x80000000;
+pub(super) const OBJECT_CONTAINER_TAG: u32 = 0x40000000;
+pub(super) const SCALAR_CONTAINER_TAG: u32 = 0x20000000;
 
-pub(self) const ARRAY_CONTAINER_TAG: u32 = 0x80000000;
-pub(self) const OBJECT_CONTAINER_TAG: u32 = 0x40000000;
-pub(self) const SCALAR_CONTAINER_TAG: u32 = 0x20000000;
-
-pub(self) const CONTAINER_HEADER_TYPE_MASK: u32 = 0xE0000000;
-pub(self) const CONTAINER_HEADER_LEN_MASK: u32 = 0x1FFFFFFF;
+pub(super) const CONTAINER_HEADER_TYPE_MASK: u32 = 0xE0000000;
+pub(super) const CONTAINER_HEADER_LEN_MASK: u32 = 0x1FFFFFFF;
 
 // JSONB JEntry constants
-pub(self) const NULL_TAG: u32 = 0x00000000;
-pub(self) const STRING_TAG: u32 = 0x10000000;
-pub(self) const NUMBER_TAG: u32 = 0x20000000;
-pub(self) const FALSE_TAG: u32 = 0x30000000;
-pub(self) const TRUE_TAG: u32 = 0x40000000;
-pub(self) const CONTAINER_TAG: u32 = 0x50000000;
+pub(super) const NULL_TAG: u32 = 0x00000000;
+pub(super) const STRING_TAG: u32 = 0x10000000;
+pub(super) const NUMBER_TAG: u32 = 0x20000000;
+pub(super) const FALSE_TAG: u32 = 0x30000000;
+pub(super) const TRUE_TAG: u32 = 0x40000000;
+pub(super) const CONTAINER_TAG: u32 = 0x50000000;
 
 // JSONB number constants
-pub(self) const NUMBER_ZERO: u8 = 0x00;
-pub(self) const NUMBER_NAN: u8 = 0x10;
-pub(self) const NUMBER_INF: u8 = 0x20;
-pub(self) const NUMBER_NEG_INF: u8 = 0x30;
-pub(self) const NUMBER_INT: u8 = 0x40;
-pub(self) const NUMBER_UINT: u8 = 0x50;
-pub(self) const NUMBER_FLOAT: u8 = 0x60;
+pub(super) const NUMBER_ZERO: u8 = 0x00;
+pub(super) const NUMBER_NAN: u8 = 0x10;
+pub(super) const NUMBER_INF: u8 = 0x20;
+pub(super) const NUMBER_NEG_INF: u8 = 0x30;
+pub(super) const NUMBER_INT: u8 = 0x40;
+pub(super) const NUMBER_UINT: u8 = 0x50;
+pub(super) const NUMBER_FLOAT: u8 = 0x60;
 
 // @todo support offset mode
 #[allow(dead_code)]
-pub(self) const JENTRY_IS_OFF_FLAG: u32 = 0x80000000;
-pub(self) const JENTRY_TYPE_MASK: u32 = 0x70000000;
-pub(self) const JENTRY_OFF_LEN_MASK: u32 = 0x0FFFFFFF;
-
+pub(super) const JENTRY_IS_OFF_FLAG: u32 = 0x80000000;
+pub(super) const JENTRY_TYPE_MASK: u32 = 0x70000000;
+pub(super) const JENTRY_OFF_LEN_MASK: u32 = 0x0FFFFFFF;

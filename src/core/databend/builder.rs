@@ -15,10 +15,10 @@
 use core::ops::Range;
 use std::collections::BTreeMap;
 
-use crate::constants::*;
+use super::constants::*;
+use super::jentry::JEntry;
 use crate::error::Error;
 use crate::error::Result;
-use crate::jentry::JEntry;
 use crate::RawJsonb;
 
 use crate::OwnedJsonb;

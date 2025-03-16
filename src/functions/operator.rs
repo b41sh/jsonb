@@ -572,7 +572,7 @@ impl RawJsonb<'_> {
     /// ```
     pub fn convert_to_comparable(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.len());
-        if let Ok(()) = self.convert_to_comparable(0, &mut buf) {
+        if let Ok(()) = self.convert_to_comparable_impl(0, &mut buf) {
             buf
         } else {
             vec![]
@@ -585,7 +585,7 @@ impl RawJsonb<'_> {
             JsonbType::Array(_) => {
                 buf.push(depth);
                 buf.push(ARRAY_LEVEL);
-                let array_iter = ArrayIterator::new(*self)?.unwrap() {
+                let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 for result in &mut array_iter {
                     let item = result?;
                     let _ = self.jsonb_item_to_comparable_impl(depth + 1, item, buf)?;
@@ -594,7 +594,7 @@ impl RawJsonb<'_> {
             JsonbType::Object(_) => {
                 buf.push(depth);
                 buf.push(OBJECT_LEVEL);
-                let object_iter = ObjectIterator::new(*self)?.unwrap();
+                let mut object_iter = ObjectIterator::new(*self)?.unwrap();
                 for result in &mut object_iter {
                     let (key, val_item) = result?;
                     let key_item = JsonbItem::String(key.as_bytes());
@@ -614,13 +614,18 @@ impl RawJsonb<'_> {
         Ok(())
     }
 
-    fn jsonb_item_to_comparable_impl(&self, depth: u8, item: JsonbItem<'_>, buf: &mut Vec<u8>) -> Result<()> {
+    fn jsonb_item_to_comparable_impl(
+        &self,
+        depth: u8,
+        item: JsonbItem<'_>,
+        buf: &mut Vec<u8>,
+    ) -> Result<()> {
         match item {
             JsonbItem::Null => {
                 buf.push(depth);
                 buf.push(NULL_LEVEL);
             }
-            JsonbType::Boolean(v) => {
+            JsonbItem::Boolean(v) => {
                 buf.push(depth);
                 if v {
                     buf.push(TRUE_LEVEL);
@@ -628,7 +633,7 @@ impl RawJsonb<'_> {
                     buf.push(FALSE_LEVEL);
                 }
             }
-            JsonbType::Number(data) => {
+            JsonbItem::Number(data) => {
                 buf.push(depth);
                 buf.push(NUMBER_LEVEL);
                 let num = Number::decode(&data)?;
@@ -641,16 +646,16 @@ impl RawJsonb<'_> {
                 b[0] ^= 0x80;
                 buf.extend_from_slice(&b);
             }
-            JsonbType::String(data) => {
+            JsonbItem::String(data) => {
                 buf.push(depth);
                 buf.push(STRING_LEVEL);
                 buf.extend_from_slice(&data);
                 buf.push(0);
             }
-            JsonbType::RawJsonb(raw) => {
+            JsonbItem::Raw(raw) => {
                 return raw.convert_to_comparable_impl(depth, buf);
             }
-            JsonbType::OwnedJsonb(owned) => {
+            JsonbItem::Owned(owned) => {
                 let raw = owned.as_raw();
                 return raw.convert_to_comparable_impl(depth, buf);
             }

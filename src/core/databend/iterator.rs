@@ -14,9 +14,9 @@
 
 use std::collections::VecDeque;
 
-use crate::constants::*;
+use super::constants::*;
+use super::jentry::JEntry;
 use crate::error::Result;
-use crate::jentry::JEntry;
 use std::ops::Range;
 
 use crate::RawJsonb;

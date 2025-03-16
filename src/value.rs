@@ -20,7 +20,7 @@ use std::fmt::Formatter;
 use std::mem::discriminant;
 
 use super::number::Number;
-use super::ser::Encoder;
+use crate::core::Encoder;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
 use rand::thread_rng;

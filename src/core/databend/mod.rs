@@ -13,27 +13,27 @@
 // limitations under the License.
 
 mod builder;
+pub(super) mod constants;
 mod de;
 mod iterator;
+pub(super) mod jentry;
 mod ser;
-mod constants;
-mod jentry;
 
-pub(self) use constants::*;
-pub(self) use jentry::JEntry;
 pub(crate) use builder::*;
 pub use de::*;
 pub(crate) use iterator::*;
 pub use ser::*;
 
-use crate::constants::*;
-use crate::jentry::JEntry;
+use super::constants::*;
+use super::jentry::JEntry;
 use crate::raw::JsonbItem;
+use crate::Number;
 use core::ops::Range;
 
 use crate::error::*;
 use crate::JsonbType;
 use crate::RawJsonb;
+use std::io::Write;
 
 use crate::OwnedJsonb;
 use byteorder::BigEndian;
@@ -76,7 +76,7 @@ impl RawJsonb<'_> {
         Ok((header_type, header_len))
     }
 
-    pub(crate) fn read_jentry(&self, index: usize) -> Result<JEntry> {
+    pub(super) fn read_jentry(&self, index: usize) -> Result<JEntry> {
         let jentry_encoded = self.read_u32(index)?;
         let jentry = JEntry::decode_jentry(jentry_encoded);
         Ok(jentry)
@@ -167,5 +167,107 @@ impl OwnedJsonb {
             buf.extend_from_slice(data);
         }
         Ok(OwnedJsonb::new(buf))
+    }
+}
+
+impl Number {
+    #[inline]
+    pub fn compact_encode<W: Write>(&self, mut writer: W) -> Result<usize> {
+        match self {
+            Self::Int64(v) => {
+                if *v == 0 {
+                    writer.write_all(&[NUMBER_ZERO])?;
+                    return Ok(1);
+                }
+                writer.write_all(&[NUMBER_INT])?;
+                if *v >= i8::MIN.into() && *v <= i8::MAX.into() {
+                    writer.write_all(&(*v as i8).to_be_bytes())?;
+                    Ok(2)
+                } else if *v >= i16::MIN.into() && *v <= i16::MAX.into() {
+                    writer.write_all(&(*v as i16).to_be_bytes())?;
+                    Ok(3)
+                } else if *v >= i32::MIN.into() && *v <= i32::MAX.into() {
+                    writer.write_all(&(*v as i32).to_be_bytes())?;
+                    Ok(5)
+                } else {
+                    writer.write_all(&v.to_be_bytes())?;
+                    Ok(9)
+                }
+            }
+            Self::UInt64(v) => {
+                if *v == 0 {
+                    writer.write_all(&[NUMBER_ZERO])?;
+                    return Ok(1);
+                }
+                writer.write_all(&[NUMBER_UINT])?;
+                if *v <= u8::MAX.into() {
+                    writer.write_all(&(*v as u8).to_be_bytes())?;
+                    Ok(2)
+                } else if *v <= u16::MAX.into() {
+                    writer.write_all(&(*v as u16).to_be_bytes())?;
+                    Ok(3)
+                } else if *v <= u32::MAX.into() {
+                    writer.write_all(&(*v as u32).to_be_bytes())?;
+                    Ok(5)
+                } else {
+                    writer.write_all(&v.to_be_bytes())?;
+                    Ok(9)
+                }
+            }
+            Self::Float64(v) => {
+                if v.is_nan() {
+                    writer.write_all(&[NUMBER_NAN])?;
+                    return Ok(1);
+                } else if v.is_infinite() {
+                    if v.is_sign_negative() {
+                        writer.write_all(&[NUMBER_NEG_INF])?;
+                    } else {
+                        writer.write_all(&[NUMBER_INF])?;
+                    }
+                    return Ok(1);
+                }
+                writer.write_all(&[NUMBER_FLOAT])?;
+                writer.write_all(&v.to_be_bytes())?;
+                Ok(9)
+            }
+        }
+    }
+
+    #[inline]
+    pub fn decode(bytes: &[u8]) -> Result<Number> {
+        let mut len = bytes.len();
+        assert!(len > 0);
+        len -= 1;
+
+        let ty = bytes[0];
+        let num = match ty {
+            NUMBER_ZERO => Number::UInt64(0),
+            NUMBER_NAN => Number::Float64(f64::NAN),
+            NUMBER_INF => Number::Float64(f64::INFINITY),
+            NUMBER_NEG_INF => Number::Float64(f64::NEG_INFINITY),
+            NUMBER_INT => match len {
+                1 => Number::Int64(i8::from_be_bytes(bytes[1..].try_into().unwrap()) as i64),
+                2 => Number::Int64(i16::from_be_bytes(bytes[1..].try_into().unwrap()) as i64),
+                4 => Number::Int64(i32::from_be_bytes(bytes[1..].try_into().unwrap()) as i64),
+                8 => Number::Int64(i64::from_be_bytes(bytes[1..].try_into().unwrap())),
+                _ => {
+                    return Err(Error::InvalidJsonbNumber);
+                }
+            },
+            NUMBER_UINT => match len {
+                1 => Number::UInt64(u8::from_be_bytes(bytes[1..].try_into().unwrap()) as u64),
+                2 => Number::UInt64(u16::from_be_bytes(bytes[1..].try_into().unwrap()) as u64),
+                4 => Number::UInt64(u32::from_be_bytes(bytes[1..].try_into().unwrap()) as u64),
+                8 => Number::UInt64(u64::from_be_bytes(bytes[1..].try_into().unwrap())),
+                _ => {
+                    return Err(Error::InvalidJsonbNumber);
+                }
+            },
+            NUMBER_FLOAT => Number::Float64(f64::from_be_bytes(bytes[1..].try_into().unwrap())),
+            _ => {
+                return Err(Error::InvalidJsonbNumber);
+            }
+        };
+        Ok(num)
     }
 }
