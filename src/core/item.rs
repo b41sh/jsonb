@@ -14,18 +14,12 @@
 
 use std::cmp::Ordering;
 
-use crate::RawJsonb;
-use crate::OwnedJsonb;
-use crate::to_owned_jsonb;
-
-use core::ops::Range;
-use std::io::Write;
-use byteorder::BigEndian;
-use byteorder::WriteBytesExt;
-use super::constants::*;
-use super::jentry::JEntry;
 use crate::error::*;
+use crate::from_raw_jsonb;
+use crate::to_owned_jsonb;
 use crate::Number;
+use crate::OwnedJsonb;
+use crate::RawJsonb;
 
 /// The value type of JSONB data.
 #[derive(Debug, Clone, Copy)]

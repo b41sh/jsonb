@@ -19,6 +19,7 @@ use std::collections::VecDeque;
 
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
+use crate::core::JsonbItem;
 use crate::core::ObjectIterator;
 use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
@@ -29,7 +30,6 @@ use crate::jsonpath::JsonPath;
 use crate::jsonpath::Path;
 use crate::jsonpath::PathValue;
 use crate::number::Number;
-use crate::raw::JsonbItem;
 use crate::Error;
 use crate::OwnedJsonb;
 use crate::RawJsonb;

@@ -17,8 +17,8 @@
 use crate::core::ArrayBuilder;
 use crate::core::ArrayDistinctBuilder;
 use crate::core::ArrayIterator;
+use crate::core::JsonbType;
 use crate::error::*;
-use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 

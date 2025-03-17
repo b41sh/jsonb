@@ -19,12 +19,12 @@ use std::str::from_utf8;
 
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
+use crate::core::JsonbItem;
+use crate::core::JsonbType;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
 use crate::core::ObjectKeyIterator;
 use crate::error::*;
-use crate::raw::JsonbItem;
-use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 

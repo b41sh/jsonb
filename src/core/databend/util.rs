@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
-
-use crate::RawJsonb;
-use crate::OwnedJsonb;
-use crate::to_owned_jsonb;
-
 use core::ops::Range;
 use std::io::Write;
+
 use byteorder::BigEndian;
 use byteorder::WriteBytesExt;
+
 use super::constants::*;
 use super::jentry::JEntry;
+use crate::core::JsonbItem;
+use crate::core::JsonbType;
 use crate::error::*;
 use crate::Number;
+use crate::OwnedJsonb;
+use crate::RawJsonb;
 
 impl<'a> JsonbItem<'a> {
     pub(crate) fn from_raw_jsonb(raw_jsonb: RawJsonb<'a>) -> Result<JsonbItem<'a>> {
@@ -56,7 +56,7 @@ impl<'a> JsonbItem<'a> {
     }
 }
 
-impl RawJsonb<'_> {
+impl<'a> RawJsonb<'a> {
     pub(crate) fn jsonb_type(&self) -> Result<JsonbType> {
         let mut index = 0;
         let (header_type, header_len) = self.read_header(index)?;
@@ -266,5 +266,3 @@ impl Number {
         Ok(num)
     }
 }
-
-

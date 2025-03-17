@@ -16,10 +16,10 @@
 
 use std::borrow::Cow;
 
+use crate::core::JsonbType;
 use crate::error::*;
 use crate::from_raw_jsonb;
 use crate::number::Number;
-use crate::JsonbType;
 use crate::RawJsonb;
 
 impl RawJsonb<'_> {

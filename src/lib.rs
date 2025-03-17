@@ -86,6 +86,5 @@ pub use owned::OwnedJsonb;
 pub use parser::from_slice;
 pub use parser::parse_value;
 pub use raw::from_raw_jsonb;
-pub use raw::JsonbType;
 pub use raw::RawJsonb;
 pub use value::*;

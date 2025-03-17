@@ -17,8 +17,8 @@ use std::ops::Range;
 
 use super::constants::*;
 use super::jentry::JEntry;
+use crate::core::JsonbItem;
 use crate::error::Result;
-use crate::raw::JsonbItem;
 use crate::RawJsonb;
 
 pub(crate) struct ArrayIterator<'a> {

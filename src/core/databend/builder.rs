@@ -20,9 +20,9 @@ use byteorder::WriteBytesExt;
 
 use super::constants::*;
 use super::jentry::JEntry;
+use crate::core::JsonbItem;
 use crate::error::Error;
 use crate::error::Result;
-use crate::raw::JsonbItem;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 

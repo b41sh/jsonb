@@ -21,5 +21,6 @@ mod item;
 
 #[cfg(feature = "databend")]
 pub use databend::*;
+pub(crate) use item::*;
 #[cfg(feature = "sqlite")]
 pub use sqlite::*;

@@ -21,12 +21,12 @@ use std::collections::VecDeque;
 use crate::constants::*;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
+use crate::core::JsonbItem;
+use crate::core::JsonbType;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
 use crate::error::*;
 use crate::number::Number;
-use crate::raw::JsonbItem;
-use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 

@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::ops::Range;
 use std::cmp::Ordering;
 
 use serde::Serialize;
 
 use crate::core::ArrayIterator;
 use crate::core::Deserializer;
+use crate::core::JsonbType;
 use crate::core::ObjectIterator;
 use crate::error::*;
-use crate::to_owned_jsonb;
 use crate::Number;
 use crate::OwnedJsonb;
 
