@@ -988,6 +988,7 @@ fn test_get_by_keypath() {
             Some(Value::String(Cow::from("a"))),
         ),
         (r#"[10,20,["a","b","c"]]"#, "{2,a}", None),
+        (r#"{"1":{"2":"abc"}}"#, "{1,2}", Some(Value::String(std::borrow::Cow::Borrowed("abc")))),
         (
             r#"[10,20,[{"k1":[1,2,3],"k2":{"w":1,"z":2}},"b","c"]]"#,
             "{2,0,k2}",
@@ -1030,6 +1031,8 @@ fn test_exists_all_keys() {
         (r#"{"a":1,"b":2,"c":3}"#, vec!["c", "b", "a"], true),
         (r#"{"a":1,"b":2,"c":3}"#, vec!["a", "b", "a"], true),
         (r#"{"a":1,"b":2,"c":3}"#, vec!["c", "f", "a"], false),
+        (r#""a""#, vec!["c", "f", "a"], false),
+        (r#""b""#, vec!["b"], true),
     ];
     for (json, keys, expected) in sources {
         let owned_jsonb = json.parse::<OwnedJsonb>().unwrap();
@@ -1054,6 +1057,8 @@ fn test_exists_any_keys() {
         (r#"{"a":1,"b":2,"c":3}"#, vec!["c", "b", "a"], true),
         (r#"{"a":1,"b":2,"c":3}"#, vec!["a", "b", "a"], true),
         (r#"{"a":1,"b":2,"c":3}"#, vec!["z", "f", "x"], false),
+        (r#""a""#, vec!["c", "f", "a"], true),
+        (r#""b""#, vec!["b"], true),
     ];
     for (json, keys, expected) in sources {
         let owned_jsonb = json.parse::<OwnedJsonb>().unwrap();
@@ -1276,6 +1281,7 @@ fn test_delete_by_keypath() {
             r#"{"a":1,"b":[{"c":1},2,3]}"#,
         ),
         (r#"{"a":1,"b":[1,2,3]}"#, "{b,20}", r#"{"a":1,"b":[1,2,3]}"#),
+        (r#"{"1":{"2":"abc","3":"def"}}"#, "{1,2}", r#"{"1":{"3":"def"}}"#),
         (
             r#"{"a":1,"b":[1,2,3]}"#,
             "{b,20,c,e}",
@@ -1635,3 +1641,4 @@ fn init_object<'a>(entries: Vec<(&str, Value<'a>)>) -> Value<'a> {
     }
     Value::Object(map)
 }
+
