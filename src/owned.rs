@@ -260,7 +260,7 @@ impl PartialEq for OwnedJsonb {
     }
 }
 
-/// Implements `PartialOrd` for `RawJsonb`, allowing comparison of two `RawJsonb` values.
+/// Implements `PartialOrd` for `OwnedJsonb`, allowing comparison of two `OwnedJsonb` values.
 ///
 /// The comparison logic handles different JSONB types (scalar, array, object) and considers null values.
 /// The ordering is defined as follows:
@@ -281,7 +281,7 @@ impl PartialOrd for OwnedJsonb {
     }
 }
 
-/// Implements `Ord` for `RawJsonb`, allowing comparison of two `RawJsonb` values using the total ordering.
+/// Implements `Ord` for `OwnedJsonb`, allowing comparison of two `OwnedJsonb` values using the total ordering.
 /// This implementation leverages the `PartialOrd` implementation, returning `Ordering::Equal` for incomparable values.
 impl Ord for OwnedJsonb {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -294,7 +294,49 @@ impl Ord for OwnedJsonb {
     }
 }
 
-/// Serialize a value into a JSONB byte array
+/// Serializes a Rust data structure into an `OwnedJsonb` using Serde.
+///
+/// This function takes a Rust type `T` that implements the `Serialize` trait and
+/// serializes it into an `OwnedJsonb`, which is a struct containing a `Vec<u8>`
+/// representing the JSONB data. It uses a custom `Serializer` to handle the
+/// serialization process.
+///
+/// # Arguments
+///
+/// * `value`: A reference to the value of type `T` to be serialized.
+///
+/// # Type Parameters
+///
+/// * `T`: The Rust type to serialize. This type must implement the `serde::ser::Serialize` trait.
+///
+/// # Returns
+///
+/// * `Ok(OwnedJsonb)`: If the serialization is successful, returns an `OwnedJsonb`
+///   containing the serialized JSONB data.
+/// * `Err(e)`: If any Serde serialization error occurs.
+///
+/// # Examples
+///
+/// ```
+/// use jsonb::to_owned_jsonb;
+/// use jsonb::OwnedJsonb;
+/// use serde::Serialize;
+///
+/// #[derive(Serialize, Debug)]
+/// struct Person {
+///     name: String,
+///     age: u32,
+/// }
+///
+/// let person = Person {
+///     name: "Bob".to_string(),
+///     age: 42,
+/// };
+///
+/// let owned_jsonb: OwnedJsonb = to_owned_jsonb(&person).unwrap();
+///
+/// println!("JSONB data: {}", owned_jsonb);
+/// ```
 pub fn to_owned_jsonb<T>(value: &T) -> Result<OwnedJsonb>
 where T: serde::ser::Serialize {
     let mut serializer = Serializer::default();

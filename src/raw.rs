@@ -67,6 +67,15 @@ impl<'a> RawJsonb<'a> {
         self.data.as_ref().len()
     }
 
+    /// Creates an `OwnedJsonb` from the `RawJsonb` by copying the underlying data.
+    ///
+    /// This method converts a `RawJsonb`, which holds a reference to JSONB data,
+    /// into an `OwnedJsonb`, which owns its own copy of the JSONB data. This is
+    /// achieved by cloning the byte slice held by the `RawJsonb` into a new `Vec<u8>`.
+    ///
+    /// # Returns
+    ///
+    /// An `OwnedJsonb` instance containing a copy of the JSONB data from the `RawJsonb`.
     pub fn to_owned(&self) -> OwnedJsonb {
         OwnedJsonb::new(self.data.to_vec())
     }
@@ -293,6 +302,48 @@ impl Ord for RawJsonb<'_> {
     }
 }
 
+/// Deserializes a `RawJsonb` into a Rust data structure using Serde.
+///
+/// This function takes a `RawJsonb` (a borrowed slice of JSONB data) and attempts
+/// to deserialize it into a Rust type `T` that implements the `Deserialize` trait.
+/// It uses a custom `Deserializer` to handle the JSONB data.
+///
+/// # Arguments
+///
+/// * `raw_jsonb`: A reference to the `RawJsonb` containing the JSONB data to deserialize.
+///
+/// # Type Parameters
+///
+/// * `T`: The Rust type to deserialize the JSONB data into.  This type must implement
+///   the `serde::de::Deserialize` trait.
+///
+/// # Returns
+///
+/// * `Ok(t)`: If the deserialization is successful, returns the deserialized value of type `T`.
+/// * `Err(Error::InvalidJsonb)`: If the deserialization fails due to invalid JSONB data
+///   (e.g., trailing characters after the expected JSONB structure).
+/// * `Err(e)`: If any other Serde deserialization error occurs.
+///
+/// # Examples
+///
+/// ```
+/// use jsonb::from_raw_jsonb;
+/// use jsonb::OwnedJsonb;
+/// use jsonb::RawJsonb;
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize, Debug)]
+/// struct Person {
+///     name: String,
+///     age: u32,
+/// }
+///
+/// let owned_jsonb = r#"{"name": "Alice", "age": 20}"#.parse::<OwnedJsonb>().unwrap();
+/// let raw_jsonb = owned_jsonb.as_raw();
+///
+/// let person: Person = from_raw_jsonb(&raw_jsonb).unwrap();
+/// println!("{:?}", person); // Output: Person { name: "Alice", age: 20 }
+/// ```
 pub fn from_raw_jsonb<'de, T>(raw_jsonb: &'de RawJsonb) -> Result<T>
 where T: serde::de::Deserialize<'de> {
     let mut deserializer = Deserializer::new(raw_jsonb);
