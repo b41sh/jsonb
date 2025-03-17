@@ -48,6 +48,16 @@ impl Serializer {
         Serializer { buffer: Vec::new() }
     }
 
+    /// Consumes the `Serializer` and returns the underlying buffer containing the
+    /// serialized JSONB data.
+    ///
+    /// This function returns the `OwnedJsonb` that has been populated with the
+    /// serialized JSONB data during the serialization process. The `Serializer`
+    /// is consumed in the process.
+    pub fn to_owned_jsonb(self) -> OwnedJsonb {
+        OwnedJsonb::new(self.buffer)
+    }
+
     fn write_jentry(&mut self, jentry: JEntry) -> Result<()> {
         self.buffer.write_u32::<BigEndian>(SCALAR_CONTAINER_TAG)?;
         let jentry_bytes = jentry.encoded();
@@ -91,10 +101,6 @@ impl Serializer {
 
         self.replace_jentry(jentry, &mut jentry_index);
         Ok(())
-    }
-
-    fn to_vec(self) -> Vec<u8> {
-        self.buffer
     }
 }
 
