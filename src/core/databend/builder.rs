@@ -41,7 +41,7 @@ impl<'a> ArrayBuilder<'a> {
         }
     }
 
-    pub(crate) fn push_raw_jsonb_item(&mut self, item: JsonbItem<'a>) {
+    pub(crate) fn push_jsonb_item(&mut self, item: JsonbItem<'a>) {
         self.items.push(item);
     }
 
@@ -50,9 +50,9 @@ impl<'a> ArrayBuilder<'a> {
         self.items.push(item);
     }
 
-    pub(crate) fn push_owned_jsonb(&mut self, owned_jsonb: OwnedJsonb) {
-        let item = JsonbItem::Owned(owned_jsonb);
-        self.push_raw_jsonb_item(item)
+    pub(crate) fn push_owned_jsonb(&mut self, owned: OwnedJsonb) {
+        let item = JsonbItem::Owned(owned);
+        self.push_jsonb_item(item)
     }
 
     pub(crate) fn build(self) -> Result<OwnedJsonb> {
@@ -81,7 +81,7 @@ impl<'a> ArrayDistinctBuilder<'a> {
         }
     }
 
-    pub(crate) fn push_raw_jsonb_item(&mut self, item: JsonbItem<'a>) {
+    pub(crate) fn push_jsonb_item(&mut self, item: JsonbItem<'a>) {
         if let Some(cnt) = self.item_map.get_mut(&item) {
             *cnt += 1;
         } else {
@@ -90,12 +90,12 @@ impl<'a> ArrayDistinctBuilder<'a> {
         }
     }
 
-    pub(crate) fn push_raw_jsonb(&mut self, raw_jsonb: RawJsonb<'a>) {
-        let item = JsonbItem::Raw(raw_jsonb);
-        self.push_raw_jsonb_item(item);
+    pub(crate) fn push_raw_jsonb(&mut self, raw: RawJsonb<'a>) {
+        let item = JsonbItem::Raw(raw);
+        self.push_jsonb_item(item);
     }
 
-    pub(crate) fn pop_raw_jsonb_item(&mut self, item: JsonbItem<'a>) -> Option<()> {
+    pub(crate) fn pop_jsonb_item(&mut self, item: JsonbItem<'a>) -> Option<()> {
         if let Some(cnt) = self.item_map.get_mut(&item) {
             if *cnt > 0 {
                 *cnt -= 1;
@@ -105,9 +105,9 @@ impl<'a> ArrayDistinctBuilder<'a> {
         None
     }
 
-    pub(crate) fn pop_raw_jsonb(&mut self, raw_jsonb: RawJsonb<'a>) -> Option<()> {
-        let item = JsonbItem::Raw(raw_jsonb);
-        self.pop_raw_jsonb_item(item)
+    pub(crate) fn pop_raw_jsonb(&mut self, raw: RawJsonb<'a>) -> Option<()> {
+        let item = JsonbItem::Raw(raw);
+        self.pop_jsonb_item(item)
     }
 
     pub(crate) fn build(self) -> Result<OwnedJsonb> {
@@ -134,7 +134,7 @@ impl<'a> ObjectBuilder<'a> {
         }
     }
 
-    pub(crate) fn push_raw_jsonb_item(
+    pub(crate) fn push_jsonb_item(
         &mut self,
         key: &'a str,
         val_item: JsonbItem<'a>,
@@ -146,14 +146,14 @@ impl<'a> ObjectBuilder<'a> {
         Ok(())
     }
 
-    pub(crate) fn push_raw_jsonb(&mut self, key: &'a str, raw_jsonb: RawJsonb<'a>) -> Result<()> {
-        let item = JsonbItem::Raw(raw_jsonb);
-        self.push_raw_jsonb_item(key, item)
+    pub(crate) fn push_raw_jsonb(&mut self, key: &'a str, raw: RawJsonb<'a>) -> Result<()> {
+        let item = JsonbItem::Raw(raw);
+        self.push_jsonb_item(key, item)
     }
 
-    pub(crate) fn push_owned_jsonb(&mut self, key: &'a str, owned_jsonb: OwnedJsonb) -> Result<()> {
-        let item = JsonbItem::Owned(owned_jsonb);
-        self.push_raw_jsonb_item(key, item)
+    pub(crate) fn push_owned_jsonb(&mut self, key: &'a str, owned: OwnedJsonb) -> Result<()> {
+        let item = JsonbItem::Owned(owned);
+        self.push_jsonb_item(key, item)
     }
 
     pub(crate) fn contains_key(&self, key: &'a str) -> bool {

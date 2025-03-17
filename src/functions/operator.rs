@@ -42,6 +42,10 @@ impl RawJsonb<'_> {
     /// * `"array"`
     /// * `"object"`
     ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONB value.
+    ///    
     /// # Returns
     ///
     /// * `Ok(&'static str)` - A string slice representing the type of the JSONB value.
@@ -340,8 +344,6 @@ impl RawJsonb<'_> {
     /// * **Array + Object/Scalar:** Creates a new array containing the elements of the `self` array followed by the `other` value (as a single element).
     /// * **Object/Scalar + Object/Scalar:** Creates a new array containing the `self` and `other` (as a single element).
     ///
-    /// If the input JSONB values are invalid or if an unsupported concatenation is attempted (e.g. trying to concatenate a number with an object directly, without creating an array), an error is returned.
-    ///
     /// # Arguments
     ///
     /// * `self` - The first JSONB value.
@@ -397,13 +399,13 @@ impl RawJsonb<'_> {
                 let mut builder = ObjectBuilder::new();
                 for result in &mut other_object_iter {
                     let (key, val_item) = result?;
-                    builder.push_raw_jsonb_item(key, val_item)?;
+                    builder.push_jsonb_item(key, val_item)?;
                 }
                 for result in &mut self_object_iter {
                     let (key, val_item) = result?;
                     // if key duplicate, keep value from other object
                     if !builder.contains_key(key) {
-                        builder.push_raw_jsonb_item(key, val_item)?;
+                        builder.push_jsonb_item(key, val_item)?;
                     }
                 }
                 Ok(builder.build()?)
@@ -415,11 +417,11 @@ impl RawJsonb<'_> {
                 let mut builder = ArrayBuilder::with_capacity(len);
                 for item_result in &mut self_array_iter {
                     let item = item_result?;
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                 }
                 for item_result in &mut other_array_iter {
                     let item = item_result?;
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                 }
                 Ok(builder.build()?)
             }
@@ -430,7 +432,7 @@ impl RawJsonb<'_> {
                 builder.push_raw_jsonb(*self);
                 for item_result in &mut other_array_iter {
                     let item = item_result?;
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                 }
                 Ok(builder.build()?)
             }
@@ -440,7 +442,7 @@ impl RawJsonb<'_> {
                 let mut builder = ArrayBuilder::with_capacity(len);
                 for item_result in &mut self_array_iter {
                     let item = item_result?;
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                 }
                 builder.push_raw_jsonb(*other);
                 Ok(builder.build()?)
@@ -457,6 +459,10 @@ impl RawJsonb<'_> {
     /// Recursively reomves all object key-value pairs that have null values from a JSONB object.
     ///
     /// Note: null values in the JSONB array are not reomved.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The first JSONB value.
     ///
     /// # Returns
     ///
@@ -500,7 +506,7 @@ impl RawJsonb<'_> {
                         let no_nulls_item = sub_item.strip_nulls()?;
                         builder.push_owned_jsonb(no_nulls_item);
                     } else {
-                        builder.push_raw_jsonb_item(item);
+                        builder.push_jsonb_item(item);
                     }
                 }
                 Ok(builder.build()?)
@@ -516,7 +522,7 @@ impl RawJsonb<'_> {
                         let no_nulls_item = sub_item.strip_nulls()?;
                         builder.push_owned_jsonb(key, no_nulls_item)?;
                     } else {
-                        builder.push_raw_jsonb_item(key, val_item)?;
+                        builder.push_jsonb_item(key, val_item)?;
                     }
                 }
                 Ok(builder.build()?)
@@ -533,7 +539,8 @@ impl RawJsonb<'_> {
     /// The compare rules are the same as the `PartialOrd` trait.
     /// Scalar Null > Array > Object > Other Scalars(String > Number > Boolean).
     ///
-    /// **Important:** The resulting byte array is *not* a valid JSONB format; it's specifically designed for comparison purposes and should not be interpreted as standard JSONB data.
+    /// **Important:** The resulting byte array is *not* a valid JSONB format;
+    /// it's specifically designed for comparison purposes and should not be interpreted as standard JSONB data.
     ///
     /// # Arguments
     ///

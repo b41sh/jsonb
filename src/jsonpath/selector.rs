@@ -100,7 +100,7 @@ impl<'a> Selector<'a> {
     pub(crate) fn build_array(&mut self) -> Result<OwnedJsonb> {
         let mut builder = ArrayBuilder::with_capacity(self.items.len());
         while let Some(item) = self.items.pop_front() {
-            builder.push_raw_jsonb_item(item);
+            builder.push_jsonb_item(item);
         }
         builder.build()
     }

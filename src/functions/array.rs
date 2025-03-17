@@ -23,13 +23,21 @@ use crate::OwnedJsonb;
 use crate::RawJsonb;
 
 impl RawJsonb<'_> {
-    /// @todo 重写
     /// Returns the number of elements in a JSONB array.
     ///
-    /// This function checks the header of the JSONB data to determine if it represents an array.
-    /// If it is an array, the function returns the number of elements in the array.  If the JSONB
-    /// data is not an array (e.g., it's an object or a scalar value), the function returns `None`.
+    /// If the JSONB data is an array, this function returns the number of elements in the array.
+    /// If the JSONB data is not an array (e.g., it's an object or a scalar), this function returns `None`.
     /// An error is returned if the JSONB data is invalid.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONB value.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(usize))` - the number of elements in the array.
+    /// * `Ok(None)` - If the input is not an array.
+    /// * `Err(Error)` - If the input JSONB data is invalid.
     ///
     /// # Examples
     ///
@@ -58,7 +66,7 @@ impl RawJsonb<'_> {
     /// Extracts the values from a JSONB array.
     ///
     /// If the JSONB value is an array, this function returns a vector of `OwnedJsonb` representing the array elements.
-    /// If the JSONB value is not an array (e.g., it's an object or a scalar), this function returns `Ok(None)`.
+    /// If the JSONB value is not an array (e.g., it's an object or a scalar), this function returns `None`.
     ///
     /// # Arguments
     ///
@@ -68,7 +76,7 @@ impl RawJsonb<'_> {
     ///
     /// * `Ok(Some(Vec<OwnedJsonb>))` - A vector of `OwnedJsonb` values if the input is an array.
     /// * `Ok(None)` - If the input is not an array.
-    /// * `Err(Error)` - If an error occurred during decoding (e.g., invalid JSONB data).
+    /// * `Err(Error)` - If the input JSONB data is invalid.
     ///
     /// # Examples
     ///
@@ -125,8 +133,7 @@ impl RawJsonb<'_> {
     /// The behavior depends on the input type:
     ///
     /// * **Array:** Returns a new array containing only the unique elements from the input array.
-    /// * **Object:** Returns a new array containing the original object as its only element.
-    /// * **Scalar:** Returns a new array containing the original scalar value as its only element.
+    /// * **Object/Scalar:** Returns a new array containing the original object or salar as its only element.
     /// * **Invalid JSONB:** Returns an error.
     ///
     /// # Arguments
@@ -176,7 +183,7 @@ impl RawJsonb<'_> {
                 let mut builder = ArrayDistinctBuilder::new(array_iter.len());
                 for item_result in &mut array_iter {
                     let item = item_result?;
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                 }
                 builder.build()
             }
@@ -191,10 +198,13 @@ impl RawJsonb<'_> {
     /// Computes the intersection of two JSONB arrays or the containment check for objects and scalars.
     ///
     /// This function calculates the intersection of two JSONB arrays or checks if one JSONB value is contained within another.
+    ///
     /// The behavior depends on the input types:
     ///
-    /// * **Array + Array:** Returns a new array containing only the elements that are present in *both* input arrays. The order of elements is not guaranteed. Duplicate elements are handled correctly; the multiplicity of elements in the intersection is the minimum of their multiplicities in the input arrays.
-    /// * **Object/Scalar + Object/Scalar:** Returns a new array containing the `self` value only if it's present in the `other` value. This effectively checks for containment. The contained value must be completely equal to the other value, including any nested structures. For arrays, this containment check would require a recursive check for each element in both arrays.
+    /// * **Array + Array:** Returns a new array containing only the elements that are present in *both* input arrays.
+    /// The order of elements is not guaranteed. Duplicate elements are handled correctly,
+    /// the multiplicity of elements in the intersection is the minimum of their multiplicities in the input arrays.
+    /// * **Object/Scalar + Object/Scalar:** Returns a new array containing the `self` value only if it's present in the `other` value.
     /// * **Invalid input:** Returns an error if either input is not an array, object, or scalar.
     ///
     /// # Arguments
@@ -204,8 +214,8 @@ impl RawJsonb<'_> {
     ///
     /// # Returns
     ///
-    /// * `Ok(OwnedJsonb)` - The intersection array (for array + array) or a single-element array indicating containment (for other combinations). The empty array `[]` indicates that there's no intersection or containment.
-    /// * `Err(Error)` - If the input JSONB data is invalid or if the input types are incompatible (e.g., trying to find the intersection of an array and an object).
+    /// * `Ok(OwnedJsonb)` - The intersection array (for array + array) or a single-element array indicating containment (for other combinations).
+    /// * `Err(Error)` - If any of the input JSONB data is invalid.
     ///
     /// # Examples
     ///
@@ -257,7 +267,7 @@ impl RawJsonb<'_> {
                 let mut builder = ArrayDistinctBuilder::new(array_iter.len());
                 for item_result in &mut array_iter {
                     let item = item_result?;
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                 }
                 builder
             }
@@ -274,8 +284,8 @@ impl RawJsonb<'_> {
                 let mut builder = ArrayBuilder::with_capacity(array_iter.len());
                 for item_result in &mut array_iter {
                     let item = item_result?;
-                    if other_builder.pop_raw_jsonb_item(item.clone()).is_some() {
-                        builder.push_raw_jsonb_item(item);
+                    if other_builder.pop_jsonb_item(item.clone()).is_some() {
+                        builder.push_jsonb_item(item);
                     }
                 }
                 builder.build()
@@ -292,10 +302,14 @@ impl RawJsonb<'_> {
 
     /// Computes the set difference between two JSONB arrays or checks for non-containment of objects and scalars.
     ///
-    /// This function calculates the set difference between two JSONB arrays or checks if one JSONB value is *not* contained within another.  The behavior depends on the input types:
+    /// This function calculates the set difference between two JSONB arrays or checks if one JSONB value is *not* contained within another.
     ///
-    /// * **Array + Array:** Returns a new array containing only the elements that are present in the `self` array but *not* in the `other` array. The order of elements is not guaranteed. Duplicate elements are handled correctly; if an element appears multiple times in `self` but is present in `other`, it will be removed from the result only up to the number of times it appears in `other`.
-    /// * **Object/Scalar + Object/Scalar:** Returns a new array containing the `self` value if it's *not* contained in the `other` value. This effectively checks for non-containment. For arrays, this non-containment check would require a recursive check for each element in both arrays.  Complete equality is required for containment; even a slight difference (e.g., a different number of duplicate elements) means the value is not contained.
+    /// The behavior depends on the input types:
+    ///
+    /// * **Array + Array:** Returns a new array containing only the elements that are present in the `self` array but *not* in the `other` array.
+    /// The order of elements is not guaranteed. Duplicate elements are handled correctly, if an element appears multiple times in `self` but is present in `other`,
+    /// it will be removed from the result only up to the number of times it appears in `other`.
+    /// * **Object/Scalar + Object/Scalar:** Returns a new array containing the `self` value if it's *not* contained in the `other` value.
     /// * **Invalid input:** Returns an error if either input is not an array, object, or scalar.
     ///
     /// # Arguments
@@ -305,8 +319,8 @@ impl RawJsonb<'_> {
     ///
     /// # Returns
     ///
-    /// * `Ok(OwnedJsonb)` - The resulting array after removing elements from `self` that are present in `other` (for array + array), or a single-element array indicating non-containment (for other combinations). An empty array `[]` indicates that all elements of `self` are present in `other`.
-    /// * `Err(Error)` - If the input JSONB data is invalid or if the input types are incompatible (e.g., trying to find the set difference between an array and an object).
+    /// * `Ok(OwnedJsonb)` - The resulting array after removing elements from `self` that are present in `other`.
+    /// * `Err(Error)` - If any of the input JSONB data is invalid.
     ///
     /// # Examples
     ///
@@ -352,7 +366,7 @@ impl RawJsonb<'_> {
                 let mut builder = ArrayDistinctBuilder::new(array_iter.len());
                 for item_result in &mut array_iter {
                     let item = item_result?;
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                 }
                 builder
             }
@@ -369,8 +383,8 @@ impl RawJsonb<'_> {
                 let mut builder = ArrayBuilder::with_capacity(array_iter.len());
                 for item_result in &mut array_iter {
                     let item = item_result?;
-                    if other_builder.pop_raw_jsonb_item(item.clone()).is_none() {
-                        builder.push_raw_jsonb_item(item);
+                    if other_builder.pop_jsonb_item(item.clone()).is_none() {
+                        builder.push_jsonb_item(item);
                     }
                 }
                 builder.build()
@@ -387,12 +401,14 @@ impl RawJsonb<'_> {
 
     /// Checks if two JSONB arrays or a JSONB array and an object/scalar have any elements in common.
     ///
-    /// This function determines whether two JSONB arrays, or a JSONB array and an object/scalar, share any common elements. The behavior depends on the input types:
+    /// This function determines whether two JSONB arrays, or a JSONB array and an object/scalar, share any common elements.
+
+    /// The behavior depends on the input types:
     ///
-    /// * **Array + Array:** Returns `true` if the two arrays have at least one element in common; otherwise, returns `false`. Duplicate elements are considered; if an element appears multiple times in one array, it only needs to appear at least once in the other array for the function to return `true`.
+    /// * **Array + Array:** Returns `true` if the two arrays have at least one element in common; otherwise, returns `false`.
     /// * **Array + Object/Scalar:** Returns `true` if the array contains the object/scalar; otherwise, returns `false`.
     /// * **Object/Scalar + Array:** Returns `true` if the array contains the object/scalar; otherwise, returns `false`.
-    /// * **Object/Scalar + Object/Scalar:** Returns `true` only if both values are exactly equal. This is effectively an equality check.  The values must be completely equal, including any nested structures. For arrays, this would require a recursive equality check for each element in both arrays.
+    /// * **Object/Scalar + Object/Scalar:** Returns `true` only if both values are exactly equal. This is effectively an equality check.
     /// * **Invalid input:** Returns an error if either input is invalid JSONB data.
     ///
     /// # Arguments
@@ -404,7 +420,7 @@ impl RawJsonb<'_> {
     ///
     /// * `Ok(true)` - If the two JSONB values have at least one element in common.
     /// * `Ok(false)` - If the two JSONB values have no elements in common.
-    /// * `Err(Error)` - If the input JSONB data is invalid.
+    /// * `Err(Error)` - If any of the input JSONB data is invalid.
     ///
     /// # Examples
     ///
@@ -454,7 +470,7 @@ impl RawJsonb<'_> {
                 let mut builder = ArrayDistinctBuilder::new(array_iter.len());
                 for item_result in &mut array_iter {
                     let item = item_result?;
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                 }
                 builder
             }
@@ -470,7 +486,7 @@ impl RawJsonb<'_> {
             Some(mut array_iter) => {
                 for item_result in &mut array_iter {
                     let item = item_result?;
-                    if other_builder.pop_raw_jsonb_item(item).is_some() {
+                    if other_builder.pop_jsonb_item(item).is_some() {
                         return Ok(true);
                     }
                 }
@@ -486,23 +502,26 @@ impl RawJsonb<'_> {
 
     /// Inserts a new element into a JSONB array at the specified position.
     ///
-    /// This function inserts the `new_val` into the JSONB array at the position specified by `pos`.  The `pos` parameter can be positive or negative:
+    /// This function inserts the `new_val` into the JSONB array at the position specified by `pos`.
+    /// The `pos` parameter can be positive or negative:
     ///
     /// * **Positive index:** 0-based index from the beginning of the array.
     /// * **Negative index:** 1-based index from the end of the array (e.g., -1 refers to the last element).
     ///
-    /// If `pos` is less than 0, the element is inserted at the beginning of the array. If `pos` is greater than or equal to the length of the array, the element is appended to the end.  If the input JSONB value is not an array, object or scalar, an error is returned (`Error::InvalidJsonb`). If the input is an object or scalar, it's treated as a single element array.
+    /// If `pos` is less than 0, the element is inserted at the beginning of the array.
+    /// If `pos` is greater than or equal to the length of the array, the element is appended to the end.
+    /// If the input is an object or scalar, it's treated as a single element array.
     ///
     /// # Arguments
     ///
     /// * `self` - The JSONB array.
     /// * `pos` - The position at which to insert the new element (positive or negative index).
-    /// * `new_val` - The new element to insert.
+    /// * `new_val` - The new JSONB element to insert.
     ///
     /// # Returns
     ///
     /// * `Ok(OwnedJsonb)` - The modified JSONB array with the new element inserted.
-    /// * `Err(Error)` - If the input JSONB value is not an array or if the JSONB data is invalid.
+    /// * `Err(Error)` - If any of the input JSONB data is invalid.
     ///
     /// # Examples
     ///
@@ -566,7 +585,7 @@ impl RawJsonb<'_> {
                     if i == idx {
                         builder.push_raw_jsonb(*new_val);
                     }
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                     i += 1;
                 }
                 if i == idx {

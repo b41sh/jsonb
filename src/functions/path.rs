@@ -39,6 +39,7 @@ impl RawJsonb<'_> {
     ///
     /// # Arguments
     ///
+    /// * `self` - The JSONB value.
     /// * `index` - The index of the desired element.
     ///
     /// # Returns
@@ -94,6 +95,7 @@ impl RawJsonb<'_> {
     ///
     /// # Arguments
     ///
+    /// * `self` - The JSONB value.
     /// * `name` - The key to search for.
     /// * `ignore_case` - Whether the key search should be case-insensitive.
     ///
@@ -178,6 +180,7 @@ impl RawJsonb<'_> {
     ///
     /// # Arguments
     ///
+    /// * `self` - The JSONB value.
     /// * `keypaths` - An iterator of `KeyPath` elements representing the path to traverse.
     ///
     /// # Returns
@@ -324,7 +327,8 @@ impl RawJsonb<'_> {
     ///
     /// * `Ok(true)` - If the JSON path exists.
     /// * `Ok(false)` - If the JSON path does not exist.
-    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation.  This could also indicate issues with the `json_path` itself.
+    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation.
+    /// This could also indicate issues with the `json_path` itself.
     ///
     /// # Examples
     ///
@@ -360,13 +364,16 @@ impl RawJsonb<'_> {
     /// # Arguments
     ///
     /// * `self` - The JSONB value.
-    /// * `json_path` - The JSON path with a predicate (from the `jsonpath` crate).  The predicate is specified within the `json_path` using the standard JSONPath syntax. For example, `$.store.book[?(@.price < 10)]` selects books with a price less than 10.
+    /// * `json_path` - The JSON path with a predicate (from the `jsonpath` crate).
+    /// The predicate is specified within the `json_path` using the standard JSONPath syntax.
+    /// For example, `$.store.book[?(@.price < 10)]` selects books with a price less than 10.
     ///
     /// # Returns
     ///
     /// * `Ok(true)` - If the JSON path with its predicate matches at least one value in the JSONB data.
     /// * `Ok(false)` - If the JSON path with its predicate does not match any values.
-    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation or predicate checking. This could also indicate issues with the `json_path` itself (invalid syntax, etc.).
+    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation or predicate checking.
+    /// This could also indicate issues with the `json_path` itself (invalid syntax, etc.).
     ///
     /// # Examples
     ///
@@ -460,7 +467,7 @@ impl RawJsonb<'_> {
                 for (i, item_result) in &mut array_iter.enumerate() {
                     let item = item_result?;
                     if i != index {
-                        builder.push_raw_jsonb_item(item);
+                        builder.push_jsonb_item(item);
                     }
                 }
                 Ok(builder.build()?)
@@ -529,7 +536,7 @@ impl RawJsonb<'_> {
                 for result in &mut object_iter {
                     let (key, val_item) = result?;
                     if !key.eq(name) {
-                        builder.push_raw_jsonb_item(key, val_item)?;
+                        builder.push_jsonb_item(key, val_item)?;
                     }
                 }
                 Ok(builder.build()?)
@@ -544,7 +551,7 @@ impl RawJsonb<'_> {
                             continue;
                         }
                     }
-                    builder.push_raw_jsonb_item(item);
+                    builder.push_jsonb_item(item);
                 }
                 Ok(builder.build()?)
             }
@@ -554,11 +561,16 @@ impl RawJsonb<'_> {
 
     /// Deletes a value from a JSONB array or object based on a key path.
     ///
-    /// This function removes a value from a JSONB array or object using a key path.  The key path is an iterator of `KeyPath` elements specifying the path to the element to delete.
+    /// This function removes a value from a JSONB array or object using a key path.
+    /// The key path is an iterator of `KeyPath` elements specifying the path to the element to delete.
     ///
-    /// * **Array:** If the JSONB value is an array, the key path must consist of array indices (`KeyPath::Index`).  A negative index counts from the end of the array (e.g., -1 is the last element).  If the index is out of bounds, the original JSONB value is returned unchanged.
-    /// * **Object:** If the JSONB value is an object, the key path can be a mix of object keys (`KeyPath::Name` or `KeyPath::QuotedName`) and array indices.  If any part of the path is invalid (e.g., trying to access an index in a non-array or a key in a non-object), the original JSONB value is returned unchanged.
-    /// * **Invalid input:** If the input is neither an array nor an object, or if the JSONB data is otherwise invalid, an error (`Error::InvalidJsonType` or `Error::InvalidJsonb`) is returned.
+    /// * **Array:** If the JSONB value is an array, the key path must consist of array indices (`KeyPath::Index`).
+    /// A negative index counts from the end of the array (e.g., -1 is the last element).
+    /// If the index is out of bounds, the original JSONB value is returned unchanged.
+    /// * **Object:** If the JSONB value is an object, the key path can be a mix of object keys (`KeyPath::Name` or `KeyPath::QuotedName`) and array indices.
+    /// If any part of the path is invalid (e.g., trying to access an index in a non-array or a key in a non-object), the original JSONB value is returned unchanged.
+    /// * **Invalid input:** If the input is neither an array nor an object, or if the JSONB data is otherwise invalid,
+    /// an error (`Error::InvalidJsonType` or `Error::InvalidJsonb`) is returned.
     ///
     /// # Arguments
     ///
@@ -630,6 +642,7 @@ impl RawJsonb<'_> {
         ) {
             return Err(Error::InvalidJsonType);
         }
+        // collect item indics need to delete in each object or array.
         let root_item = JsonbItem::Raw(*self);
         let mut items = VecDeque::new();
         items.push_back((root_item, 0));
@@ -698,6 +711,7 @@ impl RawJsonb<'_> {
         let mut child_jsonb: Option<OwnedJsonb> = None;
         let (_, mut del_index) = items.pop_back().unwrap();
 
+        // Recursively builds an array or object for paths, and remove elements that need to be deleted.
         while let Some((current_item, next_del_index)) = items.pop_back() {
             let current_raw_jsonb = current_item.as_raw_jsonb().unwrap();
 
@@ -709,7 +723,7 @@ impl RawJsonb<'_> {
                     for (i, item_result) in &mut array_iter.enumerate() {
                         let item = item_result?;
                         if i != del_index {
-                            builder.push_raw_jsonb_item(item);
+                            builder.push_jsonb_item(item);
                         } else if let Some(ref child_jsonb) = child_jsonb {
                             builder.push_owned_jsonb(child_jsonb.clone());
                         }
@@ -722,7 +736,7 @@ impl RawJsonb<'_> {
                     for (i, result) in &mut object_iter.enumerate() {
                         let (key, val_item) = result?;
                         if i != del_index {
-                            let _ = builder.push_raw_jsonb_item(key, val_item);
+                            let _ = builder.push_jsonb_item(key, val_item);
                         } else if let Some(ref child_jsonb) = child_jsonb {
                             let _ = builder.push_owned_jsonb(key, child_jsonb.clone());
                         }
@@ -735,5 +749,161 @@ impl RawJsonb<'_> {
             del_index = next_del_index;
         }
         Ok(child_jsonb.unwrap())
+    }
+
+    /// Checks if all specified keys exist in a JSONB.
+    ///
+    /// This function checks if a JSONB value contains *all* of the keys provided in the `keys` iterator.
+    /// If JSONB is an object, check the keys of the object, if it is an array, check the value of type string in the array,
+    /// and if it is a scalar, check the value of type string.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONB value.
+    /// * `keys` - An iterator of keys to check for.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - If all keys exist in the JSONB.
+    /// * `Ok(false)` - If any of the keys do not exist.
+    /// * `Err(Error)` - If the input JSONB data is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jsonb::OwnedJsonb;
+    ///
+    /// let obj_jsonb = r#"{"a": 1, "b": 2, "c": 3}"#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = obj_jsonb.as_raw();
+    ///
+    /// let keys = ["a", "b", "c"];
+    /// assert!(raw_jsonb.exists_all_keys(keys.into_iter()).unwrap());
+    ///
+    /// let keys = ["a", "b", "d"];
+    /// assert!(!raw_jsonb.exists_all_keys(keys.into_iter()).unwrap()); // "d" does not exist
+    ///
+    /// let arr_jsonb = r#"["a","b","c"]"#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = arr_jsonb.as_raw();
+    /// let keys = ["a", "b"];
+    /// assert!(raw_jsonb.exists_all_keys(keys.into_iter()).unwrap());
+    ///
+    /// let str_jsonb = r#""a""#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = str_jsonb.as_raw();
+    /// let keys = ["b"];
+    /// assert!(!raw_jsonb.exists_all_keys(keys.into_iter()).unwrap());
+    /// ```
+    pub fn exists_all_keys<'a, I: Iterator<Item = &'a str>>(&self, keys: I) -> Result<bool> {
+        let mut self_keys = BTreeSet::new();
+        let jsonb_type = self.jsonb_type()?;
+        match jsonb_type {
+            JsonbType::Object(_) => {
+                let mut object_key_iter = ObjectKeyIterator::new(*self)?.unwrap();
+                for result in &mut object_key_iter {
+                    let item = result?;
+                    if let Some(obj_key) = item.as_str() {
+                        self_keys.insert(obj_key);
+                    }
+                }
+            }
+            JsonbType::Array(_) => {
+                let mut array_iter = ArrayIterator::new(*self)?.unwrap();
+                for result in &mut array_iter {
+                    let item = result?;
+                    if let Some(arr_key) = item.as_str() {
+                        self_keys.insert(arr_key);
+                    }
+                }
+            }
+            JsonbType::String => {
+                if let Some(key) = self.as_str()? {
+                    self_keys.insert(key);
+                }
+            }
+            _ => {}
+        }
+        for key in keys {
+            if !self_keys.contains(key) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Checks if any of the specified keys exist in a JSONB.
+    ///
+    /// This function checks if a JSONB value contains *any* of the keys provided in the `keys` iterator.
+    /// If JSONB is an object, check the keys of the object, if it is an array, check the value of type string in the array,
+    /// and if it is a scalar, check the value of type string.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONB value.
+    /// * `keys` - An iterator of keys to check for.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - If any of the keys exist in the JSONB.
+    /// * `Ok(false)` - If none of the keys exist.
+    /// * `Err(Error)` - If the input JSONB data is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jsonb::OwnedJsonb;
+    ///
+    /// let obj_jsonb = r#"{"a": 1, "b": 2, "c": 3}"#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = obj_jsonb.as_raw();
+    ///
+    /// let keys = ["a", "d", "e"];
+    /// assert!(raw_jsonb.exists_any_keys(keys.into_iter()).unwrap()); // "a" exists
+    ///
+    /// let keys = ["d", "e", "f"];
+    /// assert!(!raw_jsonb.exists_any_keys(keys.into_iter()).unwrap()); // None of the keys exist
+    ///
+    /// let arr_jsonb = r#"["a","b","c"]"#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = arr_jsonb.as_raw();
+    /// let keys = ["a", "b"];
+    /// assert!(raw_jsonb.exists_any_keys(keys.into_iter()).unwrap());
+    ///
+    /// let str_jsonb = r#""a""#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = str_jsonb.as_raw();
+    /// let keys = ["b"];
+    /// assert!(!raw_jsonb.exists_any_keys(keys.into_iter()).unwrap());
+    /// ```
+    pub fn exists_any_keys<'a, I: Iterator<Item = &'a str>>(&self, keys: I) -> Result<bool> {
+        let mut self_keys = BTreeSet::new();
+        let jsonb_type = self.jsonb_type()?;
+        match jsonb_type {
+            JsonbType::Object(_) => {
+                let mut object_key_iter = ObjectKeyIterator::new(*self)?.unwrap();
+                for result in &mut object_key_iter {
+                    let item = result?;
+                    if let Some(obj_key) = item.as_str() {
+                        self_keys.insert(obj_key);
+                    }
+                }
+            }
+            JsonbType::Array(_) => {
+                let mut array_iter = ArrayIterator::new(*self)?.unwrap();
+                for result in &mut array_iter {
+                    let item = result?;
+                    if let Some(arr_key) = item.as_str() {
+                        self_keys.insert(arr_key);
+                    }
+                }
+            }
+            JsonbType::String => {
+                if let Some(key) = self.as_str()? {
+                    self_keys.insert(key);
+                }
+            }
+            _ => {}
+        }
+        for key in keys {
+            if self_keys.contains(key) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }

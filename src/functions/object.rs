@@ -33,13 +33,17 @@ impl RawJsonb<'_> {
     ///
     /// If the JSONB value is an object, this function returns a new `OwnedJsonb` array containing the keys of the object as string values.
     /// The order of the keys in the returned array is the same as their order in the original object.
-    /// If the JSONB value is not an object (e.g., it's an array or a scalar), this function returns `Ok(None)`.
+    /// If the JSONB value is not an object (e.g., it's an array or a scalar), this function returns `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONB value.
     ///
     /// # Returns
     ///
     /// * `Ok(Some(OwnedJsonb))` - An `OwnedJsonb` representing the array of keys if the input is an object.
     /// * `Ok(None)` - If the input is not an object.
-    /// * `Err(Error)` - If an error occurred during decoding (e.g., invalid JSONB data).
+    /// * `Err(Error)` - If the input JSONB data is invalid.
     ///
     /// # Examples
     ///
@@ -79,7 +83,7 @@ impl RawJsonb<'_> {
                 let mut builder = ArrayBuilder::with_capacity(object_key_iter.len());
                 for key_result in &mut object_key_iter {
                     let key_item = key_result?;
-                    builder.push_raw_jsonb_item(key_item);
+                    builder.push_jsonb_item(key_item);
                 }
                 Ok(Some(builder.build()?))
             }
@@ -92,13 +96,17 @@ impl RawJsonb<'_> {
     /// If the JSONB value is an object, this function returns a vector of tuples, where each tuple contains
     /// the key (as a `String`) and the value (as an `OwnedJsonb`) of a key-value pair.
     /// The order of the key-value pairs in the returned vector is the same as their order in the original object.
-    /// If the JSONB value is not an object (e.g., it's an array or a scalar), this function returns `Ok(None)`.
+    /// If the JSONB value is not an object (e.g., it's an array or a scalar), this function returns `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONB value.
     ///
     /// # Returns
     ///
     /// * `Ok(Some(Vec<(String, OwnedJsonb)>))` - A vector of tuples representing the key-value pairs if the input is an object.
     /// * `Ok(None)` - If the input is not an object.
-    /// * `Err(Error)` - If an error occurred during decoding (e.g., invalid JSONB data, invalid UTF-8 key).
+    /// * `Err(Error)` - If the input JSONB data is invalid.
     ///
     /// # Examples
     ///
@@ -153,18 +161,18 @@ impl RawJsonb<'_> {
 
     /// Inserts or updates a key-value pair in a JSONB object.
     ///
-    /// This function inserts a new key-value pair into a JSONB object or updates an existing key-value pair if the key already exists.  The behavior is controlled by the `update_flag`:
-    ///
+    /// This function inserts a new key-value pair into a JSONB object or updates an existing key-value pair if the key already exists.
+    /// The behavior is controlled by the `update_flag`:
     /// * `update_flag = true`:  If the key already exists, its value is updated with `new_val`. If the key does not exist, it is inserted.
     /// * `update_flag = false`: If the key already exists, an error (`Error::ObjectDuplicateKey`) is returned. If the key does not exist, it is inserted.
     ///
-    /// The input JSONB value must be an object; otherwise, an error (`Error::InvalidObject`) is returned.  Invalid JSONB data results in an `Error::InvalidJsonb`.
+    /// The input JSONB value must be an object; otherwise, an error (`Error::InvalidObject`) is returned.
     ///
     /// # Arguments
     ///
     /// * `self` - The JSONB object.
     /// * `new_key` - The key to insert or update.
-    /// * `new_val` - The new value.
+    /// * `new_val` - The new JSONB value.
     /// * `update_flag` - A boolean indicating whether to update an existing key (true) or fail if a duplicate key is found (false).
     ///
     /// # Returns
@@ -229,11 +237,11 @@ impl RawJsonb<'_> {
                             return Err(Error::ObjectDuplicateKey);
                         }
                     } else {
-                        builder.push_raw_jsonb_item(key, val_item)?;
+                        builder.push_jsonb_item(key, val_item)?;
                     }
                 }
                 let new_val_item = JsonbItem::from_raw_jsonb(*new_val)?;
-                builder.push_raw_jsonb_item(new_key, new_val_item)?;
+                builder.push_jsonb_item(new_key, new_val_item)?;
             }
             None => {
                 return Err(Error::InvalidObject);
@@ -246,7 +254,7 @@ impl RawJsonb<'_> {
     ///
     /// This function removes key-value pairs from a JSONB object where the keys are present in the provided `keys` set.  The key comparison is case-sensitive.
     ///
-    /// If the input JSONB value is not an object, an error (`Error::InvalidObject`) is returned.  Other invalid JSONB data results in an `Error::InvalidJsonb`.
+    /// If the input JSONB value is not an object, an error (`Error::InvalidObject`) is returned.
     ///
     /// # Arguments
     ///
@@ -255,7 +263,7 @@ impl RawJsonb<'_> {
     ///
     /// # Returns
     ///
-    /// * `Ok(OwnedJsonb)` - The modified JSONB object with the specified keys removed.
+    /// * `Ok(OwnedJsonb)` - A new JSONB object with the specified keys removed.
     /// * `Err(Error)` - If the input JSONB value is not an object, or if the JSONB data is invalid.
     ///
     /// # Examples
@@ -290,30 +298,31 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err()); // Returns an error
     /// ```
     pub fn object_delete(&self, keys: &BTreeSet<&str>) -> Result<OwnedJsonb> {
-        let mut builder = ObjectBuilder::new();
         let object_iter_opt = ObjectIterator::new(*self)?;
         match object_iter_opt {
             Some(mut object_iter) => {
+                let mut builder = ObjectBuilder::new();
                 for result in &mut object_iter {
                     let (key, val_item) = result?;
                     if keys.contains(key) {
                         continue;
                     }
-                    builder.push_raw_jsonb_item(key, val_item)?;
+                    builder.push_jsonb_item(key, val_item)?;
                 }
+                builder.build()
             }
             None => {
-                return Err(Error::InvalidObject);
+                Err(Error::InvalidObject)
             }
         }
-        builder.build()
     }
 
     /// Creates a new JSONB object containing only the specified keys from the original object.
     ///
-    /// This function selects a subset of key-value pairs from a JSONB object based on the provided `keys` set.  Only key-value pairs where the key is present in the `keys` set are included in the resulting object. The key comparison is case-sensitive.
+    /// This function selects a subset of key-value pairs from a JSONB object based on the provided `keys` set.
+    /// Only key-value pairs where the key is present in the `keys` set are included in the resulting object. The key comparison is case-sensitive.
     ///
-    /// If the input JSONB value is not an object, an error (`Error::InvalidObject`) is returned. Invalid JSONB data results in an `Error::InvalidJsonb`.
+    /// If the input JSONB value is not an object, an error (`Error::InvalidObject`) is returned.
     ///
     /// # Arguments
     ///
@@ -322,7 +331,7 @@ impl RawJsonb<'_> {
     ///
     /// # Returns
     ///
-    /// * `Ok(OwnedJsonb)` - A new JSONB object containing only the key-value pairs specified by the `keys` set.  Returns an empty object `{}` if none of the keys are found in the input.
+    /// * `Ok(OwnedJsonb)` - A new JSONB object containing only the key-value pairs specified by the `keys` set.
     /// * `Err(Error)` - If the input JSONB value is not an object, or if the JSONB data is invalid.
     ///
     /// # Examples
@@ -357,180 +366,22 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err()); // Returns an error
     /// ```
     pub fn object_pick(&self, keys: &BTreeSet<&str>) -> Result<OwnedJsonb> {
-        let mut builder = ObjectBuilder::new();
         let object_iter_opt = ObjectIterator::new(*self)?;
         match object_iter_opt {
             Some(mut object_iter) => {
+                let mut builder = ObjectBuilder::new();
                 for result in &mut object_iter {
                     let (key, val_item) = result?;
                     if !keys.contains(key) {
                         continue;
                     }
-                    builder.push_raw_jsonb_item(key, val_item)?;
+                    builder.push_jsonb_item(key, val_item)?;
                 }
+                builder.build()
             }
             None => {
-                return Err(Error::InvalidObject);
+                Err(Error::InvalidObject)
             }
         }
-        builder.build()
-    }
-
-    /// Checks if all specified keys exist in a JSONB object.
-    ///
-    /// This function checks if a JSONB object contains *all* of the keys provided in the `keys` iterator.
-    /// The keys are expected to be UTF-8 encoded byte slices. If the JSONB value is not an object,
-    /// the function will return `Ok(false)`.
-    ///
-    /// # Arguments
-    ///
-    /// * `keys` - An iterator of byte slices representing the keys to check for.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If all keys exist in the JSONB object.
-    /// * `Ok(false)` - If any of the keys do not exist in the object, if any key is not valid UTF-8, or if the JSONB value is not an object.
-    /// * `Err(Error)` - If an error occurred during decoding (e.g., invalid JSONB data other than the value not being an object).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use jsonb::OwnedJsonb;
-    ///
-    /// let obj_jsonb = r#"{"a": 1, "b": 2, "c": 3}"#.parse::<OwnedJsonb>().unwrap();
-    /// let raw_jsonb = obj_jsonb.as_raw();
-    ///
-    /// let keys = ["a".as_bytes(), "b".as_bytes(), "c".as_bytes()];
-    /// assert!(raw_jsonb.exists_all_keys(keys.into_iter()).unwrap());
-    ///
-    /// let keys = ["b".as_bytes(), "b".as_bytes(), "d".as_bytes()];
-    /// assert!(!raw_jsonb.exists_all_keys(keys.into_iter()).unwrap()); // "d" does not exist
-    ///
-    /// let keys = ["a".as_bytes(), "b".as_bytes(), &[0xff_u8]]; // Invalid UTF-8
-    /// assert!(!raw_jsonb.exists_all_keys(keys.into_iter()).unwrap());
-    ///
-    /// let arr_jsonb = "[1, 2, 3]".parse::<OwnedJsonb>().unwrap();
-    /// let raw_jsonb = arr_jsonb.as_raw();
-    /// let keys = ["a".as_bytes()];
-    /// assert!(!raw_jsonb.exists_all_keys(keys.into_iter()).unwrap()); // Not an object
-    ///
-    /// let obj_jsonb = r#"{"a b": 1, "c": 2}"#.parse::<OwnedJsonb>().unwrap();
-    /// let raw_jsonb = obj_jsonb.as_raw();
-    /// let keys = ["a b".as_bytes(), "c".as_bytes()];
-    /// assert!(raw_jsonb.exists_all_keys(keys.into_iter()).unwrap());
-    /// ```
-    pub fn exists_all_keys<'a, I: Iterator<Item = &'a [u8]>>(&self, keys: I) -> Result<bool> {
-        let mut self_keys = BTreeSet::new();
-        let jsonb_type = self.jsonb_type()?;
-        match jsonb_type {
-            JsonbType::Object(_) => {
-                let mut object_key_iter = ObjectKeyIterator::new(*self)?.unwrap();
-                for result in &mut object_key_iter {
-                    let item = result?;
-                    if let Some(obj_key) = item.as_str() {
-                        self_keys.insert(obj_key);
-                    }
-                }
-            }
-            JsonbType::Array(_) => {
-                let mut array_iter = ArrayIterator::new(*self)?.unwrap();
-                for result in &mut array_iter {
-                    let item = result?;
-                    if let Some(arr_key) = item.as_str() {
-                        self_keys.insert(arr_key);
-                    }
-                }
-            }
-            _ => {}
-        }
-        for key in keys {
-            if let Ok(key) = from_utf8(key) {
-                if !self_keys.contains(key) {
-                    return Ok(false);
-                }
-            } else {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-
-    /// Checks if any of the specified keys exist in a JSONB object.
-    ///
-    /// This function checks if a JSONB object contains *any* of the keys provided in the `keys` iterator.
-    /// The keys are expected to be UTF-8 encoded byte slices.
-    /// If the JSONB value is not an object, the function will return `Ok(false)`.
-    ///
-    /// # Arguments
-    ///
-    /// * `keys` - An iterator of byte slices representing the keys to check for.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(true)` - If any of the keys exist in the JSONB object.
-    /// * `Ok(false)` - If none of the keys exist in the object, if any key is not valid UTF-8, or if the JSONB value is not an object.
-    /// * `Err(Error)` - If an error occurred during decoding (e.g., invalid JSONB data other than the value not being an object).
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use jsonb::OwnedJsonb;
-    ///
-    /// let obj_jsonb = r#"{"a": 1, "b": 2, "c": 3}"#.parse::<OwnedJsonb>().unwrap();
-    /// let raw_jsonb = obj_jsonb.as_raw();
-    ///
-    /// let keys = ["a".as_bytes(), "d".as_bytes(), "e".as_bytes()];
-    /// assert!(raw_jsonb.exists_any_keys(keys.into_iter()).unwrap()); // "a" exists
-    ///
-    /// let keys = ["d".as_bytes(), "e".as_bytes(), "f".as_bytes()];
-    /// assert!(!raw_jsonb.exists_any_keys(keys.into_iter()).unwrap()); // None of the keys exist
-    ///
-    /// let keys = ["d".as_bytes(), &[0xff_u8], "f".as_bytes()]; // Invalid UTF-8 for the second key
-    /// assert!(!raw_jsonb.exists_any_keys(keys.into_iter()).unwrap()); // Stops at invalid UTF-8 and returns false
-    ///
-    /// let arr_jsonb = "[1, 2, 3]".parse::<OwnedJsonb>().unwrap();
-    /// let raw_jsonb = arr_jsonb.as_raw();
-    /// let keys = ["a".as_bytes()];
-    /// assert!(!raw_jsonb.exists_any_keys(keys.into_iter()).unwrap()); // Not an object
-    ///
-    /// let obj_jsonb = r#"{"a b": 1, "c": 2}"#.parse::<OwnedJsonb>().unwrap();
-    /// let raw_jsonb = obj_jsonb.as_raw();
-    /// let keys = ["a b".as_bytes()];
-    /// assert!(raw_jsonb.exists_any_keys(keys.into_iter()).unwrap());
-    /// ```
-    pub fn exists_any_keys<'a, I: Iterator<Item = &'a [u8]>>(&self, keys: I) -> Result<bool> {
-        let mut self_keys = BTreeSet::new();
-        let jsonb_type = self.jsonb_type()?;
-        match jsonb_type {
-            JsonbType::Object(_) => {
-                let mut object_key_iter = ObjectKeyIterator::new(*self)?.unwrap();
-                for result in &mut object_key_iter {
-                    let item = result?;
-                    if let Some(obj_key) = item.as_str() {
-                        self_keys.insert(obj_key);
-                    }
-                }
-            }
-            JsonbType::Array(_) => {
-                let mut array_iter = ArrayIterator::new(*self)?.unwrap();
-                for result in &mut array_iter {
-                    let item = result?;
-                    if let Some(arr_key) = item.as_str() {
-                        self_keys.insert(arr_key);
-                    }
-                }
-            }
-            _ => {}
-        }
-        if !self_keys.is_empty() {
-            for key in keys {
-                if let Ok(key) = from_utf8(key) {
-                    if self_keys.contains(key) {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
-        Ok(false)
     }
 }
