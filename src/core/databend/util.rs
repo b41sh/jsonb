@@ -80,7 +80,7 @@ impl<'a> RawJsonb<'a> {
         }
     }
 
-    pub(crate) fn read_header(&self, index: usize) -> Result<(u32, u32)> {
+    pub(super) fn read_header(&self, index: usize) -> Result<(u32, u32)> {
         let header = self.read_u32(index)?;
         let header_type = header & CONTAINER_HEADER_TYPE_MASK;
         match header_type {
@@ -99,7 +99,7 @@ impl<'a> RawJsonb<'a> {
         Ok(jentry)
     }
 
-    pub(crate) fn read_u32(&self, idx: usize) -> Result<u32> {
+    pub(super) fn read_u32(&self, idx: usize) -> Result<u32> {
         let bytes: [u8; 4] = self
             .data
             .get(idx..idx + 4)
@@ -109,7 +109,7 @@ impl<'a> RawJsonb<'a> {
         Ok(u32::from_be_bytes(bytes))
     }
 
-    pub(crate) fn slice(&self, range: Range<usize>) -> Result<&'a [u8]> {
+    pub(super) fn slice(&self, range: Range<usize>) -> Result<&'a [u8]> {
         // Check for potential out-of-bounds access before creating item
         if range.end > self.len() {
             return Err(Error::InvalidJsonb);

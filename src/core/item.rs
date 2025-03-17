@@ -74,14 +74,88 @@ impl PartialOrd for JsonbType {
     }
 }
 
+/// `JsonbItem` is an internal enum used primarily within `ArrayIterator` and
+/// `ObjectIterator` to represent temporary values during iteration. It is also
+/// utilized by `ArrayBuilder` and `ObjectBuilder` to store intermediate variables
+/// during the construction of JSONB objects and arrays.
+///
+/// This enum encapsulates different types of JSONB values, allowing iterators and
+/// builders to handle various data types uniformly. It supports null values,
+/// booleans, numbers (represented as byte slices), strings (represented as byte slices),
+/// raw JSONB data (`RawJsonb`), and owned JSONB data (`OwnedJsonb`).
 #[derive(Debug, Clone)]
 pub(crate) enum JsonbItem<'a> {
+    /// Represents a JSONB null value.
     Null,
+    /// Represents a JSONB boolean value.
     Boolean(bool),
+    /// Represents a JSONB number, stored as a byte slice.
     Number(&'a [u8]),
+    /// Represents a JSONB string, stored as a byte slice.
     String(&'a [u8]),
+    /// Represents raw JSONB data, using a borrowed slice.
     Raw(RawJsonb<'a>),
+    /// Represents owned JSONB data.
     Owned(OwnedJsonb),
+}
+
+impl<'a> JsonbItem<'a> {
+    pub(crate) fn jsonb_type(&self) -> Result<JsonbType> {
+        match self {
+            JsonbItem::Null => Ok(JsonbType::Null),
+            JsonbItem::Boolean(_) => Ok(JsonbType::Boolean),
+            JsonbItem::Number(_) => Ok(JsonbType::Number),
+            JsonbItem::String(_) => Ok(JsonbType::String),
+            JsonbItem::Raw(raw) => raw.jsonb_type(),
+            JsonbItem::Owned(owned) => owned.as_raw().jsonb_type(),
+        }
+    }
+
+    pub(crate) fn to_owned_jsonb(&self) -> Result<OwnedJsonb> {
+        let owned = match self {
+            JsonbItem::Null => to_owned_jsonb(&())?,
+            JsonbItem::Boolean(v) => to_owned_jsonb(&v)?,
+            JsonbItem::Number(data) => {
+                let n = Number::decode(data)?;
+                match n {
+                    Number::UInt64(v) => to_owned_jsonb(&v)?,
+                    Number::Int64(v) => to_owned_jsonb(&v)?,
+                    Number::Float64(v) => to_owned_jsonb(&v)?,
+                }
+            }
+            JsonbItem::String(data) => {
+                let s = unsafe { std::str::from_utf8_unchecked(data) };
+                to_owned_jsonb(&s)?
+            }
+            JsonbItem::Raw(raw) => raw.to_owned(),
+            JsonbItem::Owned(owned) => owned.clone(),
+        };
+        Ok(owned)
+    }
+
+    pub(crate) fn as_raw_jsonb(&self) -> Option<RawJsonb<'a>> {
+        match self {
+            JsonbItem::Raw(raw_jsonb) => Some(*raw_jsonb),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_null(&self) -> Option<()> {
+        match self {
+            JsonbItem::Null => Some(()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_str(&self) -> Option<&'a str> {
+        match self {
+            JsonbItem::String(data) => {
+                let s = unsafe { std::str::from_utf8_unchecked(data) };
+                Some(s)
+            }
+            _ => None,
+        }
+    }
 }
 
 impl Eq for JsonbItem<'_> {}
@@ -199,65 +273,6 @@ impl Ord for JsonbItem<'_> {
         match self.partial_cmp(other) {
             Some(ordering) => ordering,
             None => Ordering::Equal,
-        }
-    }
-}
-
-impl<'a> JsonbItem<'a> {
-    pub(crate) fn jsonb_type(&self) -> Result<JsonbType> {
-        match self {
-            JsonbItem::Null => Ok(JsonbType::Null),
-            JsonbItem::Boolean(_) => Ok(JsonbType::Boolean),
-            JsonbItem::Number(_) => Ok(JsonbType::Number),
-            JsonbItem::String(_) => Ok(JsonbType::String),
-            JsonbItem::Raw(raw) => raw.jsonb_type(),
-            JsonbItem::Owned(owned) => owned.as_raw().jsonb_type(),
-        }
-    }
-
-    pub(crate) fn to_owned_jsonb(&self) -> Result<OwnedJsonb> {
-        let owned = match self {
-            JsonbItem::Null => to_owned_jsonb(&())?,
-            JsonbItem::Boolean(v) => to_owned_jsonb(&v)?,
-            JsonbItem::Number(data) => {
-                let n = Number::decode(data)?;
-                match n {
-                    Number::UInt64(v) => to_owned_jsonb(&v)?,
-                    Number::Int64(v) => to_owned_jsonb(&v)?,
-                    Number::Float64(v) => to_owned_jsonb(&v)?,
-                }
-            }
-            JsonbItem::String(data) => {
-                let s = unsafe { std::str::from_utf8_unchecked(data) };
-                to_owned_jsonb(&s)?
-            }
-            JsonbItem::Raw(raw) => raw.to_owned(),
-            JsonbItem::Owned(owned) => owned.clone(),
-        };
-        Ok(owned)
-    }
-
-    pub(crate) fn as_raw_jsonb(&self) -> Option<RawJsonb<'a>> {
-        match self {
-            JsonbItem::Raw(raw_jsonb) => Some(*raw_jsonb),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn as_null(&self) -> Option<()> {
-        match self {
-            JsonbItem::Null => Some(()),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn as_str(&self) -> Option<&'a str> {
-        match self {
-            JsonbItem::String(data) => {
-                let s = unsafe { std::str::from_utf8_unchecked(data) };
-                Some(s)
-            }
-            _ => None,
         }
     }
 }
