@@ -34,13 +34,17 @@ use crate::Error;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 
+/// `Serializer` is a custom serializer for JSONB data, implementing the
+/// `serde::ser::Serializer` trait. It allows serializing Rust data structures
+/// into a `Vec<u8>` representing the JSONB data.
 #[derive(Debug, Default)]
 pub struct Serializer {
     buffer: Vec<u8>,
 }
 
 impl Serializer {
-    fn new() -> Serializer {
+    /// Creates a new `Serializer` with an empty buffer.
+    pub fn new() -> Serializer {
         Serializer { buffer: Vec::new() }
     }
 
@@ -89,7 +93,7 @@ impl Serializer {
         Ok(())
     }
 
-    pub fn to_vec(self) -> Vec<u8> {
+    fn to_vec(self) -> Vec<u8> {
         self.buffer
     }
 }
@@ -623,17 +627,17 @@ impl Serialize for RawJsonb<'_> {
     }
 }
 
-pub struct Encoder<'a> {
+pub(crate) struct Encoder<'a> {
     pub buf: &'a mut Vec<u8>,
 }
 
 impl<'a> Encoder<'a> {
-    pub fn new(buf: &'a mut Vec<u8>) -> Encoder<'a> {
+    pub(crate) fn new(buf: &'a mut Vec<u8>) -> Encoder<'a> {
         Self { buf }
     }
 
     // Encode `JSONB` Value to a sequence of bytes
-    pub fn encode(&mut self, value: &Value<'a>) {
+    pub(crate) fn encode(&mut self, value: &Value<'a>) {
         match value {
             Value::Array(array) => self.encode_array(array),
             Value::Object(obj) => self.encode_object(obj),

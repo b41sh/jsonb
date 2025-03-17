@@ -33,7 +33,9 @@ use crate::value::Object;
 use crate::value::Value;
 use crate::RawJsonb;
 
-/// A structure that deserializes JSONB data into Rust values.
+/// `Deserializer` is a custom deserializer for JSONB data, implementing the
+/// `serde::de::Deserializer` trait. It allows deserializing a `RawJsonb` into
+/// Rust data structures using Serde.
 pub struct Deserializer<'de> {
     index: usize,
     current_jentry: Option<JEntry>,
@@ -41,6 +43,13 @@ pub struct Deserializer<'de> {
 }
 
 impl<'de> Deserializer<'de> {
+    /// Creates a new `Deserializer` from a `RawJsonb`.
+    ///
+    /// This function initializes the deserializer with the provided `RawJsonb` data.
+    ///
+    /// # Arguments
+    ///
+    /// * `raw_jsonb`: A reference to the `RawJsonb` containing the JSONB data to deserialize.
     pub fn new(raw_jsonb: &'de RawJsonb) -> Self {
         Self {
             index: 0,
@@ -49,6 +58,10 @@ impl<'de> Deserializer<'de> {
         }
     }
 
+    /// Checks if the deserializer has reached the end of the `RawJsonb` data.
+    ///
+    /// This function returns `true` if the current index is equal to the length of
+    /// the `RawJsonb` data, indicating that all data has been processed.
     pub fn end(&self) -> bool {
         self.index == self.raw.len()
     }
@@ -133,7 +146,7 @@ impl<'de> Deserializer<'de> {
         Ok(Cow::Borrowed(s))
     }
 
-    pub fn read_null(&mut self) -> Result<()> {
+    fn read_null(&mut self) -> Result<()> {
         let jentry_res = self.read_scalar_jentry();
         if jentry_res == Err(Error::UnexpectedType) {
             return Err(Error::UnexpectedType);
@@ -148,7 +161,7 @@ impl<'de> Deserializer<'de> {
         }
     }
 
-    pub fn read_bool(&mut self) -> Result<bool> {
+    fn read_bool(&mut self) -> Result<bool> {
         let jentry_res = self.read_scalar_jentry();
         if jentry_res == Err(Error::UnexpectedType) {
             return Err(Error::UnexpectedType);
@@ -162,7 +175,7 @@ impl<'de> Deserializer<'de> {
         }
     }
 
-    pub fn read_number(&mut self) -> Result<Number> {
+    fn read_number(&mut self) -> Result<Number> {
         let jentry_res = self.read_scalar_jentry();
         if jentry_res == Err(Error::UnexpectedType) {
             return Err(Error::UnexpectedType);
@@ -201,7 +214,7 @@ impl<'de> Deserializer<'de> {
         }
     }
 
-    pub fn read_str(&mut self) -> Result<Cow<'_, str>> {
+    fn read_str(&mut self) -> Result<Cow<'_, str>> {
         let jentry_res = self.read_scalar_jentry();
         if jentry_res == Err(Error::UnexpectedType) {
             return Err(Error::UnexpectedType);
@@ -777,16 +790,16 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'_, 'de> {
 }
 
 #[repr(transparent)]
-pub struct Decoder<'a> {
+pub(crate) struct Decoder<'a> {
     buf: &'a [u8],
 }
 
 impl<'a> Decoder<'a> {
-    pub fn new(buf: &'a [u8]) -> Decoder<'a> {
+    pub(crate) fn new(buf: &'a [u8]) -> Decoder<'a> {
         Self { buf }
     }
 
-    pub fn decode(&mut self) -> Result<Value<'a>> {
+    pub(crate) fn decode(&mut self) -> Result<Value<'a>> {
         // Valid `JSONB` Value has at least one `Header`
         if self.buf.len() < 4 {
             return Err(Error::InvalidJsonb);
