@@ -15,6 +15,7 @@
 // This file contains functions that dealing with path-based access to JSONB data.
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
 use crate::core::ArrayBuilder;
@@ -23,7 +24,9 @@ use crate::core::JsonbItem;
 use crate::core::JsonbType;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
+use crate::core::ObjectKeyIterator;
 use crate::error::*;
+use crate::from_raw_jsonb;
 use crate::jsonpath::JsonPath;
 use crate::jsonpath::Selector;
 use crate::keypath::KeyPath;
@@ -815,9 +818,15 @@ impl RawJsonb<'_> {
                 }
             }
             JsonbType::String => {
-                if let Some(key) = self.as_str()? {
-                    self_keys.insert(key);
+                let res: Result<String> = from_raw_jsonb(self);
+                if let Ok(self_key) = res {
+                    for key in keys {
+                        if self_key != key {
+                            return Ok(false);
+                        }
+                    }
                 }
+                return Ok(true);
             }
             _ => {}
         }
@@ -893,9 +902,15 @@ impl RawJsonb<'_> {
                 }
             }
             JsonbType::String => {
-                if let Some(key) = self.as_str()? {
-                    self_keys.insert(key);
+                let res: Result<String> = from_raw_jsonb(self);
+                if let Ok(self_key) = res {
+                    for key in keys {
+                        if self_key == key {
+                            return Ok(true);
+                        }
+                    }
                 }
+                return Ok(false);
             }
             _ => {}
         }

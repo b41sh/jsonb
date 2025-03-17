@@ -134,11 +134,7 @@ impl<'a> ObjectBuilder<'a> {
         }
     }
 
-    pub(crate) fn push_jsonb_item(
-        &mut self,
-        key: &'a str,
-        val_item: JsonbItem<'a>,
-    ) -> Result<()> {
+    pub(crate) fn push_jsonb_item(&mut self, key: &'a str, val_item: JsonbItem<'a>) -> Result<()> {
         if self.entries.contains_key(key) {
             return Err(Error::ObjectDuplicateKey);
         }

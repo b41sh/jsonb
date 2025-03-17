@@ -1035,8 +1035,7 @@ fn test_exists_all_keys() {
         let owned_jsonb = json.parse::<OwnedJsonb>().unwrap();
         let raw_jsonb = owned_jsonb.as_raw();
 
-        let keys = keys.iter().map(|k| k.as_bytes());
-        let res = raw_jsonb.exists_all_keys(keys);
+        let res = raw_jsonb.exists_all_keys(keys.into_iter());
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), expected);
     }
@@ -1060,8 +1059,7 @@ fn test_exists_any_keys() {
         let owned_jsonb = json.parse::<OwnedJsonb>().unwrap();
         let raw_jsonb = owned_jsonb.as_raw();
 
-        let keys = keys.iter().map(|k| k.as_bytes());
-        let res = raw_jsonb.exists_any_keys(keys);
+        let res = raw_jsonb.exists_any_keys(keys.into_iter());
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), expected);
     }
