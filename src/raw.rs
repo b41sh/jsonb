@@ -171,24 +171,6 @@ impl<'a> RawJsonb<'a> {
             Err(_) => "null".to_string(),
         }
     }
-
-    pub(crate) fn read_u32(&self, idx: usize) -> Result<u32> {
-        let bytes: [u8; 4] = self
-            .data
-            .get(idx..idx + 4)
-            .ok_or(Error::InvalidEOF)?
-            .try_into()
-            .unwrap();
-        Ok(u32::from_be_bytes(bytes))
-    }
-
-    pub(crate) fn slice(&self, range: Range<usize>) -> Result<&'a [u8]> {
-        // Check for potential out-of-bounds access before creating item
-        if range.end > self.len() {
-            return Err(Error::InvalidJsonb);
-        }
-        Ok(&self.data[range])
-    }
 }
 
 /// Converts a borrowed byte slice into a RawJsonb.

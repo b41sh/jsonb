@@ -18,7 +18,7 @@ mod de;
 mod iterator;
 pub(super) mod jentry;
 mod ser;
-mod item;
+mod util;
 
 pub(crate) use item::*;
 pub(crate) use builder::*;
