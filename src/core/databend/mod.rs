@@ -13,15 +13,14 @@
 // limitations under the License.
 
 mod builder;
-pub(super) mod constants;
+mod constants;
 mod de;
 mod iterator;
-pub(super) mod jentry;
+mod jentry;
 mod ser;
 mod util;
 
 pub(crate) use builder::*;
 pub use de::*;
-// pub(crate) use util::*;
 pub(crate) use iterator::*;
 pub use ser::*;
