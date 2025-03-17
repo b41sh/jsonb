@@ -150,7 +150,7 @@ impl OwnedJsonb {
     /// # Arguments
     ///
     /// * `items` - An iterator of `(K, &'a RawJsonb<'a>)` tuples, where `K` is a type that can be converted into a string slice (`AsRef<str>`) representing the key,
-    /// and the second element is a `RawJsonb` representing the value.
+    ///   and the second element is a `RawJsonb` representing the value.
     ///
     /// # Returns
     ///

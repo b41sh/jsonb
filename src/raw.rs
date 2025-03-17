@@ -251,7 +251,7 @@ impl PartialOrd for RawJsonb<'_> {
                     let (self_key, self_val) = self_res.ok()?;
                     let (other_key, other_val) = other_res.ok()?;
 
-                    let key_ord = self_key.partial_cmp(&other_key)?;
+                    let key_ord = self_key.partial_cmp(other_key)?;
                     if key_ord != Ordering::Equal {
                         return Some(key_ord);
                     }

@@ -1013,7 +1013,7 @@ impl RawJsonb<'_> {
     ///
     /// * `Ok(f64)` - The `f64` representation of the JSONB value.
     /// * `Err(Error::InvalidCast)` - If the value cannot be converted to an `f64`
-    /// (e.g., it's an array, an object, a string that is not a valid number, or a null value).
+    ///   (e.g., it's an array, an object, a string that is not a valid number, or a null value).
     /// * `Err(Error)` - If the JSONB data is invalid.
     ///
     /// # Examples

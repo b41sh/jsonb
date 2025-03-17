@@ -37,7 +37,7 @@ impl<'de> Deserialize<'de> for Number {
     where D: Deserializer<'de> {
         struct NumberVisitor;
 
-        impl<'de> Visitor<'de> for NumberVisitor {
+        impl Visitor<'_> for NumberVisitor {
             type Value = Number;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

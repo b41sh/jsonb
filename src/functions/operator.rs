@@ -600,7 +600,7 @@ impl RawJsonb<'_> {
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 for result in &mut array_iter {
                     let item = result?;
-                    let _ = self.jsonb_item_to_comparable_impl(depth + 1, item, buf)?;
+                    self.jsonb_item_to_comparable_impl(depth + 1, item, buf)?;
                 }
             }
             JsonbType::Object(_) => {
@@ -610,17 +610,13 @@ impl RawJsonb<'_> {
                 for result in &mut object_iter {
                     let (key, val_item) = result?;
                     let key_item = JsonbItem::String(key.as_bytes());
-                    // buf.push(depth + 1);
-                    // buf.push(STRING_LEVEL);
-                    // buf.extend_from_slice(key.as_bytes());
-                    // buf.push(0);
-                    let _ = self.jsonb_item_to_comparable_impl(depth + 1, key_item, buf)?;
-                    let _ = self.jsonb_item_to_comparable_impl(depth + 1, val_item, buf)?;
+                    self.jsonb_item_to_comparable_impl(depth + 1, key_item, buf)?;
+                    self.jsonb_item_to_comparable_impl(depth + 1, val_item, buf)?;
                 }
             }
             _ => {
                 let item = JsonbItem::from_raw_jsonb(*self)?;
-                let _ = self.jsonb_item_to_comparable_impl(depth, item, buf)?;
+                self.jsonb_item_to_comparable_impl(depth, item, buf)?;
             }
         }
         Ok(())
@@ -648,7 +644,7 @@ impl RawJsonb<'_> {
             JsonbItem::Number(data) => {
                 buf.push(depth);
                 buf.push(NUMBER_LEVEL);
-                let num = Number::decode(&data)?;
+                let num = Number::decode(data)?;
                 let n = num.as_f64().unwrap();
                 // https://github.com/rust-lang/rust/blob/9c20b2a8cc7588decb6de25ac6a7912dcef24d65/library/core/src/num/f32.rs#L1176-L1260
                 let s = n.to_bits() as i64;
@@ -661,7 +657,7 @@ impl RawJsonb<'_> {
             JsonbItem::String(data) => {
                 buf.push(depth);
                 buf.push(STRING_LEVEL);
-                buf.extend_from_slice(&data);
+                buf.extend_from_slice(data);
                 buf.push(0);
             }
             JsonbItem::Raw(raw) => {

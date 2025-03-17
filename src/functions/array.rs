@@ -202,8 +202,8 @@ impl RawJsonb<'_> {
     /// The behavior depends on the input types:
     ///
     /// * **Array + Array:** Returns a new array containing only the elements that are present in *both* input arrays.
-    /// The order of elements is not guaranteed. Duplicate elements are handled correctly,
-    /// the multiplicity of elements in the intersection is the minimum of their multiplicities in the input arrays.
+    ///   The order of elements is not guaranteed. Duplicate elements are handled correctly,
+    ///   the multiplicity of elements in the intersection is the minimum of their multiplicities in the input arrays.
     /// * **Object/Scalar + Object/Scalar:** Returns a new array containing the `self` value only if it's present in the `other` value.
     /// * **Invalid input:** Returns an error if either input is not an array, object, or scalar.
     ///
@@ -307,8 +307,8 @@ impl RawJsonb<'_> {
     /// The behavior depends on the input types:
     ///
     /// * **Array + Array:** Returns a new array containing only the elements that are present in the `self` array but *not* in the `other` array.
-    /// The order of elements is not guaranteed. Duplicate elements are handled correctly, if an element appears multiple times in `self` but is present in `other`,
-    /// it will be removed from the result only up to the number of times it appears in `other`.
+    ///   The order of elements is not guaranteed. Duplicate elements are handled correctly, if an element appears multiple times in `self` but is present in `other`,
+    ///   it will be removed from the result only up to the number of times it appears in `other`.
     /// * **Object/Scalar + Object/Scalar:** Returns a new array containing the `self` value if it's *not* contained in the `other` value.
     /// * **Invalid input:** Returns an error if either input is not an array, object, or scalar.
     ///
@@ -402,7 +402,7 @@ impl RawJsonb<'_> {
     /// Checks if two JSONB arrays or a JSONB array and an object/scalar have any elements in common.
     ///
     /// This function determines whether two JSONB arrays, or a JSONB array and an object/scalar, share any common elements.
-
+    ///
     /// The behavior depends on the input types:
     ///
     /// * **Array + Array:** Returns `true` if the two arrays have at least one element in common; otherwise, returns `false`.

@@ -161,10 +161,7 @@ impl<'a> ObjectIterator<'a> {
             let mut jentry_offset = 4;
             let mut key_jentries = VecDeque::with_capacity(header_len as usize);
             for _ in 0..header_len {
-                let key_jentry = match raw_jsonb.read_jentry(jentry_offset) {
-                    Ok(jentry) => jentry,
-                    Err(err) => return Err(err),
-                };
+                let key_jentry = raw_jsonb.read_jentry(jentry_offset)?;
                 jentry_offset += 4;
                 key_jentries.push_back(key_jentry);
             }

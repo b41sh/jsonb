@@ -338,7 +338,7 @@ impl RawJsonb<'_> {
     /// * `Ok(true)` - If the JSON path exists.
     /// * `Ok(false)` - If the JSON path does not exist.
     /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation.
-    /// This could also indicate issues with the `json_path` itself.
+    ///   This could also indicate issues with the `json_path` itself.
     ///
     /// # Examples
     ///
@@ -375,15 +375,15 @@ impl RawJsonb<'_> {
     ///
     /// * `self` - The JSONB value.
     /// * `json_path` - The JSON path with a predicate (from the `jsonpath` crate).
-    /// The predicate is specified within the `json_path` using the standard JSONPath syntax.
-    /// For example, `$.store.book[?(@.price < 10)]` selects books with a price less than 10.
+    ///   The predicate is specified within the `json_path` using the standard JSONPath syntax.
+    ///   For example, `$.store.book[?(@.price < 10)]` selects books with a price less than 10.
     ///
     /// # Returns
     ///
     /// * `Ok(true)` - If the JSON path with its predicate matches at least one value in the JSONB data.
     /// * `Ok(false)` - If the JSON path with its predicate does not match any values.
     /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation or predicate checking.
-    /// This could also indicate issues with the `json_path` itself (invalid syntax, etc.).
+    ///   This could also indicate issues with the `json_path` itself (invalid syntax, etc.).
     ///
     /// # Examples
     ///
@@ -575,12 +575,12 @@ impl RawJsonb<'_> {
     /// The key path is an iterator of `KeyPath` elements specifying the path to the element to delete.
     ///
     /// * **Array:** If the JSONB value is an array, the key path must consist of array indices (`KeyPath::Index`).
-    /// A negative index counts from the end of the array (e.g., -1 is the last element).
-    /// If the index is out of bounds, the original JSONB value is returned unchanged.
+    ///   A negative index counts from the end of the array (e.g., -1 is the last element).
+    ///   If the index is out of bounds, the original JSONB value is returned unchanged.
     /// * **Object:** If the JSONB value is an object, the key path can be a mix of object keys (`KeyPath::Name` or `KeyPath::QuotedName`) and array indices.
-    /// If any part of the path is invalid (e.g., trying to access an index in a non-array or a key in a non-object), the original JSONB value is returned unchanged.
+    ///   If any part of the path is invalid (e.g., trying to access an index in a non-array or a key in a non-object), the original JSONB value is returned unchanged.
     /// * **Invalid input:** If the input is neither an array nor an object, or if the JSONB data is otherwise invalid,
-    /// an error (`Error::InvalidJsonType` or `Error::InvalidJsonb`) is returned.
+    ///   an error (`Error::InvalidJsonType` or `Error::InvalidJsonb`) is returned.
     ///
     /// # Arguments
     ///
