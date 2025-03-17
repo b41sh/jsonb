@@ -338,7 +338,9 @@ impl Ord for OwnedJsonb {
 /// println!("JSONB data: {}", owned_jsonb);
 /// ```
 pub fn to_owned_jsonb<T>(value: &T) -> Result<OwnedJsonb>
-where T: serde::ser::Serialize {
+where
+    T: serde::ser::Serialize,
+{
     let mut serializer = Serializer::default();
     value.serialize(&mut serializer)?;
     Ok(serializer.to_owned_jsonb())

@@ -195,7 +195,9 @@ impl<'de> Deserializer<'de> {
     }
 
     fn read_integer<T>(&mut self) -> Result<T>
-    where for<'a> T: Deserialize<'a> + FromPrimitive {
+    where
+        for<'a> T: Deserialize<'a> + FromPrimitive,
+    {
         let num = self.read_number()?;
         match num {
             Number::Int64(n) => T::from_i64(n).ok_or(Error::UnexpectedType),
@@ -205,7 +207,9 @@ impl<'de> Deserializer<'de> {
     }
 
     fn read_float<T>(&mut self) -> Result<T>
-    where for<'a> T: Deserialize<'a> + FromPrimitive {
+    where
+        for<'a> T: Deserialize<'a> + FromPrimitive,
+    {
         let num = self.read_number()?;
         match num {
             Number::Int64(n) => T::from_i64(n).ok_or(Error::UnexpectedType),
@@ -239,7 +243,9 @@ impl<'de> Deserializer<'de> {
     }
 
     fn read_with_jentry<V>(&mut self, jentry: JEntry, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         match jentry.type_code {
             NULL_TAG => visitor.visit_unit(),
             TRUE_TAG => visitor.visit_bool(true),
@@ -296,7 +302,9 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         if let Some(jentry) = &self.current_jentry {
             match jentry.type_code {
                 CONTAINER_TAG => {
@@ -349,62 +357,86 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_bool(self.read_bool()?)
     }
 
     fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_i8(self.read_integer()?)
     }
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_i16(self.read_integer()?)
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_i32(self.read_integer()?)
     }
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_i64(self.read_integer()?)
     }
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_u8(self.read_integer()?)
     }
 
     fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_u16(self.read_integer()?)
     }
 
     fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_u32(self.read_integer()?)
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_u64(self.read_integer()?)
     }
 
     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_f32(self.read_float()?)
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_f64(self.read_float()?)
     }
 
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         let s = self.read_string()?;
         if s.len() != 1 {
             return Err(Error::Message("invalid string length for char".into()));
@@ -413,27 +445,37 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_str(&self.read_str()?)
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_string(self.read_string()?)
     }
 
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         self.deserialize_seq(visitor)
     }
 
     fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         self.deserialize_seq(visitor)
     }
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         let origin_index = self.index;
         if self.read_null().is_ok() {
             visitor.visit_none()
@@ -444,23 +486,31 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         self.read_null()?;
         visitor.visit_unit()
     }
 
     fn deserialize_unit_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         self.deserialize_unit(visitor)
     }
 
     fn deserialize_newtype_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         visitor.visit_newtype_struct(self)
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         let (header_type, header_len) = self.read_header()?;
         match header_type {
             ARRAY_CONTAINER_TAG => {
@@ -473,7 +523,9 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         self.deserialize_seq(visitor)
     }
 
@@ -490,7 +542,9 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         let (header_type, header_len) = self.read_header()?;
         match header_type {
             OBJECT_CONTAINER_TAG => {
@@ -571,12 +625,16 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         self.deserialize_str(visitor)
     }
 
     fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         todo!()
     }
 
@@ -603,7 +661,9 @@ impl<'de> de::SeqAccess<'de> for ArrayDeserializer<'_, 'de> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
-    where T: de::DeserializeSeed<'de> {
+    where
+        T: de::DeserializeSeed<'de>,
+    {
         if let Some(jentry) = self.jentries.pop_front() {
             self.de.set_jentry(jentry);
             // Deserialize an array element.
@@ -652,7 +712,9 @@ impl<'de> de::MapAccess<'de> for ObjectDeserializer<'_, 'de> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
-    where K: de::DeserializeSeed<'de> {
+    where
+        K: de::DeserializeSeed<'de>,
+    {
         if let Some(jentry) = self.key_jentries.pop_front() {
             let key_payload_offset = self.key_payload_offset;
             self.key_payload_offset += jentry.length as usize;
@@ -665,7 +727,9 @@ impl<'de> de::MapAccess<'de> for ObjectDeserializer<'_, 'de> {
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
-    where V: de::DeserializeSeed<'de> {
+    where
+        V: de::DeserializeSeed<'de>,
+    {
         if let Some(jentry) = self.value_jentries.pop_front() {
             let value_payload_offset = self.value_payload_offset;
             self.value_payload_offset += jentry.length as usize;
@@ -711,7 +775,9 @@ impl<'de> de::EnumAccess<'de> for EnumDeserializer<'_, 'de> {
     type Variant = Self;
 
     fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant)>
-    where V: de::DeserializeSeed<'de> {
+    where
+        V: de::DeserializeSeed<'de>,
+    {
         let key_variant = self.key.clone().into_deserializer();
         seed.deserialize(key_variant).map(|v| (v, self))
     }
@@ -729,14 +795,18 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'_, 'de> {
     }
 
     fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
-    where T: de::DeserializeSeed<'de> {
+    where
+        T: de::DeserializeSeed<'de>,
+    {
         self.de
             .set_jentry_with_index(self.jentry, self.payload_offset);
         seed.deserialize(&mut *self.de)
     }
 
     fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         if self.jentry.type_code == CONTAINER_TAG {
             let (header_type, header_len) = self.de.read_header()?;
             match header_type {
@@ -753,7 +823,9 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'_, 'de> {
     }
 
     fn struct_variant<V>(self, _fields: &'static [&'static str], visitor: V) -> Result<V::Value>
-    where V: Visitor<'de> {
+    where
+        V: Visitor<'de>,
+    {
         self.de
             .set_jentry_with_index(self.jentry.clone(), self.payload_offset);
         if self.jentry.type_code == CONTAINER_TAG {

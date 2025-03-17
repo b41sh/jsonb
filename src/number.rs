@@ -34,7 +34,9 @@ pub enum Number {
 
 impl<'de> Deserialize<'de> for Number {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where D: Deserializer<'de> {
+    where
+        D: Deserializer<'de>,
+    {
         struct NumberVisitor;
 
         impl Visitor<'_> for NumberVisitor {
@@ -45,17 +47,23 @@ impl<'de> Deserialize<'de> for Number {
             }
 
             fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where E: de::Error {
+            where
+                E: de::Error,
+            {
                 Ok(Number::Int64(v))
             }
 
             fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-            where E: de::Error {
+            where
+                E: de::Error,
+            {
                 Ok(Number::UInt64(v))
             }
 
             fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
-            where E: de::Error {
+            where
+                E: de::Error,
+            {
                 Ok(Number::Float64(v))
             }
         }
@@ -65,7 +73,9 @@ impl<'de> Deserialize<'de> for Number {
 
 impl Serialize for Number {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
+    where
+        S: Serializer,
+    {
         match self {
             Number::Int64(v) => serializer.serialize_i64(*v),
             Number::UInt64(v) => serializer.serialize_u64(*v),

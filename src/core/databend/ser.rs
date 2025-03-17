@@ -466,7 +466,9 @@ impl ser::SerializeStructVariant for ArraySerializer<'_> {
 impl Serialize for RawJsonb<'_> {
     #[inline]
     fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where S: serde::Serializer {
+    where
+        S: serde::Serializer,
+    {
         let mut index = 0;
         let (header_type, header_len) = self
             .read_header(index)

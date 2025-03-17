@@ -345,7 +345,9 @@ impl Ord for RawJsonb<'_> {
 /// println!("{:?}", person); // Output: Person { name: "Alice", age: 20 }
 /// ```
 pub fn from_raw_jsonb<'de, T>(raw_jsonb: &'de RawJsonb) -> Result<T>
-where T: serde::de::Deserialize<'de> {
+where
+    T: serde::de::Deserialize<'de>,
+{
     let mut deserializer = Deserializer::new(raw_jsonb);
     let t = T::deserialize(&mut deserializer)?;
     if deserializer.end() {
