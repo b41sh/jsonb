@@ -243,47 +243,54 @@ impl RawJsonb<'_> {
             let Some(current) = current_item.as_raw_jsonb() else {
                 return Ok(None);
             };
-            match path {
-                KeyPath::Index(index) => {
-                    let array_iter_opt = ArrayIterator::new(current)?;
-                    if let Some(mut array_iter) = array_iter_opt {
-                        let length = array_iter.len() as i32;
-                        if *index > length || length + *index < 0 {
-                            return Ok(None);
+            let jsonb_type = current.jsonb_type()?;
+            match jsonb_type {
+                JsonbType::Array(_) => {
+                    if let KeyPath::Index(index) = path {
+                        let array_iter_opt = ArrayIterator::new(current)?;
+                        if let Some(mut array_iter) = array_iter_opt {
+                            let length = array_iter.len() as i32;
+                            if *index > length || length + *index < 0 {
+                                return Ok(None);
+                            }
+                            let index = if *index >= 0 {
+                                *index as usize
+                            } else {
+                                (length + *index) as usize
+                            };
+                            if let Some(item_result) = array_iter.nth(index) {
+                                let item = item_result?;
+                                current_item = item;
+                                continue;
+                            }
                         }
-                        let index = if *index >= 0 {
-                            *index as usize
-                        } else {
-                            (length + *index) as usize
-                        };
-                        if let Some(item_result) = array_iter.nth(index) {
-                            let item = item_result?;
-                            current_item = item;
-                        } else {
-                            return Ok(None);
-                        }
-                    } else {
-                        return Ok(None);
                     }
+                    return Ok(None);
                 }
-                KeyPath::Name(name) | KeyPath::QuotedName(name) => {
+                JsonbType::Object(_) => {
+                    let name = match path {
+                        KeyPath::Index(index) => format!("{index}"),
+                        KeyPath::Name(name) | KeyPath::QuotedName(name) => format!("{name}"),
+                    };
                     let object_iter_opt = ObjectIterator::new(current)?;
                     if let Some(mut object_iter) = object_iter_opt {
                         let mut matched = false;
                         for result in &mut object_iter {
                             let (key, val_item) = result?;
-                            if key.eq(name) {
+                            if key.eq(&name) {
                                 matched = true;
                                 current_item = val_item;
                                 break;
                             }
                         }
-                        if !matched {
-                            return Ok(None);
+                        if matched {
+                            continue;
                         }
-                    } else {
-                        return Ok(None);
                     }
+                    return Ok(None);
+                }
+                _ => {
+                    return Ok(None);
                 }
             }
         }
@@ -658,52 +665,59 @@ impl RawJsonb<'_> {
                 items.clear();
                 break;
             };
-            match path {
-                KeyPath::Index(index) => {
-                    let array_iter_opt = ArrayIterator::new(current)?;
-                    if let Some(mut array_iter) = array_iter_opt {
-                        let length = array_iter.len() as i32;
-                        if *index > length || length + *index < 0 {
-                            items.clear();
-                            break;
+
+            let jsonb_type = current.jsonb_type()?;
+            match jsonb_type {
+                JsonbType::Array(_) => {
+                    if let KeyPath::Index(index) = path {
+                        let array_iter_opt = ArrayIterator::new(current)?;
+                        if let Some(mut array_iter) = array_iter_opt {
+                            let length = array_iter.len() as i32;
+                            if *index > length || length + *index < 0 {
+                                items.clear();
+                                break;
+                            }
+                            let index = if *index >= 0 {
+                                *index as usize
+                            } else {
+                                (length + *index) as usize
+                            };
+                            if let Some(item_result) = array_iter.nth(index) {
+                                let item = item_result?;
+                                items.push_back((item, index));
+                                continue;
+                            }
                         }
-                        let index = if *index >= 0 {
-                            *index as usize
-                        } else {
-                            (length + *index) as usize
-                        };
-                        if let Some(item_result) = array_iter.nth(index) {
-                            let item = item_result?;
-                            items.push_back((item, index));
-                        } else {
-                            items.clear();
-                            break;
-                        }
-                    } else {
-                        items.clear();
-                        break;
                     }
+                    items.clear();
+                    break;
                 }
-                KeyPath::Name(name) | KeyPath::QuotedName(name) => {
+                JsonbType::Object(_) => {
+                    let name = match path {
+                        KeyPath::Index(index) => format!("{index}"),
+                        KeyPath::Name(name) | KeyPath::QuotedName(name) => format!("{name}"),
+                    };
                     let object_iter_opt = ObjectIterator::new(current)?;
                     if let Some(object_iter) = object_iter_opt {
                         let mut matched = false;
                         for (index, result) in &mut object_iter.enumerate() {
                             let (key, val_item) = result?;
-                            if key.eq(name) {
+                            if key.eq(&name) {
                                 matched = true;
                                 items.push_back((val_item, index));
                                 break;
                             }
                         }
-                        if !matched {
-                            items.clear();
-                            break;
+                        if matched {
+                            continue;
                         }
-                    } else {
-                        items.clear();
-                        break;
                     }
+                    items.clear();
+                    break;
+                }
+                _ => {
+                    items.clear();
+                    break;
                 }
             }
         }
