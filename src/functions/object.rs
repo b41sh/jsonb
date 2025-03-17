@@ -24,66 +24,11 @@ use crate::core::ArrayIterator;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
 use crate::core::ObjectKeyIterator;
-use crate::core::OwnedObjectBuilder;
 
 use crate::error::*;
 
 use crate::OwnedJsonb;
 use crate::RawJsonb;
-
-impl OwnedJsonb {
-    /// Builds a JSONB object from a collection of key-value pairs.
-    ///
-    /// This function constructs a new JSONB object from an iterator of key-value pairs. The keys are strings, and the values are `RawJsonb` values. The resulting `OwnedJsonb` represents the binary encoding of the object. The input iterator must be an `ExactSizeIterator` to allow for efficient pre-allocation of the output buffer.
-    ///
-    /// # Arguments
-    ///
-    /// * `items` - An iterator of `(K, &'a RawJsonb<'a>)` tuples, where `K` is a type that can be converted into a string slice (`AsRef<str>`) representing the key, and the second element is a `RawJsonb` representing the value. Must be an `ExactSizeIterator`.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(OwnedJsonb)` - The newly created JSONB object.
-    /// * `Err(Error)` - If any of the input `RawJsonb` values are invalid, if any key is not valid UTF-8, or if an error occurs during object construction.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use jsonb::{OwnedJsonb, RawJsonb};
-    ///
-    /// // Create some RawJsonb values
-    /// let owned_num = "1".parse::<OwnedJsonb>().unwrap();
-    /// let owned_str = r#""hello""#.parse::<OwnedJsonb>().unwrap();
-    /// let owned_arr = "[1,2,3]".parse::<OwnedJsonb>().unwrap();
-    ///
-    /// // Build the object
-    /// let raw_jsonbs = vec![("a", owned_num.as_raw()), ("b", owned_str.as_raw()), ("c", owned_arr.as_raw())];
-    /// let object_result = OwnedJsonb::build_object(raw_jsonbs.into_iter());
-    /// assert!(object_result.is_ok());
-    /// let object = object_result.unwrap();
-    ///
-    /// // Convert to string for easy verification
-    /// assert_eq!(object.to_string(), r#"{"a":1,"b":"hello","c":[1,2,3]}"#);
-    ///
-    /// // Example with an empty iterator
-    /// let empty_object = OwnedJsonb::build_object(<[(&str, RawJsonb<'_>); 0] as IntoIterator>::into_iter([])).unwrap();
-    /// assert_eq!(empty_object.to_string(), "{}");
-    ///
-    /// // Example with invalid value
-    /// let invalid_data = OwnedJsonb::new(vec![1,2,3,4]);
-    /// let result = OwnedJsonb::build_object([("a", invalid_data.as_raw())].into_iter());
-    /// assert!(result.is_err());
-    /// ```
-    pub fn build_object<'a, K: AsRef<str>>(
-        items: impl IntoIterator<Item = (K, RawJsonb<'a>)>,
-    ) -> Result<OwnedJsonb> {
-        let mut builder = OwnedObjectBuilder::new();
-        for (key, val_jsonb) in items.into_iter() {
-            let key_str = key.as_ref().to_string();
-            builder.push_owned_jsonb(key_str, val_jsonb.to_owned())?;
-        }
-        builder.build()
-    }
-}
 
 impl RawJsonb<'_> {
     /// Returns an `OwnedJsonb` array containing the keys of the JSONB object.

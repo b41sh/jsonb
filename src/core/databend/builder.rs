@@ -100,13 +100,10 @@ impl<'a> ArrayDistinctBuilder<'a> {
         if let Some(cnt) = self.item_map.get_mut(&item) {
             if *cnt > 0 {
                 *cnt -= 1;
-                Some(())
-            } else {
-                None
+                return Some(());
             }
-        } else {
-            None
         }
+        None
     }
 
     pub(crate) fn pop_raw_jsonb(&mut self, raw_jsonb: RawJsonb<'a>) -> Option<()> {
@@ -150,6 +147,11 @@ impl<'a> ObjectBuilder<'a> {
         Ok(())
     }
 
+    pub(crate) fn push_raw_jsonb(&mut self, key: &'a str, raw_jsonb: RawJsonb<'a>) -> Result<()> {
+        let item = JsonbItem::Raw(raw_jsonb);
+        self.push_raw_jsonb_item(key, item)
+    }
+
     pub(crate) fn push_owned_jsonb(&mut self, key: &'a str, owned_jsonb: OwnedJsonb) -> Result<()> {
         let item = JsonbItem::Owned(owned_jsonb);
         self.push_raw_jsonb_item(key, item)
@@ -173,45 +175,6 @@ impl<'a> ObjectBuilder<'a> {
         }
         for (_, item) in self.entries.into_iter() {
             append_jsonb_item(&mut buf, &mut jentry_index, item)?;
-        }
-        Ok(OwnedJsonb::new(buf))
-    }
-}
-
-pub(crate) struct OwnedObjectBuilder {
-    entries: BTreeMap<String, OwnedJsonb>,
-}
-
-impl OwnedObjectBuilder {
-    pub(crate) fn new() -> Self {
-        Self {
-            entries: BTreeMap::new(),
-        }
-    }
-
-    pub(crate) fn push_owned_jsonb(&mut self, key: String, owned_jsonb: OwnedJsonb) -> Result<()> {
-        if self.entries.contains_key(&key) {
-            return Err(Error::ObjectDuplicateKey);
-        }
-        self.entries.insert(key, owned_jsonb);
-        Ok(())
-    }
-
-    pub(crate) fn build(self) -> Result<OwnedJsonb> {
-        let mut buf = Vec::new();
-        let header = OBJECT_CONTAINER_TAG | self.entries.len() as u32;
-        buf.write_u32::<BigEndian>(header)?;
-
-        let mut jentry_index = reserve_jentries(&mut buf, self.entries.len() * 8);
-        for (key, _) in self.entries.iter() {
-            let key_len = key.len();
-            buf.extend_from_slice(key.as_bytes());
-            let jentry = JEntry::make_string_jentry(key_len);
-            replace_jentry(&mut buf, jentry, &mut jentry_index)
-        }
-        for (_, item) in self.entries.into_iter() {
-            let raw_jsonb = item.as_raw();
-            append_raw_jsonb_data(&mut buf, &mut jentry_index, raw_jsonb)?;
         }
         Ok(OwnedJsonb::new(buf))
     }

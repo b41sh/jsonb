@@ -16,6 +16,9 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::parse_value;
 use crate::RawJsonb;
+use crate::core::ArrayBuilder;
+use crate::core::ObjectBuilder;
+use crate::core::OwnedObjectBuilder;
 use std::fmt::Display;
 use std::str::FromStr;
 
@@ -27,7 +30,7 @@ use crate::core::Serializer;
 /// `OwnedJsonb` is primarily used to create JSONB data from other data types (such as JSON String).
 /// However, for most operations, it's necessary to convert an `OwnedJsonb` to a `RawJsonb` using the `as_raw()` method
 /// to avoid unnecessary copying and to take advantage of the performance benefits of the read-only access of the `RawJsonb`.
-#[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct OwnedJsonb {
     /// The underlying `Vec<u8>` containing the binary JSONB data.
     pub(crate) data: Vec<u8>,
@@ -84,6 +87,115 @@ impl OwnedJsonb {
     pub fn len(&self) -> usize {
         self.data.len()
     }
+
+    /// Builds a JSONB array from a collection of RawJsonb values.
+    ///
+    /// This function constructs a new JSONB array from an iterator of `RawJsonb` values.
+    /// The resulting `OwnedJsonb` represents the binary encoding of the array.
+    ///
+    /// # Arguments
+    ///
+    /// * `items` - An iterator of `RawJsonb` values representing the elements of the array.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(OwnedJsonb)` - The newly created JSONB array.
+    /// * `Err(Error)` - If any of the input `RawJsonb` values are invalid or if an error occurs during array construction.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jsonb::{OwnedJsonb, RawJsonb};
+    ///
+    /// // Create some RawJsonb values
+    /// let owned_num = "1".parse::<OwnedJsonb>().unwrap();
+    /// let owned_str = r#""hello""#.parse::<OwnedJsonb>().unwrap();
+    /// let owned_arr = "[1,2,3]".parse::<OwnedJsonb>().unwrap();
+    ///
+    /// // Build the array
+    /// let raw_jsonbs = vec![owned_num.as_raw(), owned_str.as_raw(), owned_arr.as_raw()];
+    /// let array_result = OwnedJsonb::build_array(raw_jsonbs.into_iter());
+    /// assert!(array_result.is_ok());
+    /// let array = array_result.unwrap();
+    ///
+    /// // Convert to string for easy verification
+    /// assert_eq!(array.to_string(), "[1,\"hello\",[1,2,3]]");
+    ///
+    /// // Example with an empty iterator
+    /// let empty_array = OwnedJsonb::build_array(<[RawJsonb<'_>; 0] as IntoIterator>::into_iter([])).unwrap();
+    /// assert_eq!(empty_array.to_string(), "[]");
+    ///
+    /// // Example with invalid input (this will cause an error)
+    /// let invalid_data = OwnedJsonb::new(vec![1,2,3,4]);
+    /// let result = OwnedJsonb::build_array([invalid_data.as_raw()].into_iter());
+    /// assert!(result.is_err());
+    /// ```
+    pub fn build_array<'a>(
+        raw_jsonbs: impl IntoIterator<Item = RawJsonb<'a>>,
+    ) -> Result<OwnedJsonb> {
+        let mut builder = ArrayBuilder::new();
+        for raw_jsonb in raw_jsonbs.into_iter() {
+            builder.push_raw_jsonb(raw_jsonb);
+        }
+        builder.build()
+    }
+
+    /// Builds a JSONB object from a collection of key-value pairs.
+    ///
+    /// This function constructs a new JSONB object from an iterator of key-value pairs. The keys are strings, and the values are `RawJsonb` values.
+    /// The resulting `OwnedJsonb` represents the binary encoding of the object.
+    ///
+    /// # Arguments
+    ///
+    /// * `items` - An iterator of `(K, &'a RawJsonb<'a>)` tuples, where `K` is a type that can be converted into a string slice (`AsRef<str>`) representing the key,
+    /// and the second element is a `RawJsonb` representing the value.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(OwnedJsonb)` - The newly created JSONB object.
+    /// * `Err(Error)` - If any of the input `RawJsonb` values are invalid, if contain duplicate keys, or if an error occurs during object construction.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jsonb::{OwnedJsonb, RawJsonb};
+    ///
+    /// // Create some RawJsonb values
+    /// let owned_num = "1".parse::<OwnedJsonb>().unwrap();
+    /// let owned_str = r#""hello""#.parse::<OwnedJsonb>().unwrap();
+    /// let owned_arr = "[1,2,3]".parse::<OwnedJsonb>().unwrap();
+    ///
+    /// // Build the object
+    /// let raw_jsonbs = vec![("a", owned_num.as_raw()), ("b", owned_str.as_raw()), ("c", owned_arr.as_raw())];
+    /// let object_result = OwnedJsonb::build_object(raw_jsonbs.into_iter());
+    /// assert!(object_result.is_ok());
+    /// let object = object_result.unwrap();
+    ///
+    /// // Convert to string for easy verification
+    /// assert_eq!(object.to_string(), r#"{"a":1,"b":"hello","c":[1,2,3]}"#);
+    ///
+    /// // Example with an empty iterator
+    /// let empty_object = OwnedJsonb::build_object(<[(&str, RawJsonb<'_>); 0] as IntoIterator>::into_iter([])).unwrap();
+    /// assert_eq!(empty_object.to_string(), "{}");
+    ///
+    /// // Example with invalid value
+    /// let invalid_data = OwnedJsonb::new(vec![1,2,3,4]);
+    /// let result = OwnedJsonb::build_object([("a", invalid_data.as_raw())].into_iter());
+    /// assert!(result.is_err());
+    /// ```
+    pub fn build_object<'a, K: AsRef<str>>(
+        items: impl IntoIterator<Item = (K, RawJsonb<'a>)>,
+    ) -> Result<OwnedJsonb> {
+        let mut kvs = Vec::new();
+        for (key, val) in items.into_iter() {
+            kvs.push((key, val));
+        }
+        let mut builder = ObjectBuilder::new();
+        for (key, val) in kvs.iter() {
+            builder.push_raw_jsonb(key.as_ref(), *val)?;
+        }
+        builder.build()
+    }
 }
 
 /// Creates an `OwnedJsonb` from a borrowed byte slice.  The byte slice is copied into a new `Vec<u8>`.
@@ -128,6 +240,48 @@ impl Display for OwnedJsonb {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let raw_jsonb = self.as_raw();
         write!(f, "{}", raw_jsonb.to_string())
+    }
+}
+
+impl Eq for OwnedJsonb {}
+
+impl PartialEq for OwnedJsonb {
+    fn eq(&self, other: &Self) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
+    }
+}
+
+/// Implements `PartialOrd` for `RawJsonb`, allowing comparison of two `RawJsonb` values.
+///
+/// The comparison logic handles different JSONB types (scalar, array, object) and considers null values.
+/// The ordering is defined as follows:
+///
+/// 1. Null is considered greater than any other type.
+/// 2. Scalars are compared based on their type and value (String > Number > Boolean).
+/// 3. Arrays are compared element by element.
+/// 4. Objects are compared based on their keys and values.
+/// 5. Arrays are greater than objects and scalars.
+/// 6. Objects are greater than scalars.
+/// 7. If the types are incompatible, None is returned.
+#[allow(clippy::non_canonical_partial_ord_impl)]
+impl PartialOrd for OwnedJsonb {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let self_raw = self.as_raw();
+        let other_raw = other.as_raw();
+        self_raw.partial_cmp(&other_raw)
+    }
+}
+
+/// Implements `Ord` for `RawJsonb`, allowing comparison of two `RawJsonb` values using the total ordering.
+/// This implementation leverages the `PartialOrd` implementation, returning `Ordering::Equal` for incomparable values.
+impl Ord for OwnedJsonb<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let self_raw = self.as_raw();
+        let other_raw = other.as_raw();
+        match self_raw.partial_cmp(other_raw) {
+            Some(ordering) => ordering,
+            None => Ordering::Equal,
+        }
     }
 }
 

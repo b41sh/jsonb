@@ -24,60 +24,6 @@ use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 
-impl OwnedJsonb {
-    /// Builds a JSONB array from a collection of RawJsonb values.
-    ///
-    /// This function constructs a new JSONB array from an iterator of `RawJsonb` values.
-    /// The resulting `OwnedJsonb` represents the binary encoding of the array.
-    ///
-    /// # Arguments
-    ///
-    /// * `items` - An iterator of `RawJsonb` values representing the elements of the array.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(OwnedJsonb)` - The newly created JSONB array.
-    /// * `Err(Error)` - If any of the input `RawJsonb` values are invalid or if an error occurs during array construction.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use jsonb::{OwnedJsonb, RawJsonb};
-    ///
-    /// // Create some RawJsonb values
-    /// let owned_num = "1".parse::<OwnedJsonb>().unwrap();
-    /// let owned_str = r#""hello""#.parse::<OwnedJsonb>().unwrap();
-    /// let owned_arr = "[1,2,3]".parse::<OwnedJsonb>().unwrap();
-    ///
-    /// // Build the array
-    /// let raw_jsonbs = vec![owned_num.as_raw(), owned_str.as_raw(), owned_arr.as_raw()];
-    /// let array_result = OwnedJsonb::build_array(raw_jsonbs.into_iter());
-    /// assert!(array_result.is_ok());
-    /// let array = array_result.unwrap();
-    ///
-    /// // Convert to string for easy verification
-    /// assert_eq!(array.to_string(), "[1,\"hello\",[1,2,3]]");
-    ///
-    /// // Example with an empty iterator
-    /// let empty_array = OwnedJsonb::build_array(<[RawJsonb<'_>; 0] as IntoIterator>::into_iter([])).unwrap();
-    /// assert_eq!(empty_array.to_string(), "[]");
-    ///
-    /// // Example with invalid input (this will cause an error)
-    /// let invalid_data = OwnedJsonb::new(vec![1,2,3,4]);
-    /// let result = OwnedJsonb::build_array([invalid_data.as_raw()].into_iter());
-    /// assert!(result.is_err());
-    /// ```
-    pub fn build_array<'a>(
-        raw_jsonbs: impl IntoIterator<Item = RawJsonb<'a>>,
-    ) -> Result<OwnedJsonb> {
-        let mut builder = ArrayBuilder::new();
-        for raw_jsonb in raw_jsonbs.into_iter() {
-            builder.push_raw_jsonb(raw_jsonb);
-        }
-        builder.build()
-    }
-}
-
 impl RawJsonb<'_> {
     /// @todo 重写
     /// Returns the number of elements in a JSONB array.
