@@ -14,12 +14,12 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
+use crate::core::JsonbType;
 use crate::core::ObjectIterator;
 use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
@@ -264,21 +264,22 @@ impl<'a> Selector<'a> {
             return Ok(());
         };
 
-        let array_iter_opt = ArrayIterator::new(curr_raw_jsonb)?;
-        if let Some(array_iter) = array_iter_opt {
-            let mut indices_set = HashSet::new();
-            let length = array_iter.len();
-            for array_index in array_indices {
-                let indices = array_index.to_indices(length);
-                for index in indices.into_iter() {
-                    indices_set.insert(index);
-                }
+        let jsonb_type = curr_raw_jsonb.jsonb_type()?;
+        let JsonbType::Array(arr_len) = jsonb_type else {
+            return Ok(());
+        };
+        for array_index in array_indices {
+            let indices = array_index.to_indices(arr_len);
+            if indices.is_empty() {
+                continue;
             }
-
-            for (i, item_result) in &mut array_iter.enumerate() {
-                let item = item_result?;
-                if indices_set.contains(&i) {
-                    self.items.push_back(item);
+            let array_iter_opt = ArrayIterator::new(curr_raw_jsonb)?;
+            if let Some(array_iter) = array_iter_opt {
+                for (i, item_result) in &mut array_iter.enumerate() {
+                    let item = item_result?;
+                    if indices.contains(&i) {
+                        self.items.push_back(item);
+                    }
                 }
             }
         }
