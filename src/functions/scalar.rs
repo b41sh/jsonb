@@ -19,7 +19,6 @@ use std::borrow::Cow;
 use crate::error::*;
 use crate::from_raw_jsonb;
 use crate::number::Number;
-
 use crate::JsonbType;
 use crate::RawJsonb;
 
@@ -389,7 +388,9 @@ impl RawJsonb<'_> {
     /// # Examples
     ///
     /// ```rust
-    /// use jsonb::{Number, OwnedJsonb, RawJsonb};
+    /// use jsonb::Number;
+    /// use jsonb::OwnedJsonb;
+    /// use jsonb::RawJsonb;
     ///
     /// // Number value
     /// let num_jsonb = "123.45".parse::<OwnedJsonb>().unwrap();
@@ -431,7 +432,7 @@ impl RawJsonb<'_> {
     /// let corrupted_num_jsonb = OwnedJsonb::new(vec![10, 0, 0, 0, 16, 0, 0, 0, 0, 1]);
     /// let corrupted_raw_num_jsonb = corrupted_num_jsonb.as_raw();
     /// let result = corrupted_raw_num_jsonb.as_number();
-    /// assert!(result.is_err()); //Decodes should return Err
+    /// assert!(result.is_err()); // Decodes should return Err
     /// ```
     pub fn as_number(&self) -> Result<Option<Number>> {
         if let Some(v) = self.as_u64()? {

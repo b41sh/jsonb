@@ -12,21 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::ops::Range;
 use std::cmp::Ordering;
 
+use serde::Serialize;
+
+use crate::core::ArrayIterator;
 use crate::core::Deserializer;
+use crate::core::ObjectIterator;
 use crate::error::*;
 use crate::to_owned_jsonb;
 use crate::Number;
 use crate::OwnedJsonb;
-
-use core::ops::Range;
-use crate::JsonbType;
-
-use crate::core::ArrayIterator;
-use crate::core::ObjectIterator;
-
-use serde::Serialize;
 
 /// Represents JSONB data wrapped around a raw, immutable slice of bytes.
 ///
@@ -147,7 +144,10 @@ impl<'a> RawJsonb<'a> {
     ///
     /// let obj_jsonb = r#"{"a": 1, "b": "hello"}"#.parse::<OwnedJsonb>().unwrap();
     /// let raw_jsonb = obj_jsonb.as_raw();
-    /// assert_eq!(raw_jsonb.to_pretty_string(), "{\n  \"a\": 1,\n  \"b\": \"hello\"\n}");
+    /// assert_eq!(
+    ///     raw_jsonb.to_pretty_string(),
+    ///     "{\n  \"a\": 1,\n  \"b\": \"hello\"\n}"
+    /// );
     ///
     /// let num_jsonb = "123.45".parse::<OwnedJsonb>().unwrap();
     /// let raw_jsonb = num_jsonb.as_raw();
@@ -313,9 +313,7 @@ impl Ord for RawJsonb<'_> {
 }
 
 pub fn from_raw_jsonb<'de, T>(raw_jsonb: &'de RawJsonb) -> Result<T>
-where
-    T: serde::de::Deserialize<'de>,
-{
+where T: serde::de::Deserialize<'de> {
     let mut deserializer = Deserializer::new(raw_jsonb);
     let t = T::deserialize(&mut deserializer)?;
     if deserializer.end() {

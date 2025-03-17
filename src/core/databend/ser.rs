@@ -14,6 +14,13 @@
 
 use std::collections::VecDeque;
 
+use byteorder::BigEndian;
+use byteorder::WriteBytesExt;
+use serde::ser;
+use serde::ser::Serialize;
+use serde::ser::SerializeMap;
+use serde::ser::SerializeSeq;
+
 use super::constants::*;
 use super::jentry::JEntry;
 use crate::core::ArrayBuilder;
@@ -26,14 +33,6 @@ use crate::value::Value;
 use crate::Error;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
-
-use serde::ser;
-use serde::ser::Serialize;
-use serde::ser::SerializeMap;
-use serde::ser::SerializeSeq;
-
-use byteorder::BigEndian;
-use byteorder::WriteBytesExt;
 
 #[derive(Debug, Default)]
 pub struct Serializer {
@@ -457,9 +456,7 @@ impl ser::SerializeStructVariant for ArraySerializer<'_> {
 impl Serialize for RawJsonb<'_> {
     #[inline]
     fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
+    where S: serde::Serializer {
         let mut index = 0;
         let (header_type, header_len) = self
             .read_header(index)

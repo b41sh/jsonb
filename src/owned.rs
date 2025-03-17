@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+use std::fmt::Display;
+use std::str::FromStr;
+
+use crate::core::ArrayBuilder;
+use crate::core::ObjectBuilder;
+use crate::core::Serializer;
 use crate::error::Error;
 use crate::error::Result;
 use crate::parse_value;
 use crate::RawJsonb;
-use crate::core::ArrayBuilder;
-use crate::core::ObjectBuilder;
-use crate::core::OwnedObjectBuilder;
-use std::fmt::Display;
-use std::str::FromStr;
-
-use crate::core::Serializer;
 
 /// Represents a JSONB data that owns its underlying data.
 ///
@@ -105,7 +105,8 @@ impl OwnedJsonb {
     /// # Examples
     ///
     /// ```rust
-    /// use jsonb::{OwnedJsonb, RawJsonb};
+    /// use jsonb::OwnedJsonb;
+    /// use jsonb::RawJsonb;
     ///
     /// // Create some RawJsonb values
     /// let owned_num = "1".parse::<OwnedJsonb>().unwrap();
@@ -122,11 +123,12 @@ impl OwnedJsonb {
     /// assert_eq!(array.to_string(), "[1,\"hello\",[1,2,3]]");
     ///
     /// // Example with an empty iterator
-    /// let empty_array = OwnedJsonb::build_array(<[RawJsonb<'_>; 0] as IntoIterator>::into_iter([])).unwrap();
+    /// let empty_array =
+    ///     OwnedJsonb::build_array(<[RawJsonb<'_>; 0] as IntoIterator>::into_iter([])).unwrap();
     /// assert_eq!(empty_array.to_string(), "[]");
     ///
     /// // Example with invalid input (this will cause an error)
-    /// let invalid_data = OwnedJsonb::new(vec![1,2,3,4]);
+    /// let invalid_data = OwnedJsonb::new(vec![1, 2, 3, 4]);
     /// let result = OwnedJsonb::build_array([invalid_data.as_raw()].into_iter());
     /// assert!(result.is_err());
     /// ```
@@ -158,7 +160,8 @@ impl OwnedJsonb {
     /// # Examples
     ///
     /// ```rust
-    /// use jsonb::{OwnedJsonb, RawJsonb};
+    /// use jsonb::OwnedJsonb;
+    /// use jsonb::RawJsonb;
     ///
     /// // Create some RawJsonb values
     /// let owned_num = "1".parse::<OwnedJsonb>().unwrap();
@@ -166,7 +169,11 @@ impl OwnedJsonb {
     /// let owned_arr = "[1,2,3]".parse::<OwnedJsonb>().unwrap();
     ///
     /// // Build the object
-    /// let raw_jsonbs = vec![("a", owned_num.as_raw()), ("b", owned_str.as_raw()), ("c", owned_arr.as_raw())];
+    /// let raw_jsonbs = vec![
+    ///     ("a", owned_num.as_raw()),
+    ///     ("b", owned_str.as_raw()),
+    ///     ("c", owned_arr.as_raw()),
+    /// ];
     /// let object_result = OwnedJsonb::build_object(raw_jsonbs.into_iter());
     /// assert!(object_result.is_ok());
     /// let object = object_result.unwrap();
@@ -175,11 +182,13 @@ impl OwnedJsonb {
     /// assert_eq!(object.to_string(), r#"{"a":1,"b":"hello","c":[1,2,3]}"#);
     ///
     /// // Example with an empty iterator
-    /// let empty_object = OwnedJsonb::build_object(<[(&str, RawJsonb<'_>); 0] as IntoIterator>::into_iter([])).unwrap();
+    /// let empty_object =
+    ///     OwnedJsonb::build_object(<[(&str, RawJsonb<'_>); 0] as IntoIterator>::into_iter([]))
+    ///         .unwrap();
     /// assert_eq!(empty_object.to_string(), "{}");
     ///
     /// // Example with invalid value
-    /// let invalid_data = OwnedJsonb::new(vec![1,2,3,4]);
+    /// let invalid_data = OwnedJsonb::new(vec![1, 2, 3, 4]);
     /// let result = OwnedJsonb::build_object([("a", invalid_data.as_raw())].into_iter());
     /// assert!(result.is_err());
     /// ```
@@ -274,11 +283,11 @@ impl PartialOrd for OwnedJsonb {
 
 /// Implements `Ord` for `RawJsonb`, allowing comparison of two `RawJsonb` values using the total ordering.
 /// This implementation leverages the `PartialOrd` implementation, returning `Ordering::Equal` for incomparable values.
-impl Ord for OwnedJsonb<'_> {
+impl Ord for OwnedJsonb {
     fn cmp(&self, other: &Self) -> Ordering {
         let self_raw = self.as_raw();
         let other_raw = other.as_raw();
-        match self_raw.partial_cmp(other_raw) {
+        match self_raw.partial_cmp(&other_raw) {
             Some(ordering) => ordering,
             None => Ordering::Equal,
         }
@@ -287,9 +296,7 @@ impl Ord for OwnedJsonb<'_> {
 
 /// Serialize a value into a JSONB byte array
 pub fn to_owned_jsonb<T>(value: &T) -> Result<OwnedJsonb>
-where
-    T: serde::ser::Serialize,
-{
+where T: serde::ser::Serialize {
     let mut serializer = Serializer::default();
     value.serialize(&mut serializer)?;
     Ok(OwnedJsonb::new(serializer.to_vec()))

@@ -14,8 +14,6 @@
 
 // This file contains functions that specifically operate on JSONB object values.
 
-use crate::raw::JsonbItem;
-use crate::JsonbType;
 use std::collections::BTreeSet;
 use std::str::from_utf8;
 
@@ -24,9 +22,9 @@ use crate::core::ArrayIterator;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
 use crate::core::ObjectKeyIterator;
-
 use crate::error::*;
-
+use crate::raw::JsonbItem;
+use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 
@@ -55,7 +53,10 @@ impl RawJsonb<'_> {
     /// assert!(keys_result.is_ok());
     ///
     /// let keys_jsonb = keys_result.unwrap();
-    /// assert_eq!(keys_jsonb.as_ref().map(|k| k.to_string()), Some(r#"["a","b","c"]"#.to_string()));
+    /// assert_eq!(
+    ///     keys_jsonb.as_ref().map(|k| k.to_string()),
+    ///     Some(r#"["a","b","c"]"#.to_string())
+    /// );
     ///
     /// // Array - returns None
     /// let arr_jsonb = "[1, 2, 3]".parse::<OwnedJsonb>().unwrap();
@@ -187,7 +188,10 @@ impl RawJsonb<'_> {
     /// // Updating an existing key-value pair
     /// let new_jsonb = r#"3"#.parse::<OwnedJsonb>().unwrap();
     /// let new_raw_jsonb = new_jsonb.as_raw();
-    /// let updated = inserted.as_raw().object_insert("b", &new_raw_jsonb, true).unwrap();
+    /// let updated = inserted
+    ///     .as_raw()
+    ///     .object_insert("b", &new_raw_jsonb, true)
+    ///     .unwrap();
     /// assert_eq!(updated.to_string(), r#"{"a":1,"b":3}"#);
     ///
     /// // Attempting to insert a duplicate key without update
@@ -195,7 +199,7 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err()); // Returns an error because key "a" already exists
     ///
     /// // Invalid JSONB input
-    /// let invalid_jsonb = OwnedJsonb::new(vec![1,2,3,4]);
+    /// let invalid_jsonb = OwnedJsonb::new(vec![1, 2, 3, 4]);
     /// let invalid_raw_jsonb = invalid_jsonb.as_raw();
     /// let new_raw_jsonb = new_jsonb.as_raw();
     /// let result = invalid_raw_jsonb.object_insert("a", &new_raw_jsonb, false);
@@ -257,8 +261,9 @@ impl RawJsonb<'_> {
     /// # Examples
     ///
     /// ```rust
-    /// use jsonb::OwnedJsonb;
     /// use std::collections::BTreeSet;
+    ///
+    /// use jsonb::OwnedJsonb;
     ///
     /// let obj_jsonb = r#"{"a": 1, "b": "hello", "c": 3}"#.parse::<OwnedJsonb>().unwrap();
     /// let raw_jsonb = obj_jsonb.as_raw();
@@ -323,8 +328,9 @@ impl RawJsonb<'_> {
     /// # Examples
     ///
     /// ```rust
-    /// use jsonb::OwnedJsonb;
     /// use std::collections::BTreeSet;
+    ///
+    /// use jsonb::OwnedJsonb;
     ///
     /// let obj_jsonb = r#"{"a": 1, "b": "hello", "c": 3}"#.parse::<OwnedJsonb>().unwrap();
     /// let raw_jsonb = obj_jsonb.as_raw();
@@ -400,7 +406,7 @@ impl RawJsonb<'_> {
     /// let keys = ["b".as_bytes(), "b".as_bytes(), "d".as_bytes()];
     /// assert!(!raw_jsonb.exists_all_keys(keys.into_iter()).unwrap()); // "d" does not exist
     ///
-    /// let keys = ["a".as_bytes(), "b".as_bytes(), &[0xff_u8]];  // Invalid UTF-8
+    /// let keys = ["a".as_bytes(), "b".as_bytes(), &[0xff_u8]]; // Invalid UTF-8
     /// assert!(!raw_jsonb.exists_all_keys(keys.into_iter()).unwrap());
     ///
     /// let arr_jsonb = "[1, 2, 3]".parse::<OwnedJsonb>().unwrap();

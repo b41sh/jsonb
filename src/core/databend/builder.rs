@@ -15,17 +15,16 @@
 use core::ops::Range;
 use std::collections::BTreeMap;
 
+use byteorder::BigEndian;
+use byteorder::WriteBytesExt;
+
 use super::constants::*;
 use super::jentry::JEntry;
 use crate::error::Error;
 use crate::error::Result;
-use crate::RawJsonb;
-
-use crate::OwnedJsonb;
-use byteorder::BigEndian;
-use byteorder::WriteBytesExt;
-
 use crate::raw::JsonbItem;
+use crate::OwnedJsonb;
+use crate::RawJsonb;
 
 pub(crate) struct ArrayBuilder<'a> {
     items: Vec<JsonbItem<'a>>,
@@ -257,10 +256,10 @@ fn replace_jentry(buf: &mut [u8], jentry: JEntry, jentry_index: &mut usize) {
 mod tests {
     use std::collections::BTreeMap;
 
+    use super::ArrayBuilder;
+    use super::ObjectBuilder;
     use crate::to_owned_jsonb;
     use crate::Value;
-
-    use super::{ArrayBuilder, ObjectBuilder};
 
     #[test]
     fn test_build_with_inner_array() {

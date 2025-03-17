@@ -19,25 +19,24 @@ mod iterator;
 pub(super) mod jentry;
 mod ser;
 
+use core::ops::Range;
+use std::io::Write;
+
 pub(crate) use builder::*;
+use byteorder::BigEndian;
+use byteorder::WriteBytesExt;
 pub use de::*;
 pub(crate) use iterator::*;
 pub use ser::*;
 
 use super::constants::*;
 use super::jentry::JEntry;
-use crate::raw::JsonbItem;
-use crate::Number;
-use core::ops::Range;
-
 use crate::error::*;
+use crate::raw::JsonbItem;
 use crate::JsonbType;
-use crate::RawJsonb;
-use std::io::Write;
-
+use crate::Number;
 use crate::OwnedJsonb;
-use byteorder::BigEndian;
-use byteorder::WriteBytesExt;
+use crate::RawJsonb;
 
 impl RawJsonb<'_> {
     pub fn jsonb_type(&self) -> Result<JsonbType> {

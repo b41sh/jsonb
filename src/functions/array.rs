@@ -17,9 +17,7 @@
 use crate::core::ArrayBuilder;
 use crate::core::ArrayDistinctBuilder;
 use crate::core::ArrayIterator;
-
 use crate::error::*;
-
 use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
@@ -223,7 +221,7 @@ impl RawJsonb<'_> {
     /// let arr1 = r#"[1, 1, 2, 3]"#.parse::<OwnedJsonb>().unwrap();
     /// let arr2 = r#"[1, 1, 1, 3]"#.parse::<OwnedJsonb>().unwrap();
     /// let intersection = arr1.as_raw().array_intersection(&arr2.as_raw()).unwrap();
-    /// assert_eq!(intersection.to_string(), "[1,1,3]"); //Order may vary
+    /// assert_eq!(intersection.to_string(), "[1,1,3]"); // Order may vary
     ///
     /// // Object containment (checks for complete equality)
     /// let obj1 = r#"{"a": 1}"#.parse::<OwnedJsonb>().unwrap();
@@ -238,12 +236,18 @@ impl RawJsonb<'_> {
     ///
     /// let scalar1 = "1".parse::<OwnedJsonb>().unwrap();
     /// let scalar2 = "1".parse::<OwnedJsonb>().unwrap();
-    /// let contained = scalar1.as_raw().array_intersection(&scalar2.as_raw()).unwrap();
+    /// let contained = scalar1
+    ///     .as_raw()
+    ///     .array_intersection(&scalar2.as_raw())
+    ///     .unwrap();
     /// assert_eq!(contained.to_string(), "[1]"); // Contained
     ///
     /// let scalar1 = "1".parse::<OwnedJsonb>().unwrap();
     /// let scalar2 = "2".parse::<OwnedJsonb>().unwrap();
-    /// let contained = scalar1.as_raw().array_intersection(&scalar2.as_raw()).unwrap();
+    /// let contained = scalar1
+    ///     .as_raw()
+    ///     .array_intersection(&scalar2.as_raw())
+    ///     .unwrap();
     /// assert_eq!(contained.to_string(), "[]"); // Not contained
     /// ```
     pub fn array_intersection(&self, other: &RawJsonb) -> Result<OwnedJsonb> {

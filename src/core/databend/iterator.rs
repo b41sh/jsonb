@@ -13,15 +13,13 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
+use std::ops::Range;
 
 use super::constants::*;
 use super::jentry::JEntry;
 use crate::error::Result;
-use std::ops::Range;
-
-use crate::RawJsonb;
-
 use crate::raw::JsonbItem;
+use crate::RawJsonb;
 
 pub(crate) struct ArrayIterator<'a> {
     raw_jsonb: RawJsonb<'a>,

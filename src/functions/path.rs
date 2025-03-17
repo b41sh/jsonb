@@ -14,22 +14,19 @@
 
 // This file contains functions that dealing with path-based access to JSONB data.
 
-use std::collections::VecDeque;
-
-use crate::raw::JsonbItem;
-use crate::JsonbType;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
-
 use crate::error::*;
 use crate::jsonpath::JsonPath;
 use crate::jsonpath::Selector;
 use crate::keypath::KeyPath;
-
+use crate::raw::JsonbItem;
+use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 
@@ -332,8 +329,9 @@ impl RawJsonb<'_> {
     /// # Examples
     ///
     /// ```rust
+    /// use jsonb::jsonpath::parse_json_path;
+    /// use jsonb::jsonpath::Mode;
     /// use jsonb::OwnedJsonb;
-    /// use jsonb::jsonpath::{parse_json_path, Mode};
     ///
     /// let jsonb_value = r#"{"a": {"b": [1, 2, 3]}, "c": 4}"#.parse::<OwnedJsonb>().unwrap();
     /// let raw_jsonb = jsonb_value.as_raw();
@@ -373,14 +371,17 @@ impl RawJsonb<'_> {
     /// # Examples
     ///
     /// ```rust
+    /// use jsonb::jsonpath::parse_json_path;
+    /// use jsonb::jsonpath::Mode;
     /// use jsonb::OwnedJsonb;
-    /// use jsonb::jsonpath::{parse_json_path, Mode};
     ///
     /// let jsonb_value = r#"[
     ///     {"price": 12, "title": "Book A"},
     ///     {"price": 8, "title": "Book B"},
     ///     {"price": 5, "title": "Book C"}
-    /// ]"#.parse::<OwnedJsonb>().unwrap();
+    /// ]"#
+    /// .parse::<OwnedJsonb>()
+    /// .unwrap();
     /// let raw_jsonb = jsonb_value.as_raw();
     ///
     /// // Path with predicate (select books with price < 10)
@@ -572,9 +573,10 @@ impl RawJsonb<'_> {
     /// # Examples
     ///
     /// ```rust
+    /// use std::borrow::Cow;
+    ///
     /// use jsonb::keypath::KeyPath;
     /// use jsonb::OwnedJsonb;
-    /// use std::borrow::Cow;
     ///
     /// // Deleting from an array
     /// let arr_jsonb = r#"[1, 2, 3]"#.parse::<OwnedJsonb>().unwrap();
@@ -590,7 +592,11 @@ impl RawJsonb<'_> {
     /// // Deleting from an object
     /// let obj_jsonb = r#"{"a": {"b": [1, 2, 3]}, "c": 4}"#.parse::<OwnedJsonb>().unwrap();
     /// let raw_jsonb = obj_jsonb.as_raw();
-    /// let keypath = [KeyPath::Name(Cow::Borrowed("a")), KeyPath::Name(Cow::Borrowed("b")), KeyPath::Index(1)];
+    /// let keypath = [
+    ///     KeyPath::Name(Cow::Borrowed("a")),
+    ///     KeyPath::Name(Cow::Borrowed("b")),
+    ///     KeyPath::Index(1),
+    /// ];
     /// let deleted = raw_jsonb.delete_by_keypath(keypath.iter()).unwrap();
     /// assert_eq!(deleted.to_string(), r#"{"a":{"b":[1,3]},"c":4}"#);
     ///
@@ -600,7 +606,10 @@ impl RawJsonb<'_> {
     /// assert_eq!(deleted.to_string(), r#"{"a":{"b":[1,2,3]},"c":4}"#); // Original value returned
     ///
     /// // Invalid keypath (wrong type)
-    /// let keypath = [KeyPath::Name(Cow::Borrowed("a")), KeyPath::Name(Cow::Borrowed("x"))]; // "x" doesn't exist under "a"
+    /// let keypath = [
+    ///     KeyPath::Name(Cow::Borrowed("a")),
+    ///     KeyPath::Name(Cow::Borrowed("x")),
+    /// ]; // "x" doesn't exist under "a"
     /// let deleted = raw_jsonb.delete_by_keypath(keypath.iter()).unwrap();
     /// assert_eq!(deleted.to_string(), r#"{"a":{"b":[1,2,3]},"c":4}"#); // Original value returned
     ///

@@ -17,6 +17,10 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 
+use crate::core::ArrayBuilder;
+use crate::core::ArrayIterator;
+use crate::core::ObjectIterator;
+use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
 use crate::jsonpath::BinaryOperator;
 use crate::jsonpath::Expr;
@@ -25,15 +29,10 @@ use crate::jsonpath::JsonPath;
 use crate::jsonpath::Path;
 use crate::jsonpath::PathValue;
 use crate::number::Number;
+use crate::raw::JsonbItem;
 use crate::Error;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
-
-use crate::core::ArrayBuilder;
-use crate::core::ArrayIterator;
-use crate::core::ObjectIterator;
-use crate::error::Result;
-use crate::raw::JsonbItem;
 
 #[derive(Debug)]
 enum ExprValue<'a> {
@@ -286,7 +285,7 @@ impl<'a> Selector<'a> {
         Ok(())
     }
 
-    //fn filter_expr(&'a self, raw_jsonb: RawJsonb<'a>, item: JsonbItem<'a>, expr: &Expr<'a>) -> Result<bool> {
+    // fn filter_expr(&'a self, raw_jsonb: RawJsonb<'a>, item: JsonbItem<'a>, expr: &Expr<'a>) -> Result<bool> {
     fn filter_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<bool> {
         match expr {
             Expr::BinaryOp { op, left, right } => match op {

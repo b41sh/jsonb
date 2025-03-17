@@ -18,17 +18,14 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
+use crate::constants::*;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
-
-use crate::raw::JsonbItem;
-
-use crate::constants::*;
 use crate::error::*;
 use crate::number::Number;
-
+use crate::raw::JsonbItem;
 use crate::JsonbType;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
@@ -256,15 +253,21 @@ impl RawJsonb<'_> {
     /// ```rust
     /// use jsonb::OwnedJsonb;
     ///
-    /// let jsonb_value = r#"{"a": "hello", "b": [1, "world", {"c": "rust"}]}"#.parse::<OwnedJsonb>().unwrap();
+    /// let jsonb_value = r#"{"a": "hello", "b": [1, "world", {"c": "rust"}]}"#
+    ///     .parse::<OwnedJsonb>()
+    ///     .unwrap();
     /// let raw_jsonb = jsonb_value.as_raw();
     ///
     /// // Check if any string contains "rust"
-    /// let contains_rust = raw_jsonb.traverse_check_string(|s| s.eq("rust".as_bytes())).unwrap();
+    /// let contains_rust = raw_jsonb
+    ///     .traverse_check_string(|s| s.eq("rust".as_bytes()))
+    ///     .unwrap();
     /// assert!(contains_rust);
     ///
     /// // Check if any string contains "xyz"
-    /// let contains_xyz = raw_jsonb.traverse_check_string(|s| s.eq("xyz".as_bytes())).unwrap();
+    /// let contains_xyz = raw_jsonb
+    ///     .traverse_check_string(|s| s.eq("xyz".as_bytes()))
+    ///     .unwrap();
     /// assert!(!contains_xyz);
     ///
     /// // Check if any string is longer than 5 characters
@@ -274,7 +277,9 @@ impl RawJsonb<'_> {
     /// // Example with an array of strings
     /// let jsonb_value = r#"["hello", "world", "rust"]"#.parse::<OwnedJsonb>().unwrap();
     /// let raw_jsonb = jsonb_value.as_raw();
-    /// let contains_rust = raw_jsonb.traverse_check_string(|s| s.eq("rust".as_bytes())).unwrap();
+    /// let contains_rust = raw_jsonb
+    ///     .traverse_check_string(|s| s.eq("rust".as_bytes()))
+    ///     .unwrap();
     /// assert!(contains_rust);
     /// ```
     pub fn traverse_check_string(&self, func: impl Fn(&[u8]) -> bool) -> Result<bool> {
@@ -356,7 +361,7 @@ impl RawJsonb<'_> {
     /// let obj1 = r#"{"a": 1, "b": 2}"#.parse::<OwnedJsonb>().unwrap();
     /// let obj2 = r#"{"b": 3, "c": 4}"#.parse::<OwnedJsonb>().unwrap();
     /// let concatenated = obj1.as_raw().concat(&obj2.as_raw()).unwrap();
-    /// assert_eq!(concatenated.to_string(), r#"{"a":1,"b":3,"c":4}"#);  // "b" is overwritten
+    /// assert_eq!(concatenated.to_string(), r#"{"a":1,"b":3,"c":4}"#); // "b" is overwritten
     ///
     /// // Array + Array
     /// let arr1 = "[1, 2]".parse::<OwnedJsonb>().unwrap();
@@ -598,10 +603,10 @@ impl RawJsonb<'_> {
                 for result in &mut object_iter {
                     let (key, val_item) = result?;
                     let key_item = JsonbItem::String(key.as_bytes());
-                    //buf.push(depth + 1);
-                    //buf.push(STRING_LEVEL);
-                    //buf.extend_from_slice(key.as_bytes());
-                    //buf.push(0);
+                    // buf.push(depth + 1);
+                    // buf.push(STRING_LEVEL);
+                    // buf.extend_from_slice(key.as_bytes());
+                    // buf.push(0);
                     let _ = self.jsonb_item_to_comparable_impl(depth + 1, key_item, buf)?;
                     let _ = self.jsonb_item_to_comparable_impl(depth + 1, val_item, buf)?;
                 }
