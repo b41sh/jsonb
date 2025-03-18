@@ -207,7 +207,7 @@ fn test_path_exists_expr() {
     let raw_jsonb = owned_jsonb.as_raw();
     for (path, expected) in paths {
         let json_path = parse_json_path(path.as_bytes()).unwrap();
-        let res = raw_jsonb.get_by_path_array(&json_path);
+        let res = raw_jsonb.select_array_by_path(&json_path);
         assert!(res.is_ok());
         let owned_jsonb = res.unwrap();
         let expected_buf = parse_value(expected.as_bytes()).unwrap().to_vec();
@@ -217,7 +217,7 @@ fn test_path_exists_expr() {
 }
 
 #[test]
-fn test_get_by_path() {
+fn test_select_by_path() {
     let source = r#"{"name":"Fred","phones":[{"type":"home","number":3720453},{"type":"work","number":5062051}],"car_no":123,"测试\"\uD83D\uDC8E":"ab"}"#;
 
     let paths = vec![
@@ -279,7 +279,7 @@ fn test_get_by_path() {
     let raw_jsonb = owned_jsonb.as_raw();
     for (path, expects) in paths {
         let json_path = parse_json_path(path.as_bytes()).unwrap();
-        let res = raw_jsonb.get_by_path(&json_path);
+        let res = raw_jsonb.select_by_path(&json_path);
         assert!(res.is_ok());
         let owned_jsonbs = res.unwrap();
         assert_eq!(owned_jsonbs.len(), expects.len());

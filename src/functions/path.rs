@@ -358,8 +358,7 @@ impl RawJsonb<'_> {
     ///
     /// let path = parse_json_path("$.a.b[*]".as_bytes()).unwrap();
     /// let result = raw_jsonb.select_array_by_path(&path).unwrap();
-    /// assert_eq!(result.len(), 1);
-    /// assert_eq!(result[0].to_string(), "[1,2,3]");
+    /// assert_eq!(result.to_string(), "[1,2,3]");
     /// ```
     pub fn select_array_by_path<'a>(&self, json_path: &'a JsonPath<'a>) -> Result<OwnedJsonb> {
         let mut selector = Selector::new(*self);
@@ -443,7 +442,7 @@ impl RawJsonb<'_> {
     /// assert_eq!(result.unwrap().to_string(), "[1,2]");
     ///
     /// let path = parse_json_path("$.x".as_bytes()).unwrap(); // No match.
-    /// let result = jsonb.select_value_by_path(&path).unwrap();
+    /// let result = raw_jsonb.select_value_by_path(&path).unwrap();
     /// assert!(result.is_none());
     /// ```
     pub fn select_value_by_path<'a>(
