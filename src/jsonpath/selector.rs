@@ -114,7 +114,7 @@ impl<'a> Selector<'a> {
         }
     }
 
-    pub(crate) fn build_scalar(&mut self) -> Result<Option<OwnedJsonb>> {
+    pub(crate) fn build_value(&mut self) -> Result<Option<OwnedJsonb>> {
         if self.items.len() > 1 {
             let array = self.build_array()?;
             Ok(Some(array))
