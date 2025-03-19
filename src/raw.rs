@@ -85,6 +85,7 @@ impl<'a> RawJsonb<'a> {
     ///
     /// This function serializes the JSONB value into a human-readable JSON string representation.
     /// If the JSONB data is invalid, treate it as a text JSON string and return directly.
+    /// If the JSONB data is empty, return a JSON null for compatibility.
     ///
     /// # Returns
     ///
@@ -129,7 +130,13 @@ impl<'a> RawJsonb<'a> {
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
         match self.serialize(&mut ser) {
             Ok(_) => String::from_utf8(buf).unwrap(),
-            Err(_) => String::from_utf8_lossy(self.data).to_string(),
+            Err(_) => {
+                if self.data.is_empty() {
+                    "null".to_string()
+                } else {
+                    String::from_utf8_lossy(self.data).to_string()
+                }
+            }
         }
     }
 
