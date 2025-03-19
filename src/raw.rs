@@ -84,7 +84,7 @@ impl<'a> RawJsonb<'a> {
     /// Converts the JSONB value to a JSON string.
     ///
     /// This function serializes the JSONB value into a human-readable JSON string representation.
-    /// If the JSONB data is invalid, return a "null" string.
+    /// If the JSONB data is invalid, treate it as a text JSON string and return directly.
     ///
     /// # Returns
     ///
@@ -115,12 +115,12 @@ impl<'a> RawJsonb<'a> {
     /// let raw_jsonb = true_jsonb.as_raw();
     /// assert_eq!(raw_jsonb.to_string(), "true");
     ///
-    /// // Example with invalid JSONB data (fallback to text JSON parsing)
+    /// // Example with invalid JSONB data (fallback to treat as text JSON string)
     /// let invalid_jsonb = OwnedJsonb::new(vec![1, 2, 3, 4]); // Invalid binary JSONB
     /// let invalid_raw_jsonb = invalid_jsonb.as_raw();
     ///
-    /// // It will try to parse it as text JSON, in this case fails and return "null"
-    /// assert_eq!(invalid_raw_jsonb.to_string(), "null");
+    /// // It will treat as text JSON string.
+    /// assert_eq!(invalid_raw_jsonb.to_string(), "\u{1}\u{2}\u{3}\u{4}");
     /// ```
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
@@ -129,14 +129,7 @@ impl<'a> RawJsonb<'a> {
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
         match self.serialize(&mut ser) {
             Ok(_) => String::from_utf8(buf).unwrap(),
-            Err(_) => {
-                // try parse json value
-                if let Ok(val) = parse_value(self.data) {
-                    val.to_string()
-                } else {
-                    "null".to_string()
-                }
-            }
+            Err(_) => String::from_utf8_lossy(self.data).to_string(),
         }
     }
 
