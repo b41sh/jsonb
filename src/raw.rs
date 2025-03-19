@@ -18,7 +18,7 @@ use serde::Serialize;
 
 use crate::core::ArrayIterator;
 use crate::core::Deserializer;
-use crate::core::JsonbType;
+use crate::core::JsonbItemType;
 use crate::core::ObjectIterator;
 use crate::error::*;
 use crate::Number;
@@ -128,7 +128,14 @@ impl<'a> RawJsonb<'a> {
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
         match self.serialize(&mut ser) {
             Ok(_) => String::from_utf8(buf).unwrap(),
-            Err(_) => "null".to_string(),
+            Err(_) => {
+                // try parse json value
+                if let Ok(val) = parse_value(self.data) {
+                    val.to_string()
+                } else {
+                    "null".to_string()
+                }
+            }
         }
     }
 
@@ -220,8 +227,8 @@ impl PartialEq for RawJsonb<'_> {
 #[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for RawJsonb<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let self_type = self.jsonb_type().ok()?;
-        let other_type = other.jsonb_type().ok()?;
+        let self_type = self.jsonb_item_type().ok()?;
+        let other_type = other.jsonb_item_type().ok()?;
 
         // First use JSONB type to determine the order,
         // different types must have different orders.
@@ -230,7 +237,7 @@ impl PartialOrd for RawJsonb<'_> {
         }
 
         match (self_type, other_type) {
-            (JsonbType::Array(self_len), JsonbType::Array(other_len)) => {
+            (JsonbItemType::Array(self_len), JsonbItemType::Array(other_len)) => {
                 let self_array_iter = ArrayIterator::new(*self).ok()?.unwrap();
                 let mut other_array_iter = ArrayIterator::new(*other).ok()?.unwrap();
                 for (self_res, other_res) in &mut self_array_iter.zip(&mut other_array_iter) {
@@ -244,7 +251,7 @@ impl PartialOrd for RawJsonb<'_> {
                 }
                 Some(self_len.cmp(&other_len))
             }
-            (JsonbType::Object(self_len), JsonbType::Object(other_len)) => {
+            (JsonbItemType::Object(self_len), JsonbItemType::Object(other_len)) => {
                 let self_object_iter = ObjectIterator::new(*self).ok()?.unwrap();
                 let mut other_object_iter = ObjectIterator::new(*other).ok()?.unwrap();
                 for (self_res, other_res) in &mut self_object_iter.zip(&mut other_object_iter) {
@@ -262,7 +269,7 @@ impl PartialOrd for RawJsonb<'_> {
                 }
                 Some(self_len.cmp(&other_len))
             }
-            (JsonbType::String, JsonbType::String) => {
+            (JsonbItemType::String, JsonbItemType::String) => {
                 let self_val: Result<String> = from_raw_jsonb(self);
                 let other_val: Result<String> = from_raw_jsonb(other);
                 match (self_val, other_val) {
@@ -270,7 +277,7 @@ impl PartialOrd for RawJsonb<'_> {
                     (_, _) => None,
                 }
             }
-            (JsonbType::Number, JsonbType::Number) => {
+            (JsonbItemType::Number, JsonbItemType::Number) => {
                 let self_val: Result<Number> = from_raw_jsonb(self);
                 let other_val: Result<Number> = from_raw_jsonb(other);
                 match (self_val, other_val) {
@@ -278,7 +285,7 @@ impl PartialOrd for RawJsonb<'_> {
                     (_, _) => None,
                 }
             }
-            (JsonbType::Boolean, JsonbType::Boolean) => {
+            (JsonbItemType::Boolean, JsonbItemType::Boolean) => {
                 let self_val: Result<bool> = from_raw_jsonb(self);
                 let other_val: Result<bool> = from_raw_jsonb(other);
                 match (self_val, other_val) {

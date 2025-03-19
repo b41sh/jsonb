@@ -17,7 +17,7 @@
 use crate::core::ArrayBuilder;
 use crate::core::ArrayDistinctBuilder;
 use crate::core::ArrayIterator;
-use crate::core::JsonbType;
+use crate::core::JsonbItemType;
 use crate::error::*;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
@@ -55,8 +55,8 @@ impl RawJsonb<'_> {
     /// assert_eq!(len, None);
     /// ```
     pub fn array_length(&self) -> Result<Option<usize>> {
-        let jsonb_type = self.jsonb_type()?;
-        if let JsonbType::Array(len) = jsonb_type {
+        let jsonb_item_type = self.jsonb_item_type()?;
+        if let JsonbItemType::Array(len) = jsonb_item_type {
             Ok(Some(len))
         } else {
             Ok(None)

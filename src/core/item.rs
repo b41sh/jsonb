@@ -23,7 +23,7 @@ use crate::RawJsonb;
 
 /// The value type of JSONB data.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum JsonbType {
+pub(crate) enum JsonbItemType {
     /// The Null JSONB type.
     Null,
     /// The Boolean JSONB type.
@@ -38,38 +38,38 @@ pub(crate) enum JsonbType {
     Object(usize),
 }
 
-impl Eq for JsonbType {}
+impl Eq for JsonbItemType {}
 
-impl PartialEq for JsonbType {
+impl PartialEq for JsonbItemType {
     fn eq(&self, other: &Self) -> bool {
         self.partial_cmp(other) == Some(Ordering::Equal)
     }
 }
 
-impl PartialOrd for JsonbType {
+impl PartialOrd for JsonbItemType {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
-            (JsonbType::Null, JsonbType::Null) => Some(Ordering::Equal),
-            (JsonbType::Null, _) => Some(Ordering::Greater),
-            (_, JsonbType::Null) => Some(Ordering::Less),
+            (JsonbItemType::Null, JsonbItemType::Null) => Some(Ordering::Equal),
+            (JsonbItemType::Null, _) => Some(Ordering::Greater),
+            (_, JsonbItemType::Null) => Some(Ordering::Less),
 
-            (JsonbType::Array(_), JsonbType::Array(_)) => None,
-            (JsonbType::Array(_), _) => Some(Ordering::Greater),
-            (_, JsonbType::Array(_)) => Some(Ordering::Less),
+            (JsonbItemType::Array(_), JsonbItemType::Array(_)) => None,
+            (JsonbItemType::Array(_), _) => Some(Ordering::Greater),
+            (_, JsonbItemType::Array(_)) => Some(Ordering::Less),
 
-            (JsonbType::Object(_), JsonbType::Object(_)) => None,
-            (JsonbType::Object(_), _) => Some(Ordering::Greater),
-            (_, JsonbType::Object(_)) => Some(Ordering::Less),
+            (JsonbItemType::Object(_), JsonbItemType::Object(_)) => None,
+            (JsonbItemType::Object(_), _) => Some(Ordering::Greater),
+            (_, JsonbItemType::Object(_)) => Some(Ordering::Less),
 
-            (JsonbType::String, JsonbType::String) => None,
-            (JsonbType::String, _) => Some(Ordering::Greater),
-            (_, JsonbType::String) => Some(Ordering::Less),
+            (JsonbItemType::String, JsonbItemType::String) => None,
+            (JsonbItemType::String, _) => Some(Ordering::Greater),
+            (_, JsonbItemType::String) => Some(Ordering::Less),
 
-            (JsonbType::Number, JsonbType::Number) => None,
-            (JsonbType::Number, _) => Some(Ordering::Greater),
-            (_, JsonbType::Number) => Some(Ordering::Less),
+            (JsonbItemType::Number, JsonbItemType::Number) => None,
+            (JsonbItemType::Number, _) => Some(Ordering::Greater),
+            (_, JsonbItemType::Number) => Some(Ordering::Less),
 
-            (JsonbType::Boolean, JsonbType::Boolean) => None,
+            (JsonbItemType::Boolean, JsonbItemType::Boolean) => None,
         }
     }
 }
@@ -100,14 +100,14 @@ pub(crate) enum JsonbItem<'a> {
 }
 
 impl<'a> JsonbItem<'a> {
-    pub(crate) fn jsonb_type(&self) -> Result<JsonbType> {
+    pub(crate) fn jsonb_item_type(&self) -> Result<JsonbItemType> {
         match self {
-            JsonbItem::Null => Ok(JsonbType::Null),
-            JsonbItem::Boolean(_) => Ok(JsonbType::Boolean),
-            JsonbItem::Number(_) => Ok(JsonbType::Number),
-            JsonbItem::String(_) => Ok(JsonbType::String),
-            JsonbItem::Raw(raw) => raw.jsonb_type(),
-            JsonbItem::Owned(owned) => owned.as_raw().jsonb_type(),
+            JsonbItem::Null => Ok(JsonbItemType::Null),
+            JsonbItem::Boolean(_) => Ok(JsonbItemType::Boolean),
+            JsonbItem::Number(_) => Ok(JsonbItemType::Number),
+            JsonbItem::String(_) => Ok(JsonbItemType::String),
+            JsonbItem::Raw(raw) => raw.jsonb_item_type(),
+            JsonbItem::Owned(owned) => owned.as_raw().jsonb_item_type(),
         }
     }
 
@@ -169,8 +169,8 @@ impl PartialEq for JsonbItem<'_> {
 #[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for JsonbItem<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let self_type = self.jsonb_type().ok()?;
-        let other_type = other.jsonb_type().ok()?;
+        let self_type = self.jsonb_item_type().ok()?;
+        let other_type = other.jsonb_item_type().ok()?;
 
         // First use JSONB type to determine the order,
         // different types must have different orders.

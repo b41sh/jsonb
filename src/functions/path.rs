@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
-use crate::core::JsonbType;
+use crate::core::JsonbItemType;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
 use crate::core::ObjectKeyIterator;
@@ -243,9 +243,9 @@ impl RawJsonb<'_> {
             let Some(current) = current_item.as_raw_jsonb() else {
                 return Ok(None);
             };
-            let jsonb_type = current.jsonb_type()?;
-            match jsonb_type {
-                JsonbType::Array(_) => {
+            let jsonb_item_type = current.jsonb_item_type()?;
+            match jsonb_item_type {
+                JsonbItemType::Array(_) => {
                     if let KeyPath::Index(index) = path {
                         let array_iter_opt = ArrayIterator::new(current)?;
                         if let Some(mut array_iter) = array_iter_opt {
@@ -267,7 +267,7 @@ impl RawJsonb<'_> {
                     }
                     return Ok(None);
                 }
-                JsonbType::Object(_) => {
+                JsonbItemType::Object(_) => {
                     let name = match path {
                         KeyPath::Index(index) => format!("{index}"),
                         KeyPath::Name(name) | KeyPath::QuotedName(name) => format!("{name}"),
@@ -668,9 +668,9 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err()); // Returns an error
     /// ```
     pub fn delete_by_name(&self, name: &str) -> Result<OwnedJsonb> {
-        let jsonb_type = self.jsonb_type()?;
-        match jsonb_type {
-            JsonbType::Object(_) => {
+        let jsonb_item_type = self.jsonb_item_type()?;
+        match jsonb_item_type {
+            JsonbItemType::Object(_) => {
                 let mut object_iter = ObjectIterator::new(*self)?.unwrap();
                 let mut builder = ObjectBuilder::new();
                 for result in &mut object_iter {
@@ -681,7 +681,7 @@ impl RawJsonb<'_> {
                 }
                 Ok(builder.build()?)
             }
-            JsonbType::Array(_) => {
+            JsonbItemType::Array(_) => {
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 let mut builder = ArrayBuilder::with_capacity(array_iter.len());
                 for item_result in &mut array_iter {
@@ -775,10 +775,13 @@ impl RawJsonb<'_> {
         &self,
         keypaths: I,
     ) -> Result<OwnedJsonb> {
-        let jsonb_type = self.jsonb_type()?;
+        let jsonb_item_type = self.jsonb_item_type()?;
         if matches!(
-            jsonb_type,
-            JsonbType::Null | JsonbType::Boolean | JsonbType::Number | JsonbType::String
+            jsonb_item_type,
+            JsonbItemType::Null
+                | JsonbItemType::Boolean
+                | JsonbItemType::Number
+                | JsonbItemType::String
         ) {
             return Err(Error::InvalidJsonType);
         }
@@ -796,9 +799,9 @@ impl RawJsonb<'_> {
                 break;
             };
 
-            let jsonb_type = current.jsonb_type()?;
-            match jsonb_type {
-                JsonbType::Array(_) => {
+            let jsonb_item_type = current.jsonb_item_type()?;
+            match jsonb_item_type {
+                JsonbItemType::Array(_) => {
                     if let KeyPath::Index(index) = path {
                         let array_iter_opt = ArrayIterator::new(current)?;
                         if let Some(mut array_iter) = array_iter_opt {
@@ -822,7 +825,7 @@ impl RawJsonb<'_> {
                     items.clear();
                     break;
                 }
-                JsonbType::Object(_) => {
+                JsonbItemType::Object(_) => {
                     let name = match path {
                         KeyPath::Index(index) => format!("{index}"),
                         KeyPath::Name(name) | KeyPath::QuotedName(name) => format!("{name}"),
@@ -862,9 +865,9 @@ impl RawJsonb<'_> {
         while let Some((current_item, next_del_index)) = items.pop_back() {
             let current_raw_jsonb = current_item.as_raw_jsonb().unwrap();
 
-            let jsonb_type = current_raw_jsonb.jsonb_type()?;
-            let current_del_jsonb = match jsonb_type {
-                JsonbType::Array(_) => {
+            let jsonb_item_type = current_raw_jsonb.jsonb_item_type()?;
+            let current_del_jsonb = match jsonb_item_type {
+                JsonbItemType::Array(_) => {
                     let array_iter = ArrayIterator::new(current_raw_jsonb)?.unwrap();
                     let mut builder = ArrayBuilder::with_capacity(array_iter.len());
                     for (i, item_result) in &mut array_iter.enumerate() {
@@ -877,7 +880,7 @@ impl RawJsonb<'_> {
                     }
                     builder.build()?
                 }
-                JsonbType::Object(_) => {
+                JsonbItemType::Object(_) => {
                     let object_iter = ObjectIterator::new(current_raw_jsonb)?.unwrap();
                     let mut builder = ObjectBuilder::new();
                     for (i, result) in &mut object_iter.enumerate() {
@@ -941,9 +944,9 @@ impl RawJsonb<'_> {
     /// ```
     pub fn exists_all_keys<'a, I: Iterator<Item = &'a str>>(&self, keys: I) -> Result<bool> {
         let mut self_keys = BTreeSet::new();
-        let jsonb_type = self.jsonb_type()?;
-        match jsonb_type {
-            JsonbType::Object(_) => {
+        let jsonb_item_type = self.jsonb_item_type()?;
+        match jsonb_item_type {
+            JsonbItemType::Object(_) => {
                 let mut object_key_iter = ObjectKeyIterator::new(*self)?.unwrap();
                 for result in &mut object_key_iter {
                     let item = result?;
@@ -952,7 +955,7 @@ impl RawJsonb<'_> {
                     }
                 }
             }
-            JsonbType::Array(_) => {
+            JsonbItemType::Array(_) => {
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 for result in &mut array_iter {
                     let item = result?;
@@ -961,7 +964,7 @@ impl RawJsonb<'_> {
                     }
                 }
             }
-            JsonbType::String => {
+            JsonbItemType::String => {
                 let res: Result<String> = from_raw_jsonb(self);
                 if let Ok(self_key) = res {
                     for key in keys {
@@ -1025,9 +1028,9 @@ impl RawJsonb<'_> {
     /// ```
     pub fn exists_any_keys<'a, I: Iterator<Item = &'a str>>(&self, keys: I) -> Result<bool> {
         let mut self_keys = BTreeSet::new();
-        let jsonb_type = self.jsonb_type()?;
-        match jsonb_type {
-            JsonbType::Object(_) => {
+        let jsonb_item_type = self.jsonb_item_type()?;
+        match jsonb_item_type {
+            JsonbItemType::Object(_) => {
                 let mut object_key_iter = ObjectKeyIterator::new(*self)?.unwrap();
                 for result in &mut object_key_iter {
                     let item = result?;
@@ -1036,7 +1039,7 @@ impl RawJsonb<'_> {
                     }
                 }
             }
-            JsonbType::Array(_) => {
+            JsonbItemType::Array(_) => {
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 for result in &mut array_iter {
                     let item = result?;
@@ -1045,7 +1048,7 @@ impl RawJsonb<'_> {
                     }
                 }
             }
-            JsonbType::String => {
+            JsonbItemType::String => {
                 let res: Result<String> = from_raw_jsonb(self);
                 if let Ok(self_key) = res {
                     for key in keys {

@@ -16,7 +16,7 @@
 
 use std::borrow::Cow;
 
-use crate::core::JsonbType;
+use crate::core::JsonbItemType;
 use crate::error::*;
 use crate::from_raw_jsonb;
 use crate::number::Number;
@@ -51,8 +51,8 @@ impl RawJsonb<'_> {
     /// assert!(!raw_jsonb.is_null().unwrap());
     /// ```
     pub fn is_null(&self) -> Result<bool> {
-        let jsonb_type = self.jsonb_type()?;
-        Ok(matches!(jsonb_type, JsonbType::Null))
+        let jsonb_item_type = self.jsonb_item_type()?;
+        Ok(matches!(jsonb_item_type, JsonbItemType::Null))
     }
 
     /// Extracts a null value from a JSONB value.
@@ -168,8 +168,8 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn is_boolean(&self) -> Result<bool> {
-        let jsonb_type = self.jsonb_type()?;
-        Ok(matches!(jsonb_type, JsonbType::Boolean))
+        let jsonb_item_type = self.jsonb_item_type()?;
+        Ok(matches!(jsonb_item_type, JsonbItemType::Boolean))
     }
 
     /// Extracts a boolean value from a JSONB value.
@@ -372,8 +372,8 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn is_number(&self) -> Result<bool> {
-        let jsonb_type = self.jsonb_type()?;
-        Ok(matches!(jsonb_type, JsonbType::Number))
+        let jsonb_item_type = self.jsonb_item_type()?;
+        Ok(matches!(jsonb_item_type, JsonbItemType::Number))
     }
 
     /// Extracts a number from a JSONB value.
@@ -1131,8 +1131,8 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn is_string(&self) -> Result<bool> {
-        let jsonb_type = self.jsonb_type()?;
-        Ok(matches!(jsonb_type, JsonbType::String))
+        let jsonb_item_type = self.jsonb_item_type()?;
+        Ok(matches!(jsonb_item_type, JsonbItemType::String))
     }
 
     /// Extracts a string from a JSONB value.
@@ -1327,8 +1327,8 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn is_array(&self) -> Result<bool> {
-        let jsonb_type = self.jsonb_type()?;
-        Ok(matches!(jsonb_type, JsonbType::Array(_)))
+        let jsonb_item_type = self.jsonb_item_type()?;
+        Ok(matches!(jsonb_item_type, JsonbItemType::Array(_)))
     }
 
     /// Checks if the JSONB value is an object.
@@ -1383,7 +1383,7 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn is_object(&self) -> Result<bool> {
-        let jsonb_type = self.jsonb_type()?;
-        Ok(matches!(jsonb_type, JsonbType::Object(_)))
+        let jsonb_item_type = self.jsonb_item_type()?;
+        Ok(matches!(jsonb_item_type, JsonbItemType::Object(_)))
     }
 }

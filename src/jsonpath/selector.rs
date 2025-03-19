@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
-use crate::core::JsonbType;
+use crate::core::JsonbItemType;
 use crate::core::ObjectIterator;
 use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
@@ -264,8 +264,8 @@ impl<'a> Selector<'a> {
             return Ok(());
         };
 
-        let jsonb_type = curr_raw_jsonb.jsonb_type()?;
-        let JsonbType::Array(arr_len) = jsonb_type else {
+        let jsonb_item_type = curr_raw_jsonb.jsonb_item_type()?;
+        let JsonbItemType::Array(arr_len) = jsonb_item_type else {
             return Ok(());
         };
         for array_index in array_indices {

@@ -22,7 +22,7 @@ use crate::constants::*;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
-use crate::core::JsonbType;
+use crate::core::JsonbItemType;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
 use crate::error::*;
@@ -82,14 +82,14 @@ impl RawJsonb<'_> {
     /// assert_eq!(raw_jsonb.type_of().unwrap(), "null");
     /// ```
     pub fn type_of(&self) -> Result<&'static str> {
-        let jsonb_type = self.jsonb_type()?;
-        match jsonb_type {
-            JsonbType::Null => Ok(TYPE_NULL),
-            JsonbType::Boolean => Ok(TYPE_BOOLEAN),
-            JsonbType::Number => Ok(TYPE_NUMBER),
-            JsonbType::String => Ok(TYPE_STRING),
-            JsonbType::Array(_) => Ok(TYPE_ARRAY),
-            JsonbType::Object(_) => Ok(TYPE_OBJECT),
+        let jsonb_item_type = self.jsonb_item_type()?;
+        match jsonb_item_type {
+            JsonbItemType::Null => Ok(TYPE_NULL),
+            JsonbItemType::Boolean => Ok(TYPE_BOOLEAN),
+            JsonbItemType::Number => Ok(TYPE_NUMBER),
+            JsonbItemType::String => Ok(TYPE_STRING),
+            JsonbItemType::Array(_) => Ok(TYPE_ARRAY),
+            JsonbItemType::Object(_) => Ok(TYPE_OBJECT),
         }
     }
 
@@ -135,10 +135,10 @@ impl RawJsonb<'_> {
     /// assert!(left_raw.contains(&right_raw).unwrap());
     /// ```
     pub fn contains(&self, other: &RawJsonb) -> Result<bool> {
-        let self_type = self.jsonb_type()?;
-        let other_type = other.jsonb_type()?;
+        let self_type = self.jsonb_item_type()?;
+        let other_type = other.jsonb_item_type()?;
         match (self_type, other_type) {
-            (JsonbType::Object(self_len), JsonbType::Object(other_len)) => {
+            (JsonbItemType::Object(self_len), JsonbItemType::Object(other_len)) => {
                 if self_len < other_len {
                     return Ok(false);
                 }
@@ -172,7 +172,7 @@ impl RawJsonb<'_> {
                 }
                 Ok(true)
             }
-            (JsonbType::Array(_), JsonbType::Array(_)) => {
+            (JsonbItemType::Array(_), JsonbItemType::Array(_)) => {
                 let mut self_array_iter = ArrayIterator::new(*self)?.unwrap();
                 let mut other_array_iter = ArrayIterator::new(*other)?.unwrap();
                 let mut self_scalar_set = BTreeSet::new();
@@ -207,8 +207,11 @@ impl RawJsonb<'_> {
                 Ok(true)
             }
             (
-                JsonbType::Array(_),
-                JsonbType::Null | JsonbType::Boolean | JsonbType::Number | JsonbType::String,
+                JsonbItemType::Array(_),
+                JsonbItemType::Null
+                | JsonbItemType::Boolean
+                | JsonbItemType::Number
+                | JsonbItemType::String,
             ) => {
                 let mut self_array_iter = ArrayIterator::new(*self)?.unwrap();
                 let mut self_item_set = BTreeSet::new();
@@ -225,8 +228,14 @@ impl RawJsonb<'_> {
                 Ok(self_item_set.contains(&other_item))
             }
             (
-                JsonbType::Null | JsonbType::Boolean | JsonbType::Number | JsonbType::String,
-                JsonbType::Null | JsonbType::Boolean | JsonbType::Number | JsonbType::String,
+                JsonbItemType::Null
+                | JsonbItemType::Boolean
+                | JsonbItemType::Number
+                | JsonbItemType::String,
+                JsonbItemType::Null
+                | JsonbItemType::Boolean
+                | JsonbItemType::Number
+                | JsonbItemType::String,
             ) => Ok(self.eq(other)),
             (_, _) => Ok(false),
         }
@@ -290,9 +299,9 @@ impl RawJsonb<'_> {
         let mut raw_jsonbs = VecDeque::new();
         raw_jsonbs.push_back(*self);
         while let Some(raw_jsonb) = raw_jsonbs.pop_front() {
-            let jsonb_type = raw_jsonb.jsonb_type()?;
-            match jsonb_type {
-                JsonbType::Array(_) => {
+            let jsonb_item_type = raw_jsonb.jsonb_item_type()?;
+            match jsonb_item_type {
+                JsonbItemType::Array(_) => {
                     let mut array_iter = ArrayIterator::new(raw_jsonb)?.unwrap();
                     for item_result in &mut array_iter {
                         let item = item_result?;
@@ -305,7 +314,7 @@ impl RawJsonb<'_> {
                         }
                     }
                 }
-                JsonbType::Object(_) => {
+                JsonbItemType::Object(_) => {
                     let mut object_iter = ObjectIterator::new(raw_jsonb)?.unwrap();
                     for result in &mut object_iter {
                         let (key, val_item) = result?;
@@ -390,10 +399,10 @@ impl RawJsonb<'_> {
     /// assert_eq!(concatenated.to_string(), "[1,2]");
     /// ```
     pub fn concat(&self, other: &RawJsonb) -> Result<OwnedJsonb> {
-        let self_type = self.jsonb_type()?;
-        let other_type = other.jsonb_type()?;
+        let self_type = self.jsonb_item_type()?;
+        let other_type = other.jsonb_item_type()?;
         match (self_type, other_type) {
-            (JsonbType::Object(_), JsonbType::Object(_)) => {
+            (JsonbItemType::Object(_), JsonbItemType::Object(_)) => {
                 let mut self_object_iter = ObjectIterator::new(*self)?.unwrap();
                 let mut other_object_iter = ObjectIterator::new(*other)?.unwrap();
                 let mut builder = ObjectBuilder::new();
@@ -410,7 +419,7 @@ impl RawJsonb<'_> {
                 }
                 Ok(builder.build()?)
             }
-            (JsonbType::Array(_), JsonbType::Array(_)) => {
+            (JsonbItemType::Array(_), JsonbItemType::Array(_)) => {
                 let mut self_array_iter = ArrayIterator::new(*self)?.unwrap();
                 let mut other_array_iter = ArrayIterator::new(*other)?.unwrap();
                 let len = self_array_iter.len() + other_array_iter.len();
@@ -425,7 +434,7 @@ impl RawJsonb<'_> {
                 }
                 Ok(builder.build()?)
             }
-            (_, JsonbType::Array(_)) => {
+            (_, JsonbItemType::Array(_)) => {
                 let mut other_array_iter = ArrayIterator::new(*other)?.unwrap();
                 let len = other_array_iter.len() + 1;
                 let mut builder = ArrayBuilder::with_capacity(len);
@@ -436,7 +445,7 @@ impl RawJsonb<'_> {
                 }
                 Ok(builder.build()?)
             }
-            (JsonbType::Array(_), _) => {
+            (JsonbItemType::Array(_), _) => {
                 let mut self_array_iter = ArrayIterator::new(*self)?.unwrap();
                 let len = self_array_iter.len() + 1;
                 let mut builder = ArrayBuilder::with_capacity(len);
@@ -495,9 +504,9 @@ impl RawJsonb<'_> {
     /// assert_eq!(stripped.to_string(), "null"); // Remains unchanged
     /// ```
     pub fn strip_nulls(&self) -> Result<OwnedJsonb> {
-        let jsonb_type = self.jsonb_type()?;
-        match jsonb_type {
-            JsonbType::Array(_) => {
+        let jsonb_item_type = self.jsonb_item_type()?;
+        match jsonb_item_type {
+            JsonbItemType::Array(_) => {
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 let mut builder = ArrayBuilder::with_capacity(array_iter.len());
                 for item_result in &mut array_iter {
@@ -511,7 +520,7 @@ impl RawJsonb<'_> {
                 }
                 Ok(builder.build()?)
             }
-            JsonbType::Object(_) => {
+            JsonbItemType::Object(_) => {
                 let mut object_iter = ObjectIterator::new(*self)?.unwrap();
                 let mut builder = ObjectBuilder::new();
                 for result in &mut object_iter {
@@ -592,9 +601,9 @@ impl RawJsonb<'_> {
     }
 
     fn convert_to_comparable_impl(&self, depth: u8, buf: &mut Vec<u8>) -> Result<()> {
-        let jsonb_type = self.jsonb_type()?;
-        match jsonb_type {
-            JsonbType::Array(_) => {
+        let jsonb_item_type = self.jsonb_item_type()?;
+        match jsonb_item_type {
+            JsonbItemType::Array(_) => {
                 buf.push(depth);
                 buf.push(ARRAY_LEVEL);
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
@@ -603,7 +612,7 @@ impl RawJsonb<'_> {
                     self.jsonb_item_to_comparable_impl(depth + 1, item, buf)?;
                 }
             }
-            JsonbType::Object(_) => {
+            JsonbItemType::Object(_) => {
                 buf.push(depth);
                 buf.push(OBJECT_LEVEL);
                 let mut object_iter = ObjectIterator::new(*self)?.unwrap();

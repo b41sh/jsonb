@@ -21,7 +21,7 @@ use byteorder::WriteBytesExt;
 use super::constants::*;
 use super::jentry::JEntry;
 use crate::core::JsonbItem;
-use crate::core::JsonbType;
+use crate::core::JsonbItemType;
 use crate::error::*;
 use crate::Number;
 use crate::OwnedJsonb;
@@ -57,7 +57,7 @@ impl<'a> JsonbItem<'a> {
 }
 
 impl<'a> RawJsonb<'a> {
-    pub(crate) fn jsonb_type(&self) -> Result<JsonbType> {
+    pub(crate) fn jsonb_item_type(&self) -> Result<JsonbItemType> {
         let mut index = 0;
         let (header_type, header_len) = self.read_header(index)?;
         index += 4;
@@ -66,16 +66,16 @@ impl<'a> RawJsonb<'a> {
                 let jentry = self.read_jentry(index)?;
 
                 match jentry.type_code {
-                    NULL_TAG => Ok(JsonbType::Null),
-                    TRUE_TAG => Ok(JsonbType::Boolean),
-                    FALSE_TAG => Ok(JsonbType::Boolean),
-                    NUMBER_TAG => Ok(JsonbType::Number),
-                    STRING_TAG => Ok(JsonbType::String),
+                    NULL_TAG => Ok(JsonbItemType::Null),
+                    TRUE_TAG => Ok(JsonbItemType::Boolean),
+                    FALSE_TAG => Ok(JsonbItemType::Boolean),
+                    NUMBER_TAG => Ok(JsonbItemType::Number),
+                    STRING_TAG => Ok(JsonbItemType::String),
                     _ => Err(Error::InvalidJsonb),
                 }
             }
-            ARRAY_CONTAINER_TAG => Ok(JsonbType::Array(header_len as usize)),
-            OBJECT_CONTAINER_TAG => Ok(JsonbType::Object(header_len as usize)),
+            ARRAY_CONTAINER_TAG => Ok(JsonbItemType::Array(header_len as usize)),
+            OBJECT_CONTAINER_TAG => Ok(JsonbItemType::Object(header_len as usize)),
             _ => Err(Error::InvalidJsonb),
         }
     }
