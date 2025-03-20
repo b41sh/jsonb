@@ -367,7 +367,7 @@ where
 }
 
 /// The value type of JSONB data.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum JsonbType {
     /// The Null JSONB type.
     Null,
@@ -383,7 +383,7 @@ pub enum JsonbType {
     Object(BTreeMap<String, JsonbType>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum JsonbNumberType {
     UInt64,
     Int64,

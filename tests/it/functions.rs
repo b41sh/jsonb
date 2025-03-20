@@ -1642,6 +1642,25 @@ fn test_to_serde_json() {
     }
 }
 
+#[test]
+fn test_jsonb_type() {
+    let sources = vec![
+        r#"true"#,
+        r#"1e20"#,
+        r#"[100,"abc",{"xx":"✅❌💻"}]"#,
+        r#"{"a":1,"b":[1,2,3]}"#,
+        r#"{"ab":{"k1":"v1","k2":"v2"},"cd":[true,100.23,"测试"]}"#,
+    ];
+    for s in sources {
+        let owned_jsonb = s.parse::<OwnedJsonb>().unwrap();
+        let raw_jsonb = owned_jsonb.as_raw();
+        let jsonb_type = raw_jsonb.jsonb_type().unwrap();
+        println!("jsonb_str={:?}", raw_jsonb.to_string());
+        println!("jsonb_type={:?}", jsonb_type);
+    }
+    assert_eq!(1, 2);
+}
+
 fn init_object<'a>(entries: Vec<(&str, Value<'a>)>) -> Value<'a> {
     let mut map = BTreeMap::new();
     for (key, val) in entries {

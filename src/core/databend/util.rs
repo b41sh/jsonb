@@ -14,7 +14,7 @@
 
 use core::ops::Range;
 use std::collections::BTreeMap;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::io::Write;
 
 use byteorder::BigEndian;
@@ -95,7 +95,7 @@ impl<'a> RawJsonb<'a> {
                 }
             }
             ARRAY_CONTAINER_TAG => {
-                let mut arr_type_set = HashSet::new();
+                let mut arr_type_set = BTreeSet::new();
                 let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 for item_result in &mut array_iter {
                     let item = item_result?;
