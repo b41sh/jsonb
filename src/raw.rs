@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 use serde::Serialize;
 
@@ -366,7 +367,7 @@ where
 }
 
 /// The value type of JSONB data.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum JsonbType {
     /// The Null JSONB type.
     Null,
@@ -382,7 +383,7 @@ pub enum JsonbType {
     Object(BTreeMap<String, JsonbType>),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum JsonbNumberType {
     UInt64,
     Int64,

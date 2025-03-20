@@ -16,6 +16,8 @@ use std::cmp::Ordering;
 
 use crate::error::*;
 use crate::from_raw_jsonb;
+use crate::raw::JsonbNumberType;
+use crate::raw::JsonbType;
 use crate::to_owned_jsonb;
 use crate::Number;
 use crate::OwnedJsonb;
@@ -118,7 +120,7 @@ impl<'a> JsonbItem<'a> {
             JsonbItem::Owned(owned) => owned.as_raw().jsonb_type(),
         }
     }
-    
+
     pub(crate) fn jsonb_item_type(&self) -> Result<JsonbItemType> {
         match self {
             JsonbItem::Null => Ok(JsonbItemType::Null),

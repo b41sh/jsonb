@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use core::ops::Range;
+use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::io::Write;
 
 use byteorder::BigEndian;
@@ -20,9 +22,13 @@ use byteorder::WriteBytesExt;
 
 use super::constants::*;
 use super::jentry::JEntry;
+use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
+use crate::core::ObjectIterator;
 use crate::error::*;
+use crate::raw::JsonbNumberType;
+use crate::raw::JsonbType;
 use crate::Number;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
@@ -59,7 +65,7 @@ impl<'a> JsonbItem<'a> {
 impl<'a> RawJsonb<'a> {
     pub fn jsonb_type(&self) -> Result<JsonbType> {
         let mut index = 0;
-        let (header_type, header_len) = self.read_header(index)?;
+        let (header_type, _) = self.read_header(index)?;
         index += 4;
         match header_type {
             SCALAR_CONTAINER_TAG => {
@@ -90,11 +96,11 @@ impl<'a> RawJsonb<'a> {
             }
             ARRAY_CONTAINER_TAG => {
                 let mut arr_type_set = HashSet::new();
-                let array_iter = ArrayIterator::new(*self)?.unwrap();
+                let mut array_iter = ArrayIterator::new(*self)?.unwrap();
                 for item_result in &mut array_iter {
                     let item = item_result?;
                     let jsonb_type = item.jsonb_type()?;
-                    if !arr_type_set.contains(jsonb_type) {
+                    if !arr_type_set.contains(&jsonb_type) {
                         arr_type_set.insert(jsonb_type);
                     }
                 }
@@ -103,7 +109,7 @@ impl<'a> RawJsonb<'a> {
             }
             OBJECT_CONTAINER_TAG => {
                 let mut obj_types = BTreeMap::new();
-                let object_iter = ObjectIterator::new(*self)?.unwrap();
+                let mut object_iter = ObjectIterator::new(*self)?.unwrap();
                 for result in &mut object_iter {
                     let (key, val_item) = result?;
                     let val_type = val_item.jsonb_type()?;
