@@ -364,3 +364,27 @@ where
         Err(Error::InvalidJsonb)
     }
 }
+
+/// The value type of JSONB data.
+#[derive(Debug, Clone, Copy)]
+pub enum JsonbType {
+    /// The Null JSONB type.
+    Null,
+    /// The Boolean JSONB type.
+    Boolean,
+    /// The Number JSONB type.
+    Number(JsonbNumberType),
+    /// The String JSONB type.
+    String,
+    /// The Array JSONB type with the length of items.
+    Array(Vec<JsonbType>),
+    /// The Object JSONB type with the length of key and value pairs.
+    Object(BTreeMap<String, JsonbType>),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum JsonbNumberType {
+    UInt64,
+    Int64,
+    Float64,
+}

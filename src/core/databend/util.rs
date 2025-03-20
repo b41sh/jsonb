@@ -57,6 +57,64 @@ impl<'a> JsonbItem<'a> {
 }
 
 impl<'a> RawJsonb<'a> {
+    pub fn jsonb_type(&self) -> Result<JsonbType> {
+        let mut index = 0;
+        let (header_type, header_len) = self.read_header(index)?;
+        index += 4;
+        match header_type {
+            SCALAR_CONTAINER_TAG => {
+                let jentry = self.read_jentry(index)?;
+                index += 4;
+
+                match jentry.type_code {
+                    NULL_TAG => Ok(JsonbType::Null),
+                    TRUE_TAG => Ok(JsonbType::Boolean),
+                    FALSE_TAG => Ok(JsonbType::Boolean),
+                    NUMBER_TAG => {
+                        let range = Range {
+                            start: index,
+                            end: index + jentry.length as usize,
+                        };
+                        let data = self.slice(range)?;
+                        let num = Number::decode(data)?;
+                        let num_type = match num {
+                            Number::UInt64(_) => JsonbNumberType::UInt64,
+                            Number::Int64(_) => JsonbNumberType::Int64,
+                            Number::Float64(_) => JsonbNumberType::Float64,
+                        };
+                        Ok(JsonbType::Number(num_type))
+                    }
+                    STRING_TAG => Ok(JsonbType::String),
+                    _ => Err(Error::InvalidJsonb),
+                }
+            }
+            ARRAY_CONTAINER_TAG => {
+                let mut arr_type_set = HashSet::new();
+                let array_iter = ArrayIterator::new(*self)?.unwrap();
+                for item_result in &mut array_iter {
+                    let item = item_result?;
+                    let jsonb_type = item.jsonb_type()?;
+                    if !arr_type_set.contains(jsonb_type) {
+                        arr_type_set.insert(jsonb_type);
+                    }
+                }
+                let arr_types: Vec<JsonbType> = arr_type_set.into_iter().collect();
+                Ok(JsonbType::Array(arr_types))
+            }
+            OBJECT_CONTAINER_TAG => {
+                let mut obj_types = BTreeMap::new();
+                let object_iter = ObjectIterator::new(*self)?.unwrap();
+                for result in &mut object_iter {
+                    let (key, val_item) = result?;
+                    let val_type = val_item.jsonb_type()?;
+                    obj_types.insert(key.to_string(), val_type);
+                }
+                Ok(JsonbType::Object(obj_types))
+            }
+            _ => Err(Error::InvalidJsonb),
+        }
+    }
+
     pub(crate) fn jsonb_item_type(&self) -> Result<JsonbItemType> {
         let mut index = 0;
         let (header_type, header_len) = self.read_header(index)?;

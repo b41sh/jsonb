@@ -100,6 +100,25 @@ pub(crate) enum JsonbItem<'a> {
 }
 
 impl<'a> JsonbItem<'a> {
+    pub(crate) fn jsonb_type(&self) -> Result<JsonbType> {
+        match self {
+            JsonbItem::Null => Ok(JsonbType::Null),
+            JsonbItem::Boolean(_) => Ok(JsonbType::Boolean),
+            JsonbItem::Number(data) => {
+                let num = Number::decode(data)?;
+                let num_type = match num {
+                    Number::UInt64(_) => JsonbNumberType::UInt64,
+                    Number::Int64(_) => JsonbNumberType::Int64,
+                    Number::Float64(_) => JsonbNumberType::Float64,
+                };
+                Ok(JsonbType::Number(num_type))
+            }
+            JsonbItem::String(_) => Ok(JsonbType::String),
+            JsonbItem::Raw(raw) => raw.jsonb_type(),
+            JsonbItem::Owned(owned) => owned.as_raw().jsonb_type(),
+        }
+    }
+    
     pub(crate) fn jsonb_item_type(&self) -> Result<JsonbItemType> {
         match self {
             JsonbItem::Null => Ok(JsonbItemType::Null),
