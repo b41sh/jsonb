@@ -21,7 +21,6 @@ use crate::core::Deserializer;
 use crate::core::JsonbItemType;
 use crate::core::ObjectIterator;
 use crate::error::*;
-use crate::Number;
 use crate::OwnedJsonb;
 
 /// Represents JSONB data wrapped around a raw, immutable slice of bytes.

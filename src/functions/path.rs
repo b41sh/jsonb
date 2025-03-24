@@ -26,7 +26,6 @@ use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
 use crate::core::ObjectKeyIterator;
 use crate::error::*;
-use crate::from_raw_jsonb;
 use crate::jsonpath::JsonPath;
 use crate::jsonpath::Selector;
 use crate::keypath::KeyPath;

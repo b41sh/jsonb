@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use crate::error::*;
-use crate::from_raw_jsonb;
 use crate::to_owned_jsonb;
 use crate::Number;
 use crate::OwnedJsonb;
@@ -248,7 +248,7 @@ impl PartialOrd for JsonbItem<'_> {
             }
             (JsonbItem::Raw(self_raw), JsonbItem::String(other_data)) => {
                 let self_str = self_raw.as_str();
-                let other_str = unsafe { std::str::from_utf8_unchecked(other_data.to_vec()) };
+                let other_str = Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(other_data) });
                 if let Ok(Some(self_str)) = self_str {
                     self_str.partial_cmp(&other_str)
                 } else {
@@ -256,7 +256,7 @@ impl PartialOrd for JsonbItem<'_> {
                 }
             }
             (JsonbItem::String(self_data), JsonbItem::Raw(other_raw)) => {
-                let self_str = unsafe { std::str::from_utf8_unchecked(self_data.to_vec()) };
+                let self_str = Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(self_data) });
                 let other_str = other_raw.as_str();
                 if let Ok(Some(other_str)) = other_str {
                     self_str.partial_cmp(&other_str)
