@@ -16,7 +16,6 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 
 use crate::error::*;
-use crate::to_owned_jsonb;
 use crate::Number;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
@@ -109,28 +108,6 @@ impl<'a> JsonbItem<'a> {
             JsonbItem::Raw(raw) => raw.jsonb_item_type(),
             JsonbItem::Owned(owned) => owned.as_raw().jsonb_item_type(),
         }
-    }
-
-    pub(crate) fn to_owned_jsonb(&self) -> Result<OwnedJsonb> {
-        let owned = match self {
-            JsonbItem::Null => to_owned_jsonb(&())?,
-            JsonbItem::Boolean(v) => to_owned_jsonb(&v)?,
-            JsonbItem::Number(data) => {
-                let n = Number::decode(data)?;
-                match n {
-                    Number::UInt64(v) => to_owned_jsonb(&v)?,
-                    Number::Int64(v) => to_owned_jsonb(&v)?,
-                    Number::Float64(v) => to_owned_jsonb(&v)?,
-                }
-            }
-            JsonbItem::String(data) => {
-                let s = unsafe { std::str::from_utf8_unchecked(data) };
-                to_owned_jsonb(&s)?
-            }
-            JsonbItem::Raw(raw) => raw.to_owned(),
-            JsonbItem::Owned(owned) => owned.clone(),
-        };
-        Ok(owned)
     }
 
     pub(crate) fn as_raw_jsonb(&self) -> Option<RawJsonb<'a>> {

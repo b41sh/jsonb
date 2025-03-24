@@ -21,6 +21,7 @@ use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
 use crate::core::ObjectIterator;
+use crate::core::ObjectKeyIterator;
 use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
 use crate::jsonpath::BinaryOperator;
@@ -91,7 +92,7 @@ impl<'a> Selector<'a> {
     pub(crate) fn build(&mut self) -> Result<Vec<OwnedJsonb>> {
         let mut values = Vec::with_capacity(self.items.len());
         while let Some(item) = self.items.pop_front() {
-            let value = item.to_owned_jsonb()?;
+            let value = OwnedJsonb::from_item(item)?;
             values.push(value);
         }
         Ok(values)
@@ -107,7 +108,7 @@ impl<'a> Selector<'a> {
 
     pub(crate) fn build_first(&mut self) -> Result<Option<OwnedJsonb>> {
         if let Some(item) = self.items.pop_front() {
-            let value = item.to_owned_jsonb()?;
+            let value = OwnedJsonb::from_item(item)?;
             Ok(Some(value))
         } else {
             Ok(None)
@@ -222,13 +223,18 @@ impl<'a> Selector<'a> {
             return Ok(());
         };
 
-        let object_iter_opt = ObjectIterator::new(curr_raw_jsonb)?;
+        let object_iter_opt = ObjectKeyIterator::new(curr_raw_jsonb)?;
         if let Some(mut object_iter) = object_iter_opt {
             for result in &mut object_iter {
-                let (key, val_item) = result?;
-                if key.eq(name) {
-                    self.items.push_back(val_item);
-                    break;
+                let item = result?;
+                if let Some(key) = item.as_str() {
+                    if key.eq(name) {
+                        let val_item = object_iter.get_val_item()?;
+                        self.items.push_back(val_item);
+                        break;
+                    }
+                } else {
+                    return Err(Error::InvalidJsonb);
                 }
             }
         }

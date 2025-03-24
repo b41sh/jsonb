@@ -14,7 +14,6 @@
 
 // This file contains functions that dealing with path-based access to JSONB data.
 
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
@@ -80,7 +79,7 @@ impl RawJsonb<'_> {
         if let Some(mut array_iter) = array_iter_opt {
             if let Some(item_result) = array_iter.nth(index) {
                 let item = item_result?;
-                let value = item.to_owned_jsonb()?;
+                let value = OwnedJsonb::from_item(item)?;
                 return Ok(Some(value));
             }
         }
@@ -137,30 +136,52 @@ impl RawJsonb<'_> {
     /// assert!(value.is_none()); // Not an object
     /// ```
     pub fn get_by_name(&self, name: &str, ignore_case: bool) -> Result<Option<OwnedJsonb>> {
-        let object_iter_opt = ObjectIterator::new(*self)?;
+        let object_iter_opt = ObjectKeyIterator::new(*self)?;
         if let Some(mut object_iter) = object_iter_opt {
             if !ignore_case {
                 for result in &mut object_iter {
-                    let (key, val_item) = result?;
-                    if key.eq(name) {
-                        let value = val_item.to_owned_jsonb()?;
-                        return Ok(Some(value));
+                    let item = result?;
+                    if let Some(key) = item.as_str() {
+                        if key.eq(name) {
+                            let val_item = object_iter.get_val_item()?;
+                            let value = OwnedJsonb::from_item(val_item)?;
+                            return Ok(Some(value));
+                        }
+                    } else {
+                        return Err(Error::InvalidJsonb);
                     }
                 }
             } else {
-                let mut item_map = BTreeMap::new();
+                let mut has_ignore_case_matched = false;
                 for result in &mut object_iter {
-                    let (key, val_item) = result?;
-                    if key.eq(name) {
-                        let value = val_item.to_owned_jsonb()?;
-                        return Ok(Some(value));
+                    let item = result?;
+                    if let Some(key) = item.as_str() {
+                        if key.eq(name) {
+                            let val_item = object_iter.get_val_item()?;
+                            let value = OwnedJsonb::from_item(val_item)?;
+                            return Ok(Some(value));
+                        }
+                        if key.eq_ignore_ascii_case(name) {
+                            has_ignore_case_matched = true;
+                        }
+                    } else {
+                        return Err(Error::InvalidJsonb);
                     }
-                    item_map.insert(key, val_item);
                 }
-                for (key, val_item) in item_map.into_iter() {
-                    if name.eq_ignore_ascii_case(key) {
-                        let value = val_item.to_owned_jsonb()?;
-                        return Ok(Some(value));
+                if !has_ignore_case_matched {
+                    return Ok(None);
+                }
+                let mut object_iter = ObjectKeyIterator::new(*self)?.unwrap();
+                for result in &mut object_iter {
+                    let item = result?;
+                    if let Some(key) = item.as_str() {
+                        if key.eq_ignore_ascii_case(name) {
+                            let val_item = object_iter.get_val_item()?;
+                            let value = OwnedJsonb::from_item(val_item)?;
+                            return Ok(Some(value));
+                        }
+                    } else {
+                        return Err(Error::InvalidJsonb);
                     }
                 }
             }
@@ -271,15 +292,20 @@ impl RawJsonb<'_> {
                         KeyPath::Index(index) => format!("{index}"),
                         KeyPath::Name(name) | KeyPath::QuotedName(name) => format!("{name}"),
                     };
-                    let object_iter_opt = ObjectIterator::new(current)?;
+                    let object_iter_opt = ObjectKeyIterator::new(current)?;
                     if let Some(mut object_iter) = object_iter_opt {
                         let mut matched = false;
                         for result in &mut object_iter {
-                            let (key, val_item) = result?;
-                            if key.eq(&name) {
-                                matched = true;
-                                current_item = val_item;
-                                break;
+                            let item = result?;
+                            if let Some(key) = item.as_str() {
+                                if key.eq(&name) {
+                                    matched = true;
+                                    let val_item = object_iter.get_val_item()?;
+                                    current_item = val_item;
+                                    break;
+                                }
+                            } else {
+                                return Err(Error::InvalidJsonb);
                             }
                         }
                         if matched {
@@ -293,7 +319,8 @@ impl RawJsonb<'_> {
                 }
             }
         }
-        Ok(Some(current_item.to_owned_jsonb()?))
+        let value = OwnedJsonb::from_item(current_item)?;
+        Ok(Some(value))
     }
 
     /// Selects elements from the `RawJsonb` by the given `JsonPath`.
