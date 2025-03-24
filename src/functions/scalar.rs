@@ -16,9 +16,9 @@
 
 use std::borrow::Cow;
 
+use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
 use crate::error::*;
-use crate::from_raw_jsonb;
 use crate::number::Number;
 use crate::RawJsonb;
 
@@ -226,10 +226,10 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn as_bool(&self) -> Result<Option<bool>> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
-            JsonbItem::Boolean(v) => Ok(Some(v))
-            _ => Ok(None)
+            JsonbItem::Boolean(v) => Ok(Some(v)),
+            _ => Ok(None),
         }
     }
 
@@ -299,7 +299,7 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn to_bool(&self) -> Result<bool> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::Boolean(v) => {
                 return Ok(v);
@@ -446,13 +446,13 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err()); // Decodes should return Err
     /// ```
     pub fn as_number(&self) -> Result<Option<Number>> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::Number(data) => {
                 let num = Number::decode(data)?;
                 Ok(Some(num))
             }
-            _ => Ok(None)
+            _ => Ok(None),
         }
     }
 
@@ -553,13 +553,13 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn as_i64(&self) -> Result<Option<i64>> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::Number(data) => {
                 let num = Number::decode(data)?;
                 Ok(num.as_i64())
             }
-            _ => Ok(None)
+            _ => Ok(None),
         }
     }
 
@@ -632,7 +632,7 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn to_i64(&self) -> Result<i64> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::Boolean(v) => {
                 if v {
@@ -787,13 +787,13 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn as_u64(&self) -> Result<Option<u64>> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::Number(data) => {
                 let num = Number::decode(data)?;
                 Ok(num.as_u64())
             }
-            _ => Ok(None)
+            _ => Ok(None),
         }
     }
 
@@ -870,7 +870,7 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn to_u64(&self) -> Result<u64> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::Boolean(v) => {
                 if v {
@@ -1017,13 +1017,13 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn as_f64(&self) -> Result<Option<f64>> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::Number(data) => {
                 let num = Number::decode(data)?;
                 Ok(num.as_f64())
             }
-            _ => Ok(None)
+            _ => Ok(None),
         }
     }
 
@@ -1093,7 +1093,7 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn to_f64(&self) -> Result<f64> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::Boolean(v) => {
                 if v {
@@ -1236,12 +1236,13 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn as_str(&self) -> Result<Option<Cow<'_, str>>> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::String(data) => {
-                Ok(Cow::Borrowed(data))
+                let s = unsafe { std::str::from_utf8_unchecked(data) };
+                Ok(Some(Cow::Borrowed(s)))
             }
-            _ => Ok(None)
+            _ => Ok(None),
         }
     }
 
@@ -1302,7 +1303,7 @@ impl RawJsonb<'_> {
     /// assert!(result.is_err());
     /// ```
     pub fn to_str(&self) -> Result<String> {
-        let jsonb_item = JsonbItem::from_raw_jsonb(self)?;
+        let jsonb_item = JsonbItem::from_raw_jsonb(*self)?;
         match jsonb_item {
             JsonbItem::Boolean(v) => {
                 if v {
@@ -1316,9 +1317,10 @@ impl RawJsonb<'_> {
                 Ok(format!("{}", num))
             }
             JsonbItem::String(data) => {
-                String::from_utf8(data)
+                let s = unsafe { String::from_utf8_unchecked(data.to_vec()) };
+                Ok(s)
             }
-            _ => Err(Error::InvalidCast)
+            _ => Err(Error::InvalidCast),
         }
     }
 
