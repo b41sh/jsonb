@@ -965,8 +965,7 @@ impl RawJsonb<'_> {
                 }
             }
             JsonbItemType::String => {
-                let res: Result<String> = from_raw_jsonb(self);
-                if let Ok(self_key) = res {
+                if let Some(self_key) = self.as_str()? {
                     for key in keys {
                         if self_key != key {
                             return Ok(false);
@@ -1049,8 +1048,7 @@ impl RawJsonb<'_> {
                 }
             }
             JsonbItemType::String => {
-                let res: Result<String> = from_raw_jsonb(self);
-                if let Ok(self_key) = res {
+                if let Some(self_key) = self.as_str()? {
                     for key in keys {
                         if self_key == key {
                             return Ok(true);

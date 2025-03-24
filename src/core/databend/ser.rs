@@ -378,8 +378,7 @@ impl ser::SerializeMap for ObjectSerializer<'_> {
         }
         let mut key_strs = Vec::with_capacity(self.keys.len());
         for key in self.keys.into_iter() {
-            let key_str_res: Result<String> = from_raw_jsonb(&key.as_raw());
-            let Ok(key_str) = key_str_res else {
+            let Ok(Some(key_str)) = key.as_raw().as_str() else {
                 return Err(ser::Error::custom("Invalid object key".to_string()));
             };
             key_strs.push(key_str);
