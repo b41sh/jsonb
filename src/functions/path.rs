@@ -136,9 +136,26 @@ impl RawJsonb<'_> {
     /// assert!(value.is_none()); // Not an object
     /// ```
     pub fn get_by_name(&self, name: &str, ignore_case: bool) -> Result<Option<OwnedJsonb>> {
-        let object_iter_opt = ObjectKeyIterator::new(*self)?;
-        if let Some(mut object_iter) = object_iter_opt {
-            if !ignore_case {
+        if let Some(val_item) = self.find_object_matched_value(name)? {
+            let value = OwnedJsonb::from_item(val_item)?;
+            return Ok(Some(value));
+        }
+        if ignore_case {
+            let mut object_iter = ObjectKeyIterator::new(*self)?.unwrap();
+            for result in &mut object_iter {
+                let item = result?;
+                if let Some(key) = item.as_str() {
+                    if key.eq_ignore_ascii_case(name) {
+                        let val_item = object_iter.get_val_item()?;
+                        let value = OwnedJsonb::from_item(val_item)?;
+                        return Ok(Some(value));
+                    }
+                } else {
+                    return Err(Error::InvalidJsonb);
+                }
+            }
+        }
+/**
                 let name_len = name.len();
                 let name_bytes = name.as_bytes();
                 for result in &mut object_iter {
@@ -163,41 +180,7 @@ impl RawJsonb<'_> {
                         return Err(Error::InvalidJsonb);
                     }
                 }
-            } else {
-                let mut has_ignore_case_matched = false;
-                for result in &mut object_iter {
-                    let item = result?;
-                    if let Some(key) = item.as_str() {
-                        if key.eq(name) {
-                            let val_item = object_iter.get_val_item()?;
-                            let value = OwnedJsonb::from_item(val_item)?;
-                            return Ok(Some(value));
-                        }
-                        if key.eq_ignore_ascii_case(name) {
-                            has_ignore_case_matched = true;
-                        }
-                    } else {
-                        return Err(Error::InvalidJsonb);
-                    }
-                }
-                if !has_ignore_case_matched {
-                    return Ok(None);
-                }
-                let mut object_iter = ObjectKeyIterator::new(*self)?.unwrap();
-                for result in &mut object_iter {
-                    let item = result?;
-                    if let Some(key) = item.as_str() {
-                        if key.eq_ignore_ascii_case(name) {
-                            let val_item = object_iter.get_val_item()?;
-                            let value = OwnedJsonb::from_item(val_item)?;
-                            return Ok(Some(value));
-                        }
-                    } else {
-                        return Err(Error::InvalidJsonb);
-                    }
-                }
-            }
-        }
+*/
         Ok(None)
     }
 

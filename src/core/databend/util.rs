@@ -80,6 +80,115 @@ impl<'a> RawJsonb<'a> {
         }
     }
 
+    pub(crate) fn find_object_matched_value(&self, name: &'a str) -> Result<Option<JsonbItem<'a>>> {
+        let (header_type, header_len) = raw_jsonb.read_header(0)?;
+        if header_type != OBJECT_CONTAINER_TAG || header_len == 0 {
+            return Ok(None);
+        }
+        let length = header_len as usize;
+        let mut index = 0;
+        let mut jentry_offset = 4;
+        let mut item_offset = 4 + 8 * length;
+
+        let mut key_matched = false;
+        let name_len = name.len();
+        let name_bytes = name.as_bytes();
+        while index < length {
+            let jentry = match self.read_jentry(jentry_offset) {
+                Ok(jentry) => jentry,
+                Err(err) => return Err(err),
+            };
+            let key_len = jentry.length as usize;
+
+            index += 1;
+            jentry_offset += 4;
+            item_offset += key_len;
+
+            if name_len == key_len {
+                let key_range = Range {
+                    start: item_offset - key_len,
+                    end: item_offset,
+                };
+                let data = match self.slice(key_range) {
+                    Ok(data) => data,
+                    Err(err) => return Err(err),
+                };
+                if name_bytes.eq(data) {
+                    key_matched = true;
+                    break;
+                }
+            }
+        }
+
+        if !key_matched {
+            return Ok(None);
+        }
+        let val_index = index - 1;
+        // skip rest keys and values.
+        while index < length + val_index {
+            let jentry = match self.read_jentry(jentry_offset) {
+                Ok(jentry) => jentry,
+                Err(err) => return Err(err),
+            };
+            index += 1;
+            jentry_offset += 4;
+            item_offset += jentry.length as usize;
+        }
+        let jentry = match self.read_jentry(jentry_offset) {
+            Ok(jentry) => jentry,
+            Err(err) => return Err(err),
+        };
+        let value_len = jentry.length as usize;
+
+        let value_range = Range {
+            start: self.item_offset,
+            end: self.item_offset + value_len,
+        };
+        let data = match self.raw_jsonb.slice(value_range) {
+            Ok(data) => data,
+            Err(err) => return Err(err),
+        };
+        let value_item = jentry_to_jsonb_item(jentry, data);
+        Ok(Some(value_item))
+    }
+}
+
+impl<'a> Iterator for ObjectKeyIterator<'a> {
+    type Item = Result<JsonbItem<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.length {
+            return None;
+        }
+        let jentry = match self.raw_jsonb.read_jentry(self.jentry_offset) {
+            Ok(jentry) => jentry,
+            Err(err) => return Some(Err(err)),
+        };
+
+        let key_length = jentry.length as usize;
+        let key_range = Range {
+            start: self.item_offset,
+            end: self.item_offset + key_length,
+        };
+        let data = match self.raw_jsonb.slice(key_range) {
+            Ok(data) => data,
+            Err(err) => return Some(Err(err)),
+        };
+        let key_item = jentry_to_jsonb_item(jentry, data);
+
+        self.index += 1;
+        self.jentry_offset += 4;
+        self.item_offset += key_length;
+
+        Some(Ok(key_item))
+    }
+
+
+
+
+
+
+
     pub(super) fn read_header(&self, index: usize) -> Result<(u32, u32)> {
         let header = self.read_u32(index)?;
         let header_type = header & CONTAINER_HEADER_TYPE_MASK;
