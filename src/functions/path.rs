@@ -136,25 +136,14 @@ impl RawJsonb<'_> {
     /// assert!(value.is_none()); // Not an object
     /// ```
     pub fn get_by_name(&self, name: &str, ignore_case: bool) -> Result<Option<OwnedJsonb>> {
-        if let Some(val_item) = self.find_object_matched_value(name)? {
+        if let Some(val_item) = self.find_object_matched_value(name, |name, key| key.eq(name))? {
             let value = OwnedJsonb::from_item(val_item)?;
             return Ok(Some(value));
         }
         if ignore_case {
-            let mut object_iter_opt = ObjectKeyIterator::new(*self)?;
-            if let Some(mut object_iter) = object_iter_opt {
-                for result in &mut object_iter {
-                    let item = result?;
-                    if let Some(key) = item.as_str() {
-                        if key.eq_ignore_ascii_case(name) {
-                            let val_item = object_iter.get_val_item()?;
-                            let value = OwnedJsonb::from_item(val_item)?;
-                            return Ok(Some(value));
-                        }
-                    } else {
-                        return Err(Error::InvalidJsonb);
-                    }
-                }
+            if let Some(val_item) = self.find_object_matched_value(name, |name, key| key.eq_ignore_ascii_case(name))? {
+                let value = OwnedJsonb::from_item(val_item)?;
+                return Ok(Some(value));
             }
         }
         /**

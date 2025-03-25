@@ -80,7 +80,7 @@ impl<'a> RawJsonb<'a> {
         }
     }
 
-    pub(crate) fn find_object_matched_value(&self, name: &'a str) -> Result<Option<JsonbItem<'a>>> {
+    pub(crate) fn find_object_matched_value(&self, name: &'a str, eq_func: impl Fn(&[u8], &[u8]) -> bool) -> Result<Option<JsonbItem<'a>>> {
         let (header_type, header_len) = self.read_header(0)?;
         if header_type != OBJECT_CONTAINER_TAG || header_len == 0 {
             return Ok(None);
@@ -113,7 +113,7 @@ impl<'a> RawJsonb<'a> {
                     Ok(data) => data,
                     Err(err) => return Err(err),
                 };
-                if name_bytes.eq(data) {
+                if eq_func(name_bytes, data) {
                     key_matched = true;
                     break;
                 }
@@ -350,3 +350,4 @@ fn jentry_to_jsonb_item(jentry: JEntry, data: &[u8]) -> JsonbItem<'_> {
         _ => unreachable!(),
     }
 }
+
