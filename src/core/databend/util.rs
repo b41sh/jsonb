@@ -80,7 +80,7 @@ impl<'a> RawJsonb<'a> {
         }
     }
 
-    pub(crate) fn find_object_matched_value(&self, name: &'a str, eq_func: impl Fn(&[u8], &[u8]) -> bool) -> Result<Option<JsonbItem<'a>>> {
+    pub(crate) fn get_object_value_by_key_name(&self, name: &'a str, eq_func: impl Fn(&[u8], &[u8]) -> bool) -> Result<Option<JsonbItem<'a>>> {
         let (header_type, header_len) = self.read_header(0)?;
         if header_type != OBJECT_CONTAINER_TAG || header_len == 0 {
             return Ok(None);
@@ -94,26 +94,21 @@ impl<'a> RawJsonb<'a> {
         let name_len = name.len();
         let name_bytes = name.as_bytes();
         while index < length {
-            let jentry = match self.read_jentry(jentry_offset) {
-                Ok(jentry) => jentry,
-                Err(err) => return Err(err),
-            };
-            let key_len = jentry.length as usize;
+            let key_jentry = self.read_jentry(jentry_offset)?;
+            let key_len = key_jentry.length as usize;
 
             index += 1;
             jentry_offset += 4;
             item_offset += key_len;
 
+            // check if key match the name.
             if name_len == key_len {
                 let key_range = Range {
                     start: item_offset - key_len,
                     end: item_offset,
                 };
-                let data = match self.slice(key_range) {
-                    Ok(data) => data,
-                    Err(err) => return Err(err),
-                };
-                if eq_func(name_bytes, data) {
+                let key_data = self.slice(key_range)?;
+                if eq_func(name_bytes, key_data) {
                     key_matched = true;
                     break;
                 }
@@ -124,30 +119,23 @@ impl<'a> RawJsonb<'a> {
             return Ok(None);
         }
         let val_index = index - 1;
-        // skip rest keys and values.
+        // skip unmatched keys and values.
         while index < length + val_index {
-            let jentry = match self.read_jentry(jentry_offset) {
-                Ok(jentry) => jentry,
-                Err(err) => return Err(err),
-            };
+            let jentry = self.read_jentry(jentry_offset)?;
             index += 1;
             jentry_offset += 4;
             item_offset += jentry.length as usize;
         }
-        let jentry = match self.read_jentry(jentry_offset) {
-            Ok(jentry) => jentry,
-            Err(err) => return Err(err),
-        };
-        let value_len = jentry.length as usize;
+
+        // read value item data
+        let value_jentry = self.read_jentry(jentry_offset)?;
+        let value_len = value_jentry.length as usize;
 
         let value_range = Range {
             start: item_offset,
             end: item_offset + value_len,
         };
-        let data = match self.slice(value_range) {
-            Ok(data) => data,
-            Err(err) => return Err(err),
-        };
+        let value_data = self.slice(value_range)?;
         let value_item = jentry_to_jsonb_item(jentry, data);
         Ok(Some(value_item))
     }
@@ -339,7 +327,7 @@ impl Number {
     }
 }
 
-fn jentry_to_jsonb_item(jentry: JEntry, data: &[u8]) -> JsonbItem<'_> {
+pub(super) fn jentry_to_jsonb_item(jentry: JEntry, data: &[u8]) -> JsonbItem<'_> {
     match jentry.type_code {
         NULL_TAG => JsonbItem::Null,
         TRUE_TAG => JsonbItem::Boolean(true),
@@ -350,4 +338,3 @@ fn jentry_to_jsonb_item(jentry: JEntry, data: &[u8]) -> JsonbItem<'_> {
         _ => unreachable!(),
     }
 }
-

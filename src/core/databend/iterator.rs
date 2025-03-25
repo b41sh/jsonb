@@ -112,39 +112,6 @@ impl<'a> ObjectKeyIterator<'a> {
     pub(crate) fn len(&self) -> usize {
         self.length
     }
-
-    pub(crate) fn get_val_item(&mut self) -> Result<JsonbItem<'a>> {
-        assert!(self.index > 0);
-        let val_index = self.index - 1;
-        // skip rest keys and values.
-        while self.index < self.length + val_index {
-            let jentry = match self.raw_jsonb.read_jentry(self.jentry_offset) {
-                Ok(jentry) => jentry,
-                Err(err) => return Err(err),
-            };
-            let length = jentry.length as usize;
-
-            self.index += 1;
-            self.jentry_offset += 4;
-            self.item_offset += length;
-        }
-        let jentry = match self.raw_jsonb.read_jentry(self.jentry_offset) {
-            Ok(jentry) => jentry,
-            Err(err) => return Err(err),
-        };
-        let value_length = jentry.length as usize;
-
-        let value_range = Range {
-            start: self.item_offset,
-            end: self.item_offset + value_length,
-        };
-        let data = match self.raw_jsonb.slice(value_range) {
-            Ok(data) => data,
-            Err(err) => return Err(err),
-        };
-        let value_item = jentry_to_jsonb_item(jentry, data);
-        Ok(value_item)
-    }
 }
 
 impl<'a> Iterator for ObjectKeyIterator<'a> {
@@ -261,17 +228,5 @@ impl<'a> Iterator for ObjectIterator<'a> {
             }
             None => None,
         }
-    }
-}
-
-fn jentry_to_jsonb_item(jentry: JEntry, data: &[u8]) -> JsonbItem<'_> {
-    match jentry.type_code {
-        NULL_TAG => JsonbItem::Null,
-        TRUE_TAG => JsonbItem::Boolean(true),
-        FALSE_TAG => JsonbItem::Boolean(false),
-        NUMBER_TAG => JsonbItem::Number(data),
-        STRING_TAG => JsonbItem::String(data),
-        CONTAINER_TAG => JsonbItem::Raw(RawJsonb::new(data)),
-        _ => unreachable!(),
     }
 }

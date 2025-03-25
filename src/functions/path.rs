@@ -136,43 +136,16 @@ impl RawJsonb<'_> {
     /// assert!(value.is_none()); // Not an object
     /// ```
     pub fn get_by_name(&self, name: &str, ignore_case: bool) -> Result<Option<OwnedJsonb>> {
-        if let Some(val_item) = self.find_object_matched_value(name, |name, key| key.eq(name))? {
+        if let Some(val_item) = self.get_object_value_by_key_name(name, |name, key| key.eq(name))? {
             let value = OwnedJsonb::from_item(val_item)?;
             return Ok(Some(value));
         }
         if ignore_case {
-            if let Some(val_item) = self.find_object_matched_value(name, |name, key| key.eq_ignore_ascii_case(name))? {
+            if let Some(val_item) = self.get_object_value_by_key_name(name, |name, key| key.eq_ignore_ascii_case(name))? {
                 let value = OwnedJsonb::from_item(val_item)?;
                 return Ok(Some(value));
             }
         }
-        /**
-                        let name_len = name.len();
-                        let name_bytes = name.as_bytes();
-                        for result in &mut object_iter {
-                            let item = result?;
-                            if let Some(key) = item.as_str() {
-                                if key.len() != name_len {
-                                    continue;
-                                }
-                                let key_bytes = key.as_bytes();
-                                let r = unsafe { libc::memcmp(
-                                    name_bytes.as_ptr() as *const libc::c_void,
-                                    key_bytes.as_ptr() as *const libc::c_void,
-                                    name_len,
-                                )};
-                                //if key.eq(name) {
-                                if r == 0 {
-                                    let val_item = object_iter.get_val_item()?;
-                                    let value = OwnedJsonb::from_item(val_item)?;
-                                    return Ok(Some(value));
-                                }
-                            } else {
-                                return Err(Error::InvalidJsonb);
-                            }
-                        }
-        */
-        Ok(None)
     }
 
     /// Gets the value at the specified key path in a JSONB value.
@@ -278,27 +251,11 @@ impl RawJsonb<'_> {
                         KeyPath::Index(index) => format!("{index}"),
                         KeyPath::Name(name) | KeyPath::QuotedName(name) => format!("{name}"),
                     };
-                    let object_iter_opt = ObjectKeyIterator::new(current)?;
-                    if let Some(mut object_iter) = object_iter_opt {
-                        let mut matched = false;
-                        for result in &mut object_iter {
-                            let item = result?;
-                            if let Some(key) = item.as_str() {
-                                if key.eq(&name) {
-                                    matched = true;
-                                    let val_item = object_iter.get_val_item()?;
-                                    current_item = val_item;
-                                    break;
-                                }
-                            } else {
-                                return Err(Error::InvalidJsonb);
-                            }
-                        }
-                        if matched {
-                            continue;
-                        }
+                    if let Some(val_item) = current.get_object_value_by_key_name(&name, |name, key| key.eq(name))? {
+                        current_item = val_item;
+                    } else {
+                        return Ok(None);
                     }
-                    return Ok(None);
                 }
                 _ => {
                     return Ok(None);

@@ -223,20 +223,8 @@ impl<'a> Selector<'a> {
             return Ok(());
         };
 
-        let object_iter_opt = ObjectKeyIterator::new(curr_raw_jsonb)?;
-        if let Some(mut object_iter) = object_iter_opt {
-            for result in &mut object_iter {
-                let item = result?;
-                if let Some(key) = item.as_str() {
-                    if key.eq(name) {
-                        let val_item = object_iter.get_val_item()?;
-                        self.items.push_back(val_item);
-                        break;
-                    }
-                } else {
-                    return Err(Error::InvalidJsonb);
-                }
-            }
+        if let Some(val_item) = curr_raw_jsonb.get_object_value_by_key_name(name, |name, key| key.eq(name))? {
+            self.items.push_back(val_item);
         }
         Ok(())
     }
