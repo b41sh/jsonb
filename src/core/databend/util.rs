@@ -165,13 +165,15 @@ impl<'a> RawJsonb<'a> {
     }
 
     pub(super) fn read_u32(&self, idx: usize) -> Result<u32> {
-        let bytes: [u8; 4] = self
-            .data
-            .get(idx..idx + 4)
-            .ok_or(Error::InvalidEOF)?
-            .try_into()
-            .unwrap();
-        Ok(u32::from_be_bytes(bytes))
+        let slice = self.data.get(idx..idx + 4).ok_or(Error::InvalidEOF)?;
+
+        // Use a pointer cast to avoid copying
+        let ptr = slice.as_ptr() as *const [u8; 4];
+
+        // Safety: We've already checked that the slice has length 4,
+        let bytes: &[u8; 4] = unsafe { &*ptr };
+
+        Ok(u32::from_be_bytes(*bytes))
     }
 
     pub(super) fn slice(&self, range: Range<usize>) -> Result<&'a [u8]> {
