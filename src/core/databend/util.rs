@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::ops::Range;
+use std::borrow::Cow;
 use std::io::Write;
 
 use byteorder::BigEndian;
@@ -80,7 +81,11 @@ impl<'a> RawJsonb<'a> {
         }
     }
 
-    pub(crate) fn get_object_value_by_key_name(&self, name: &'a str, eq_func: impl Fn(&[u8], &[u8]) -> bool) -> Result<Option<JsonbItem<'a>>> {
+    pub(crate) fn get_object_value_by_key_name(
+        &self,
+        key_name: &Cow<'a, str>,
+        eq_func: impl Fn(&[u8], &[u8]) -> bool,
+    ) -> Result<Option<JsonbItem<'a>>> {
         let (header_type, header_len) = self.read_header(0)?;
         if header_type != OBJECT_CONTAINER_TAG || header_len == 0 {
             return Ok(None);
@@ -91,8 +96,8 @@ impl<'a> RawJsonb<'a> {
         let mut item_offset = 4 + 8 * length;
 
         let mut key_matched = false;
-        let name_len = name.len();
-        let name_bytes = name.as_bytes();
+        let name_len = key_name.len();
+        let name_bytes = key_name.as_bytes();
         while index < length {
             let key_jentry = self.read_jentry(jentry_offset)?;
             let key_len = key_jentry.length as usize;
@@ -136,7 +141,7 @@ impl<'a> RawJsonb<'a> {
             end: item_offset + value_len,
         };
         let value_data = self.slice(value_range)?;
-        let value_item = jentry_to_jsonb_item(jentry, data);
+        let value_item = jentry_to_jsonb_item(value_jentry, value_data);
         Ok(Some(value_item))
     }
 

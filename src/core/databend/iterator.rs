@@ -17,6 +17,7 @@ use std::ops::Range;
 
 use super::constants::*;
 use super::jentry::JEntry;
+use crate::core::databend::util::jentry_to_jsonb_item;
 use crate::core::JsonbItem;
 use crate::error::Result;
 use crate::RawJsonb;

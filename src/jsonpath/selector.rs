@@ -21,7 +21,6 @@ use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
 use crate::core::ObjectIterator;
-use crate::core::ObjectKeyIterator;
 use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
 use crate::jsonpath::BinaryOperator;
@@ -223,7 +222,10 @@ impl<'a> Selector<'a> {
             return Ok(());
         };
 
-        if let Some(val_item) = curr_raw_jsonb.get_object_value_by_key_name(name, |name, key| key.eq(name))? {
+        let key_name = Cow::Borrowed(name);
+        if let Some(val_item) =
+            curr_raw_jsonb.get_object_value_by_key_name(&key_name, |name, key| key.eq(name))?
+        {
             self.items.push_back(val_item);
         }
         Ok(())

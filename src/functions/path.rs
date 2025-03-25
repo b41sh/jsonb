@@ -14,6 +14,7 @@
 
 // This file contains functions that dealing with path-based access to JSONB data.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
@@ -136,16 +137,22 @@ impl RawJsonb<'_> {
     /// assert!(value.is_none()); // Not an object
     /// ```
     pub fn get_by_name(&self, name: &str, ignore_case: bool) -> Result<Option<OwnedJsonb>> {
-        if let Some(val_item) = self.get_object_value_by_key_name(name, |name, key| key.eq(name))? {
+        let key_name = Cow::Borrowed(name);
+        if let Some(val_item) =
+            self.get_object_value_by_key_name(&key_name, |name, key| key.eq(name))?
+        {
             let value = OwnedJsonb::from_item(val_item)?;
             return Ok(Some(value));
         }
         if ignore_case {
-            if let Some(val_item) = self.get_object_value_by_key_name(name, |name, key| key.eq_ignore_ascii_case(name))? {
+            if let Some(val_item) = self.get_object_value_by_key_name(&key_name, |name, key| {
+                key.eq_ignore_ascii_case(name)
+            })? {
                 let value = OwnedJsonb::from_item(val_item)?;
                 return Ok(Some(value));
             }
         }
+        Ok(None)
     }
 
     /// Gets the value at the specified key path in a JSONB value.
@@ -247,11 +254,13 @@ impl RawJsonb<'_> {
                     return Ok(None);
                 }
                 JsonbItemType::Object(_) => {
-                    let name = match path {
-                        KeyPath::Index(index) => format!("{index}"),
-                        KeyPath::Name(name) | KeyPath::QuotedName(name) => format!("{name}"),
+                    let name: Cow<'a, str> = match path {
+                        KeyPath::Index(index) => Cow::Owned(index.to_string()),
+                        KeyPath::Name(name) | KeyPath::QuotedName(name) => Cow::Borrowed(name),
                     };
-                    if let Some(val_item) = current.get_object_value_by_key_name(&name, |name, key| key.eq(name))? {
+                    if let Some(val_item) =
+                        current.get_object_value_by_key_name(&name, |name, key| key.eq(name))?
+                    {
                         current_item = val_item;
                     } else {
                         return Ok(None);
