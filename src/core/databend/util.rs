@@ -81,7 +81,7 @@ impl<'a> RawJsonb<'a> {
     }
 
     pub(crate) fn find_object_matched_value(&self, name: &'a str) -> Result<Option<JsonbItem<'a>>> {
-        let (header_type, header_len) = raw_jsonb.read_header(0)?;
+        let (header_type, header_len) = self.read_header(0)?;
         if header_type != OBJECT_CONTAINER_TAG || header_len == 0 {
             return Ok(None);
         }
@@ -141,53 +141,16 @@ impl<'a> RawJsonb<'a> {
         let value_len = jentry.length as usize;
 
         let value_range = Range {
-            start: self.item_offset,
-            end: self.item_offset + value_len,
+            start: item_offset,
+            end: item_offset + value_len,
         };
-        let data = match self.raw_jsonb.slice(value_range) {
+        let data = match self.slice(value_range) {
             Ok(data) => data,
             Err(err) => return Err(err),
         };
         let value_item = jentry_to_jsonb_item(jentry, data);
         Ok(Some(value_item))
     }
-}
-
-impl<'a> Iterator for ObjectKeyIterator<'a> {
-    type Item = Result<JsonbItem<'a>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.length {
-            return None;
-        }
-        let jentry = match self.raw_jsonb.read_jentry(self.jentry_offset) {
-            Ok(jentry) => jentry,
-            Err(err) => return Some(Err(err)),
-        };
-
-        let key_length = jentry.length as usize;
-        let key_range = Range {
-            start: self.item_offset,
-            end: self.item_offset + key_length,
-        };
-        let data = match self.raw_jsonb.slice(key_range) {
-            Ok(data) => data,
-            Err(err) => return Some(Err(err)),
-        };
-        let key_item = jentry_to_jsonb_item(jentry, data);
-
-        self.index += 1;
-        self.jentry_offset += 4;
-        self.item_offset += key_length;
-
-        Some(Ok(key_item))
-    }
-
-
-
-
-
-
 
     pub(super) fn read_header(&self, index: usize) -> Result<(u32, u32)> {
         let header = self.read_u32(index)?;
@@ -373,5 +336,17 @@ impl Number {
             }
         };
         Ok(num)
+    }
+}
+
+fn jentry_to_jsonb_item(jentry: JEntry, data: &[u8]) -> JsonbItem<'_> {
+    match jentry.type_code {
+        NULL_TAG => JsonbItem::Null,
+        TRUE_TAG => JsonbItem::Boolean(true),
+        FALSE_TAG => JsonbItem::Boolean(false),
+        NUMBER_TAG => JsonbItem::Number(data),
+        STRING_TAG => JsonbItem::String(data),
+        CONTAINER_TAG => JsonbItem::Raw(RawJsonb::new(data)),
+        _ => unreachable!(),
     }
 }
