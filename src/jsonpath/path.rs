@@ -41,6 +41,8 @@ pub enum Path<'a> {
     Current,
     /// `.*` represents selecting all elements in an Object.
     DotWildcard,
+    /// `.**` represents
+    RecursiveDotWildcard(Option<ArrayIndex>),
     /// `[*]` represents selecting all elements in an Array.
     BracketWildcard,
     /// `.<name>` represents selecting element that matched the name in an Object, like `$.event`.
@@ -280,6 +282,14 @@ impl Display for Path<'_> {
             Path::DotWildcard => {
                 write!(f, ".*")?;
             }
+            Path::RecursiveDotWildcard(index_opt) => {
+                write!(f, ".**")?;
+                if let Some(index) = index_opt {
+                    write!(f, "{{")?;
+                    write!(f, "{index}")?;
+                    write!(f, "}}")?;
+                }
+            }
             Path::BracketWildcard => {
                 write!(f, "[*]")?;
             }
@@ -450,3 +460,4 @@ impl Display for Expr<'_> {
         Ok(())
     }
 }
+

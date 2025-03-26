@@ -24,6 +24,47 @@ JsonPath {
 
 
 ---------- Input ----------
+$.**
+---------- Output ---------
+$.**
+---------- AST ------------
+JsonPath {
+    paths: [
+        Root,
+        RecursiveDotWildcard(
+            None,
+        ),
+    ],
+}
+
+
+---------- Input ----------
+$.**{2 to last}
+---------- Output ---------
+$.**{2 to last}
+---------- AST ------------
+JsonPath {
+    paths: [
+        Root,
+        RecursiveDotWildcard(
+            Some(
+                Slice(
+                    (
+                        Index(
+                            2,
+                        ),
+                        LastIndex(
+                            0,
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    ],
+}
+
+
+---------- Input ----------
 $[*]
 ---------- Output ---------
 $[*]

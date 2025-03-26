@@ -179,6 +179,22 @@ fn bracket_wildcard(input: &[u8]) -> IResult<&[u8], ()> {
     )(input)
 }
 
+
+fn recursive_dot_wildcard(input: &[u8]) -> IResult<&[u8], Option<ArrayIndex>> {
+    preceded(
+        tag(".**"), 
+        opt(recursive_dot_wildcard_index),
+    )(input)
+}
+
+fn recursive_dot_wildcard_index(input: &[u8]) -> IResult<&[u8], ArrayIndex> {
+    delimited(
+        char('{'),
+        delimited(multispace0, array_index, multispace0),
+        char('}'),
+    )(input)
+}
+
 fn colon_field(input: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
     alt((preceded(char(':'), string), preceded(char(':'), raw_string)))(input)
 }
@@ -240,6 +256,7 @@ fn array_indices(input: &[u8]) -> IResult<&[u8], Vec<ArrayIndex>> {
 
 fn inner_path(input: &[u8]) -> IResult<&[u8], Path<'_>> {
     alt((
+        map(recursive_dot_wildcard, Path::RecursiveDotWildcard),
         value(Path::DotWildcard, tag(".*")),
         value(Path::BracketWildcard, bracket_wildcard),
         map(colon_field, Path::ColonField),
@@ -515,3 +532,4 @@ mod tests {
         );
     }
 }
+
