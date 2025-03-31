@@ -156,9 +156,7 @@ impl RecursiveIndex {
                     }
                 }
                 RecursiveEnd::Index(end) => {
-                    if *end < self.start {
-                        (false, false)
-                    } else if depth < self.start {
+                    if depth < self.start && self.start <= *end {
                         (false, true)
                     } else if depth >= self.start && depth <= *end {
                         (true, true)

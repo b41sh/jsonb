@@ -20,7 +20,7 @@ use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
-use crate::core::ObjectIterator;
+use crate::core::ObjectValueIterator;
 use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
 use crate::jsonpath::BinaryOperator;
@@ -183,6 +183,9 @@ impl<'a> Selector<'a> {
                 Path::DotWildcard => {
                     self.select_object_values(item)?;
                 }
+                Path::RecursiveDotWildcard(index_opt) => {
+                    self.recursive_select_values(item, 0, index_opt)?;
+                }
                 Path::BracketWildcard => {
                     self.select_array_values(item)?;
                 }
@@ -203,11 +206,43 @@ impl<'a> Selector<'a> {
             return Ok(());
         };
 
-        let object_iter_opt = ObjectIterator::new(curr_raw_jsonb)?;
-        if let Some(mut object_iter) = object_iter_opt {
-            for result in &mut object_iter {
-                let (_, val_item) = result?;
+        let object_val_iter_opt = ObjectValueIterator::new(curr_raw_jsonb)?;
+        if let Some(mut object_val_iter) = object_val_iter_opt {
+            for result in &mut object_val_iter {
+                let val_item = result?;
                 self.items.push_back(val_item);
+            }
+        }
+        Ok(())
+    }
+
+    fn recursive_select_values(&mut self, parent_item: JsonbItem<'a>, depth: u8, index_opt: &Option<RecursiveIndex>) -> Result<()> {
+        let (matched, continued) = if let Some(recursive_index) = index_opt {
+            recursive_index.check_depth(depth);
+        } else {
+            (true, true)
+        }
+        if matched {
+            self.items.push_back(parent_item.clone());
+        }
+        let Some(curr_raw_jsonb) = parent_item.as_raw_jsonb() else {
+            return Ok(());
+        };
+        if !continued {
+            return Ok(());
+        }
+        let object_val_iter_opt = ObjectValueIterator::new(curr_raw_jsonb)?;
+        if let Some(mut object_val_iter) = object_val_iter_opt {
+            for result in &mut object_val_iter {
+                let val_item = result?;
+                self.recursive_select_values(val_item, depth + 1, index_opt)?;
+            }
+        }
+        let array_iter_opt = ArrayIterator::new(curr_raw_jsonb)?;
+        if let Some(mut array_iter) = array_iter_opt {
+            for item_result in &mut array_iter {
+                let item = item_result?;
+                self.recursive_select_values(val_item, depth + 1, index_opt)?;
             }
         }
         Ok(())
