@@ -22,6 +22,7 @@ use nom::character::complete::i32;
 use nom::character::complete::i64;
 use nom::character::complete::multispace0;
 use nom::character::complete::u64;
+use nom::character::complete::u8;
 use nom::combinator::cond;
 use nom::combinator::map;
 use nom::combinator::map_res;
@@ -179,12 +180,8 @@ fn bracket_wildcard(input: &[u8]) -> IResult<&[u8], ()> {
     )(input)
 }
 
-
-fn recursive_dot_wildcard(input: &[u8]) -> IResult<&[u8], Option<ArrayIndex>> {
-    preceded(
-        tag(".**"), 
-        opt(recursive_dot_wildcard_index),
-    )(input)
+fn recursive_dot_wildcard(input: &[u8]) -> IResult<&[u8], Option<RecursiveIndex>> {
+    preceded(tag(".**"), opt(recursive_dot_wildcard_index))(input)
 }
 
 fn recursive_dot_wildcard_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> {
@@ -197,11 +194,14 @@ fn recursive_dot_wildcard_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> 
         map(
             delimited(
                 char('{'),
-                delimited(multispace0, u32, multispace0),
+                delimited(multispace0, u8, multispace0),
                 char('}'),
-            )
-            |s| RecursiveIndex { start: s, end: None}
-        )
+            ),
+            |s| RecursiveIndex {
+                start: s,
+                end: None,
+            },
+        ),
     ))(input)
 }
 
@@ -209,20 +209,26 @@ fn recursive_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> {
     alt((
         map(
             separated_pair(
-                u32,
+                u8,
                 delimited(multispace0, tag_no_case("to"), multispace0),
-                u32,
+                u8,
             ),
-            |(s, e)| RecursiveIndex{ start: s, end: Some(RecursiveEnd::Index(e))},
+            |(s, e)| RecursiveIndex {
+                start: s,
+                end: Some(RecursiveEnd::Index(e)),
+            },
         ),
         map(
             separated_pair(
-                u32,
+                u8,
                 delimited(multispace0, tag_no_case("to"), multispace0),
                 tag_no_case("last"),
             ),
-            |(s, _)| RecursiveIndex{ start: s, end: Some(RecursiveEnd::Last)},
-        )
+            |(s, _)| RecursiveIndex {
+                start: s,
+                end: Some(RecursiveEnd::Last),
+            },
+        ),
     ))(input)
 }
 
@@ -563,4 +569,3 @@ mod tests {
         );
     }
 }
-

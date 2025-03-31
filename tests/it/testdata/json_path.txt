@@ -48,16 +48,12 @@ JsonPath {
         Root,
         RecursiveDotWildcard(
             Some(
-                Slice(
-                    (
-                        Index(
-                            2,
-                        ),
-                        LastIndex(
-                            0,
-                        ),
+                RecursiveIndex {
+                    start: 2,
+                    end: Some(
+                        Last,
                     ),
-                ),
+                },
             ),
         ),
     ],

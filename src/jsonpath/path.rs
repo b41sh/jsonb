@@ -133,20 +133,20 @@ impl ArrayIndex {
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecursiveEnd {
     /// The single number index.
-    Index(u32),
+    Index(u8),
     /// The range index between two number.
     Last,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecursiveIndex {
-    start: u32,
-    end: Option<RecursiveEnd>,
+    pub start: u8,
+    pub end: Option<RecursiveEnd>,
 }
 
-
 impl RecursiveIndex {
-    pub fn check_recursive_index(&self, depth: u32) -> (bool, bool) {
-        if let Some(end) = self.end {
+    pub fn check_recursive_index(&self, depth: u8) -> (bool, bool) {
+        if let Some(end) = &self.end {
             match end {
                 RecursiveEnd::Last => {
                     if depth < self.start {
@@ -156,18 +156,17 @@ impl RecursiveIndex {
                     }
                 }
                 RecursiveEnd::Index(end) => {
-                    if end < self.start {
+                    if *end < self.start {
                         (false, false)
                     } else if depth < self.start {
                         (false, true)
-                    } else if depth >= self.start && depth <= end {
+                    } else if depth >= self.start && depth <= *end {
                         (true, true)
                     } else {
                         (false, false)
                     }
                 }
             }
-
         } else {
             if depth == self.start {
                 (true, false)
@@ -177,6 +176,7 @@ impl RecursiveIndex {
                 (false, false)
             }
         }
+    }
 }
 
 /// Represents a literal value used in filter expression.
@@ -315,6 +315,24 @@ impl Display for ArrayIndex {
             ArrayIndex::Slice((start, end)) => {
                 write!(f, "{start} to {end}")?;
             }
+        }
+        Ok(())
+    }
+}
+
+impl Display for RecursiveIndex {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(end_index) = &self.end {
+            match end_index {
+                RecursiveEnd::Index(end) => {
+                    write!(f, "{} to {}", self.start, end)?;
+                }
+                RecursiveEnd::Last => {
+                    write!(f, "{} to last", self.start)?;
+                }
+            }
+        } else {
+            write!(f, "{}", self.start)?;
         }
         Ok(())
     }
@@ -510,4 +528,3 @@ impl Display for Expr<'_> {
         Ok(())
     }
 }
-
