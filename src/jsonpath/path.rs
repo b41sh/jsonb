@@ -148,13 +148,6 @@ impl RecursiveIndex {
     pub fn check_recursive_index(&self, depth: u8) -> (bool, bool) {
         if let Some(end) = &self.end {
             match end {
-                RecursiveEnd::Last => {
-                    if depth < self.start {
-                        (false, true)
-                    } else {
-                        (true, true)
-                    }
-                }
                 RecursiveEnd::Index(end) => {
                     if depth < self.start && self.start <= *end {
                         (false, true)
@@ -164,12 +157,19 @@ impl RecursiveIndex {
                         (false, false)
                     }
                 }
+                RecursiveEnd::Last => {
+                    if depth < self.start {
+                        (false, true)
+                    } else {
+                        (true, true)
+                    }
+                }
             }
         } else {
-            if depth == self.start {
-                (true, false)
-            } else if depth < self.start {
+            if depth < self.start {
                 (false, true)
+            } else if depth == self.start {
+                (true, false)
             } else {
                 (false, false)
             }
