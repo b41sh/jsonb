@@ -187,12 +187,43 @@ fn recursive_dot_wildcard(input: &[u8]) -> IResult<&[u8], Option<ArrayIndex>> {
     )(input)
 }
 
-fn recursive_dot_wildcard_index(input: &[u8]) -> IResult<&[u8], ArrayIndex> {
-    delimited(
-        char('{'),
-        delimited(multispace0, array_index, multispace0),
-        char('}'),
-    )(input)
+fn recursive_dot_wildcard_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> {
+    alt((
+        delimited(
+            char('{'),
+            delimited(multispace0, recursive_index, multispace0),
+            char('}'),
+        ),
+        map(
+            delimited(
+                char('{'),
+                delimited(multispace0, u32, multispace0),
+                char('}'),
+            )
+            |s| RecursiveIndex { start: s, end: None}
+        )
+    ))(input)
+}
+
+fn recursive_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> {
+    alt((
+        map(
+            separated_pair(
+                u32,
+                delimited(multispace0, tag_no_case("to"), multispace0),
+                u32,
+            ),
+            |(s, e)| RecursiveIndex{ start: s, end: Some(RecursiveEnd::Index(e))},
+        ),
+        map(
+            separated_pair(
+                u32,
+                delimited(multispace0, tag_no_case("to"), multispace0),
+                tag_no_case("last"),
+            ),
+            |(s, _)| RecursiveIndex{ start: s, end: Some(RecursiveEnd::Last)},
+        )
+    ))(input)
 }
 
 fn colon_field(input: &[u8]) -> IResult<&[u8], Cow<'_, str>> {

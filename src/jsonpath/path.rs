@@ -42,7 +42,7 @@ pub enum Path<'a> {
     /// `.*` represents selecting all elements in an Object.
     DotWildcard,
     /// `.**` represents
-    RecursiveDotWildcard(Option<ArrayIndex>),
+    RecursiveDotWildcard(Option<RecursiveIndex>),
     /// `[*]` represents selecting all elements in an Array.
     BracketWildcard,
     /// `.<name>` represents selecting element that matched the name in an Object, like `$.event`.
@@ -127,6 +127,56 @@ impl ArrayIndex {
             Index::LastIndex(idx) => length + *idx - 1,
         }
     }
+}
+
+/// Represents the index in an Array.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecursiveEnd {
+    /// The single number index.
+    Index(u32),
+    /// The range index between two number.
+    Last,
+}
+
+pub struct RecursiveIndex {
+    start: u32,
+    end: Option<RecursiveEnd>,
+}
+
+
+impl RecursiveIndex {
+    pub fn check_recursive_index(&self, depth: u32) -> (bool, bool) {
+        if let Some(end) = self.end {
+            match end {
+                RecursiveEnd::Last => {
+                    if depth < self.start {
+                        (false, true)
+                    } else {
+                        (true, true)
+                    }
+                }
+                RecursiveEnd::Index(end) => {
+                    if end < self.start {
+                        (false, false)
+                    } else if depth < self.start {
+                        (false, true)
+                    } else if depth >= self.start && depth <= end {
+                        (true, true)
+                    } else {
+                        (false, false)
+                    }
+                }
+            }
+
+        } else {
+            if depth == self.start {
+                (true, false)
+            } else if depth < self.start {
+                (false, true)
+            } else {
+                (false, false)
+            }
+        }
 }
 
 /// Represents a literal value used in filter expression.
