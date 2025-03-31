@@ -29,6 +29,7 @@ use crate::jsonpath::FilterFunc;
 use crate::jsonpath::JsonPath;
 use crate::jsonpath::Path;
 use crate::jsonpath::PathValue;
+use crate::jsonpath::RecursiveIndex;
 use crate::number::Number;
 use crate::Error;
 use crate::OwnedJsonb;
@@ -216,12 +217,17 @@ impl<'a> Selector<'a> {
         Ok(())
     }
 
-    fn recursive_select_values(&mut self, parent_item: JsonbItem<'a>, depth: u8, index_opt: &Option<RecursiveIndex>) -> Result<()> {
+    fn recursive_select_values(
+        &mut self,
+        parent_item: JsonbItem<'a>,
+        depth: u8,
+        index_opt: &Option<RecursiveIndex>,
+    ) -> Result<()> {
         let (matched, continued) = if let Some(recursive_index) = index_opt {
-            recursive_index.check_depth(depth);
+            recursive_index.check_recursive_index(depth)
         } else {
             (true, true)
-        }
+        };
         if matched {
             self.items.push_back(parent_item.clone());
         }
@@ -242,7 +248,7 @@ impl<'a> Selector<'a> {
         if let Some(mut array_iter) = array_iter_opt {
             for item_result in &mut array_iter {
                 let item = item_result?;
-                self.recursive_select_values(val_item, depth + 1, index_opt)?;
+                self.recursive_select_values(item, depth + 1, index_opt)?;
             }
         }
         Ok(())

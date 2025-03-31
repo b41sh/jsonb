@@ -178,6 +178,7 @@ impl<'a> ObjectValueIterator<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn len(&self) -> usize {
         self.length
     }
