@@ -385,6 +385,7 @@ fn op(input: &[u8]) -> IResult<&[u8], BinaryOperator> {
         value(BinaryOperator::Lt, char('<')),
         value(BinaryOperator::Gte, tag(">=")),
         value(BinaryOperator::Gt, char('>')),
+        value(BinaryOperator::StartsWith, tag("starts with")),
     ))(input)
 }
 
@@ -472,22 +473,18 @@ fn expr_atom(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
             ),
             |expr| expr,
         ),
-        map(filter_func, Expr::FilterFunc),
+        map(exists_func, Expr::ExistsFunc),
     ))(input)
 }
 
-fn filter_func(input: &[u8]) -> IResult<&[u8], FilterFunc<'_>> {
-    alt((exists, starts_with))(input)
-}
-
-fn exists(input: &[u8]) -> IResult<&[u8], FilterFunc<'_>> {
+fn exists_func(input: &[u8]) -> IResult<&[u8], Vec<Path<'_>>> {
     preceded(
         tag("exists"),
         preceded(
             multispace0,
             delimited(
                 terminated(char('('), multispace0),
-                map(exists_paths, FilterFunc::Exists),
+                exists_paths,
                 preceded(multispace0, char(')')),
             ),
         ),
@@ -507,13 +504,6 @@ fn exists_paths(input: &[u8]) -> IResult<&[u8], Vec<Path<'_>>> {
             paths.insert(0, pre);
             paths
         },
-    )(input)
-}
-
-fn starts_with(input: &[u8]) -> IResult<&[u8], FilterFunc<'_>> {
-    preceded(
-        tag("starts with"),
-        preceded(multispace0, map(string, FilterFunc::StartsWith)),
     )(input)
 }
 
@@ -553,19 +543,4 @@ fn expr_or(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
             expr
         },
     )(input)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_starts_with() {
-        let input = r#"starts with "Nigel""#;
-        let res = starts_with(input.as_bytes()).unwrap();
-        assert_eq!(
-            res,
-            (&b""[..], FilterFunc::StartsWith(Cow::Borrowed("Nigel")))
-        );
-    }
 }

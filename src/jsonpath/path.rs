@@ -209,6 +209,8 @@ pub enum BinaryOperator {
     Gt,
     /// `>=` represents left is greater than or equal to right.
     Gte,
+    /// 
+    StartsWith,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -262,14 +264,7 @@ pub enum Expr<'a> {
     /// Arithmetic expression that performs an arithmetic operation, returns a number value.
     ArithmeticFunc(ArithmeticFunc<'a>),
     /// Filter function, returns a boolean value.
-    FilterFunc(FilterFunc<'a>),
-}
-
-/// Represents filter function, returns a boolean value.
-#[derive(Debug, Clone, PartialEq)]
-pub enum FilterFunc<'a> {
-    Exists(Vec<Path<'a>>),
-    StartsWith(Cow<'a, str>),
+    ExistsFunc(Vec<Path<'a>>),
 }
 
 impl Display for JsonPath<'_> {
@@ -442,6 +437,9 @@ impl Display for BinaryOperator {
             BinaryOperator::Gte => {
                 write!(f, ">=")
             }
+            BinaryOperator::StartsWith => {
+                write!(f, "starts with")
+            }
         }
     }
 }
@@ -509,19 +507,13 @@ impl Display for Expr<'_> {
                     write!(f, "{} {} {}", left, op, right)?;
                 }
             },
-            Expr::FilterFunc(func) => match func {
-                FilterFunc::Exists(paths) => {
-                    f.write_str("exists(")?;
-                    for path in paths {
-                        write!(f, "{path}")?;
-                    }
-                    f.write_str(")")?;
+            ExistsFunc(paths) => {
+                f.write_str("exists(")?;
+                for path in paths {
+                    write!(f, "{path}")?;
                 }
-                FilterFunc::StartsWith(paths) => {
-                    f.write_str("starts with ")?;
-                    write!(f, "{paths}")?;
-                }
-            },
+                f.write_str(")")?;
+            }
         }
         Ok(())
     }

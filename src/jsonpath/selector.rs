@@ -323,7 +323,6 @@ impl<'a> Selector<'a> {
         Ok(())
     }
 
-    // fn filter_expr(&'a self, raw_jsonb: RawJsonb<'a>, item: JsonbItem<'a>, expr: &Expr<'a>) -> Result<bool> {
     fn filter_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<bool> {
         match expr {
             Expr::BinaryOp { op, left, right } => match op {
@@ -344,10 +343,7 @@ impl<'a> Selector<'a> {
                     Ok(res)
                 }
             },
-            Expr::FilterFunc(filter_expr) => match filter_expr {
-                FilterFunc::Exists(paths) => self.eval_exists(item, paths),
-                FilterFunc::StartsWith(prefix) => self.eval_starts_with(item, prefix),
-            },
+            Expr::ExistsFunc(paths) => self.eval_exists(item, paths),
             _ => todo!(),
         }
     }
@@ -481,6 +477,7 @@ impl<'a> Selector<'a> {
         lhs: PathValue<'a>,
         rhs: PathValue<'a>,
     ) -> bool {
+        // todo stars with
         let order = lhs.partial_cmp(&rhs);
         if let Some(order) = order {
             match op {
