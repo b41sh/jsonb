@@ -1170,32 +1170,30 @@ JsonPath {
             "book",
         ),
         FilterExpr(
-            FilterFunc(
-                Exists(
-                    [
-                        Current,
-                        DotField(
-                            "price",
-                        ),
-                        FilterExpr(
-                            BinaryOp {
-                                op: Gt,
-                                left: Paths(
-                                    [
-                                        Current,
-                                    ],
-                                ),
-                                right: Value(
-                                    Number(
-                                        UInt64(
-                                            20,
-                                        ),
+            ExistsFunc(
+                [
+                    Current,
+                    DotField(
+                        "price",
+                    ),
+                    FilterExpr(
+                        BinaryOp {
+                            op: Gt,
+                            left: Paths(
+                                [
+                                    Current,
+                                ],
+                            ),
+                            right: Value(
+                                Number(
+                                    UInt64(
+                                        20,
                                     ),
                                 ),
-                            },
-                        ),
-                    ],
-                ),
+                            ),
+                        },
+                    ),
+                ],
             ),
         ),
     ],
@@ -1214,42 +1212,38 @@ JsonPath {
             "store",
         ),
         FilterExpr(
-            FilterFunc(
-                Exists(
-                    [
-                        Current,
-                        DotField(
-                            "book",
-                        ),
-                        FilterExpr(
-                            FilterFunc(
-                                Exists(
-                                    [
-                                        Current,
-                                        DotField(
-                                            "category",
-                                        ),
-                                        FilterExpr(
-                                            BinaryOp {
-                                                op: Eq,
-                                                left: Paths(
-                                                    [
-                                                        Current,
-                                                    ],
-                                                ),
-                                                right: Value(
-                                                    String(
-                                                        "fiction",
-                                                    ),
-                                                ),
-                                            },
-                                        ),
-                                    ],
+            ExistsFunc(
+                [
+                    Current,
+                    DotField(
+                        "book",
+                    ),
+                    FilterExpr(
+                        ExistsFunc(
+                            [
+                                Current,
+                                DotField(
+                                    "category",
                                 ),
-                            ),
+                                FilterExpr(
+                                    BinaryOp {
+                                        op: Eq,
+                                        left: Paths(
+                                            [
+                                                Current,
+                                            ],
+                                        ),
+                                        right: Value(
+                                            String(
+                                                "fiction",
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ],
                         ),
-                    ],
-                ),
+                    ),
+                ],
             ),
         ),
     ],
@@ -1257,9 +1251,9 @@ JsonPath {
 
 
 ---------- Input ----------
-$.store.book?(starts with "Nigel")
+$.store.book?(@ starts with "Nigel")
 ---------- Output ---------
-$.store.book?(starts with Nigel)
+$.store.book?(@ starts with "Nigel")
 ---------- AST ------------
 JsonPath {
     paths: [
@@ -1271,11 +1265,51 @@ JsonPath {
             "book",
         ),
         FilterExpr(
-            FilterFunc(
-                StartsWith(
-                    "Nigel",
+            BinaryOp {
+                op: StartsWith,
+                left: Paths(
+                    [
+                        Current,
+                    ],
                 ),
-            ),
+                right: Value(
+                    String(
+                        "Nigel",
+                    ),
+                ),
+            },
+        ),
+    ],
+}
+
+
+---------- Input ----------
+$[*] ? (@.job == null) .name
+---------- Output ---------
+$[*]?(@.job == null).name
+---------- AST ------------
+JsonPath {
+    paths: [
+        Root,
+        BracketWildcard,
+        FilterExpr(
+            BinaryOp {
+                op: Eq,
+                left: Paths(
+                    [
+                        Current,
+                        DotField(
+                            "job",
+                        ),
+                    ],
+                ),
+                right: Value(
+                    Null,
+                ),
+            },
+        ),
+        DotField(
+            "name",
         ),
     ],
 }

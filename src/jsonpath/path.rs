@@ -507,7 +507,7 @@ impl Display for Expr<'_> {
                     write!(f, "{} {} {}", left, op, right)?;
                 }
             },
-            ExistsFunc(paths) => {
+            Expr::ExistsFunc(paths) => {
                 f.write_str("exists(")?;
                 for path in paths {
                     write!(f, "{path}")?;

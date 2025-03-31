@@ -25,7 +25,6 @@ use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
 use crate::jsonpath::BinaryOperator;
 use crate::jsonpath::Expr;
-use crate::jsonpath::FilterFunc;
 use crate::jsonpath::JsonPath;
 use crate::jsonpath::Path;
 use crate::jsonpath::PathValue;
@@ -354,17 +353,6 @@ impl<'a> Selector<'a> {
         Ok(res)
     }
 
-    fn eval_starts_with(&mut self, item: JsonbItem<'a>, prefix: &str) -> Result<bool> {
-        if let JsonbItem::String(data) = item {
-            let val = unsafe { String::from_utf8_unchecked(data.to_vec()) };
-            let res = val.starts_with(prefix);
-            if res {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
     fn select_by_filter_paths(
         &mut self,
         item: JsonbItem<'a>,
@@ -422,8 +410,8 @@ impl<'a> Selector<'a> {
                             let n = Number::decode(data)?;
                             PathValue::Number(n)
                         }
-                        JsonbItem::String(data) => PathValue::String(Cow::Owned(unsafe {
-                            String::from_utf8_unchecked(data.to_vec())
+                        JsonbItem::String(data) => PathValue::String(Cow::Borrowed(unsafe {
+                            std::str::from_utf8_unchecked(data)
                         })),
                         _ => {
                             continue;
@@ -477,7 +465,17 @@ impl<'a> Selector<'a> {
         lhs: PathValue<'a>,
         rhs: PathValue<'a>,
     ) -> bool {
-        // todo stars with
+        if op == &BinaryOperator::StartsWith {
+            let res = match (lhs, rhs) {
+                (PathValue::String(lhs), PathValue::String(rhs)) => {
+                    lhs.starts_with(&*rhs)
+                }
+                (_, _) => {
+                    false
+                }
+            };
+            return res;
+        }
         let order = lhs.partial_cmp(&rhs);
         if let Some(order) = order {
             match op {

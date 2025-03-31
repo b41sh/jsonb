@@ -273,6 +273,7 @@ fn test_select_by_path() {
         (r#"$.phones[0 to last].number == 3720453"#, vec!["true"]),
         (r#"$.phones[0 to last].type == "workk""#, vec!["false"]),
         (r#"$.name == "Fred" && $.car_no == 123"#, vec!["true"]),
+        (r#"$.phones[*] ? (@.type starts with "ho")"#, vec![r#"{"type":"home","number":3720453}"#]),
     ];
 
     let owned_jsonb = source.parse::<OwnedJsonb>().unwrap();
