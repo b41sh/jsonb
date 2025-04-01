@@ -80,7 +80,7 @@ JsonPath {
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             ArithmeticFunc(
                 Binary {
                     op: Add,
@@ -112,7 +112,7 @@ JsonPath {
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             ArithmeticFunc(
                 Binary {
                     op: Subtract,
@@ -144,7 +144,7 @@ JsonPath {
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             ArithmeticFunc(
                 Binary {
                     op: Multiply,
@@ -176,7 +176,7 @@ JsonPath {
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             ArithmeticFunc(
                 Binary {
                     op: Divide,
@@ -208,10 +208,10 @@ JsonPath {
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             ArithmeticFunc(
                 Binary {
-                    op: Modulus,
+                    op: Modulo,
                     left: Value(
                         Number(
                             UInt64(
@@ -290,7 +290,7 @@ JsonPath {
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             ArithmeticFunc(
                 Unary {
                     op: Add,
@@ -331,7 +331,7 @@ JsonPath {
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             ArithmeticFunc(
                 Unary {
                     op: Subtract,
@@ -372,7 +372,7 @@ $.store.book[0].price + 5
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             ArithmeticFunc(
                 Binary {
                     op: Add,
@@ -994,7 +994,7 @@ $ > 1
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             BinaryOp {
                 op: Gt,
                 left: Paths(
@@ -1022,7 +1022,7 @@ $.* == 0
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             BinaryOp {
                 op: Eq,
                 left: Paths(
@@ -1051,7 +1051,7 @@ $[*] > 1
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             BinaryOp {
                 op: Gt,
                 left: Paths(
@@ -1080,7 +1080,7 @@ $.a > $.b
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             BinaryOp {
                 op: Gt,
                 left: Paths(
@@ -1112,7 +1112,7 @@ $.price > 10 || $.category == "reference"
 ---------- AST ------------
 JsonPath {
     paths: [
-        Predicate(
+        Expr(
             BinaryOp {
                 op: Or,
                 left: BinaryOp {
@@ -1310,6 +1310,128 @@ JsonPath {
         ),
         DotField(
             "name",
+        ),
+    ],
+}
+
+
+---------- Input ----------
+$.phones[0].number + 3
+---------- Output ---------
+$.phones[0].number + 3
+---------- AST ------------
+JsonPath {
+    paths: [
+        Expr(
+            ArithmeticFunc(
+                Binary {
+                    op: Add,
+                    left: Paths(
+                        [
+                            Root,
+                            DotField(
+                                "phones",
+                            ),
+                            ArrayIndices(
+                                [
+                                    Index(
+                                        Index(
+                                            0,
+                                        ),
+                                    ),
+                                ],
+                            ),
+                            DotField(
+                                "number",
+                            ),
+                        ],
+                    ),
+                    right: Value(
+                        Number(
+                            UInt64(
+                                3,
+                            ),
+                        ),
+                    ),
+                },
+            ),
+        ),
+    ],
+}
+
+
+---------- Input ----------
+7 - $[0]
+---------- Output ---------
+7 - $[0]
+---------- AST ------------
+JsonPath {
+    paths: [
+        Expr(
+            ArithmeticFunc(
+                Binary {
+                    op: Subtract,
+                    left: Value(
+                        Number(
+                            UInt64(
+                                7,
+                            ),
+                        ),
+                    ),
+                    right: Paths(
+                        [
+                            Root,
+                            ArrayIndices(
+                                [
+                                    Index(
+                                        Index(
+                                            0,
+                                        ),
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+                },
+            ),
+        ),
+    ],
+}
+
+
+---------- Input ----------
+- $.phones[0].number
+---------- Output ---------
+-$.phones[0].number
+---------- AST ------------
+JsonPath {
+    paths: [
+        Expr(
+            ArithmeticFunc(
+                Unary {
+                    op: Subtract,
+                    operand: Paths(
+                        [
+                            Root,
+                            DotField(
+                                "phones",
+                            ),
+                            ArrayIndices(
+                                [
+                                    Index(
+                                        Index(
+                                            0,
+                                        ),
+                                    ),
+                                ],
+                            ),
+                            DotField(
+                                "number",
+                            ),
+                        ],
+                    ),
+                },
+            ),
         ),
     ],
 }

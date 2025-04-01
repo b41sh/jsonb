@@ -192,34 +192,18 @@ impl Number {
                 .checked_sub(b)
                 .map(Number::Int64)
                 .ok_or(Error::Message("Int64 overflow".to_string())),
-            (Number::UInt64(a), Number::UInt64(b)) => a
-                .checked_sub(b)
-                .map(Number::UInt64)
+            (Number::UInt64(a), Number::UInt64(b)) => (*a as i64)
+                .checked_sub(b as i64)
+                .map(Number::Int64)
                 .ok_or(Error::Message("UInt64 overflow".to_string())),
-            (Number::Int64(a), Number::UInt64(b)) => {
-                if *a < 0 {
-                    a.checked_sub(b as i64)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    (*a as u64)
-                        .checked_sub(b)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
-            (Number::UInt64(a), Number::Int64(b)) => {
-                if b < 0 {
-                    (*a as i64)
-                        .checked_sub(b)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    a.checked_sub(b as u64)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
+            (Number::Int64(a), Number::UInt64(b)) => a
+                .checked_sub(b as i64)
+                .map(Number::Int64)
+                .ok_or(Error::Message("Int64 overflow".to_string())),
+            (Number::UInt64(a), Number::Int64(b)) => (*a as i64)
+                .checked_sub(b)
+                .map(Number::Int64)
+                .ok_or(Error::Message("Int64 overflow".to_string())),
             (Number::Float64(a), Number::Float64(b)) => Ok(Number::Float64(a - b)),
             (a, b) => {
                 let a_float = a.as_f64().unwrap();

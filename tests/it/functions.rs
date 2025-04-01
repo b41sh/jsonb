@@ -234,6 +234,29 @@ fn test_select_by_path() {
                 r#"{"type":"work","number":5062051}"#,
             ],
         ),
+        (
+            r#"$.phones.**"#,
+            vec![
+                r#"[{"type":"home","number":3720453},{"type":"work","number":5062051}]"#,
+                r#"{"type":"home","number":3720453}"#,
+                r#"3720453"#,
+                r#""home""#,
+                r#"{"type":"work","number":5062051}"#,
+                r#"5062051"#,
+                r#""work""#,
+            ],
+        ),
+        (
+            r#"$.phones.**{1 to last}"#,
+            vec![
+                r#"{"type":"home","number":3720453}"#,
+                r#"3720453"#,
+                r#""home""#,
+                r#"{"type":"work","number":5062051}"#,
+                r#"5062051"#,
+                r#""work""#,
+            ],
+        ),
         (r#"$.phones[0].*"#, vec![r#"3720453"#, r#""home""#]),
         (r#"$.phones[0].type"#, vec![r#""home""#]),
         (r#"$.phones[*].type[*]"#, vec![r#""home""#, r#""work""#]),
@@ -273,7 +296,14 @@ fn test_select_by_path() {
         (r#"$.phones[0 to last].number == 3720453"#, vec!["true"]),
         (r#"$.phones[0 to last].type == "workk""#, vec!["false"]),
         (r#"$.name == "Fred" && $.car_no == 123"#, vec!["true"]),
-        (r#"$.phones[*] ? (@.type starts with "ho")"#, vec![r#"{"type":"home","number":3720453}"#]),
+        (
+            r#"$.phones[*] ? (@.type starts with "ho")"#,
+            vec![r#"{"type":"home","number":3720453}"#],
+        ),
+        // arithmetic functions
+        (r#"$.phones[0].number + 3"#, vec![r#"3720456"#]),
+        (r#"$.phones[0].number % 10"#, vec![r#"3"#]),
+        (r#"7 - $.phones[1].number"#, vec![r#"-5062044"#]),
     ];
 
     let owned_jsonb = source.parse::<OwnedJsonb>().unwrap();

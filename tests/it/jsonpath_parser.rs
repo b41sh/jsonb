@@ -66,6 +66,10 @@ fn test_json_path() {
         r#"$.store?(exists(@.book?(exists(@.category?(@ == "fiction")))))"#,
         r#"$.store.book?(@ starts with "Nigel")"#,
         r#"$[*] ? (@.job == null) .name"#,
+        // arithmetic functions
+        r#"$.phones[0].number + 3"#,
+        r#"7 - $[0]"#,
+        r#"- $.phones[0].number"#,
     ];
 
     for case in cases {

@@ -45,7 +45,7 @@ enum ExprValue<'a> {
 }
 
 impl ExprValue<'_> {
-    fn as_number(self) -> Result<Number> {
+    fn convert_to_number(self) -> Result<Number> {
         match self {
             ExprValue::Values(mut vals) => {
                 if vals.len() != 1 {
@@ -64,7 +64,7 @@ impl ExprValue<'_> {
         }
     }
 
-    fn as_numbers(self) -> Result<Vec<Number>> {
+    fn convert_to_numbers(self) -> Result<Vec<Number>> {
         match self {
             ExprValue::Values(vals) => {
                 let mut nums = Vec::with_capacity(vals.len());
@@ -372,7 +372,7 @@ impl<'a> Selector<'a> {
         match func {
             ArithmeticFunc::Unary { op, operand } => {
                 let operand = self.convert_expr_val(item.clone(), operand)?;
-                let Ok(nums) = operand.as_numbers() else {
+                let Ok(nums) = operand.convert_to_numbers() else {
                     return Err(Error::InvalidJsonPath);
                 };
                 let num_vals = match op {
@@ -392,11 +392,10 @@ impl<'a> Selector<'a> {
             ArithmeticFunc::Binary { op, left, right } => {
                 let lhs = self.convert_expr_val(item.clone(), left)?;
                 let rhs = self.convert_expr_val(item.clone(), right)?;
-
-                let Ok(lnum) = lhs.as_number() else {
+                let Ok(lnum) = lhs.convert_to_number() else {
                     return Err(Error::InvalidJsonPath);
                 };
-                let Ok(rnum) = rhs.as_number() else {
+                let Ok(rnum) = rhs.convert_to_number() else {
                     return Err(Error::InvalidJsonPath);
                 };
 

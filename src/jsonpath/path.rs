@@ -164,14 +164,12 @@ impl RecursiveIndex {
                     }
                 }
             }
+        } else if depth < self.start {
+            (false, true)
+        } else if depth == self.start {
+            (true, false)
         } else {
-            if depth < self.start {
-                (false, true)
-            } else if depth == self.start {
-                (true, false)
-            } else {
-                (false, false)
-            }
+            (false, false)
         }
     }
 }
@@ -208,7 +206,7 @@ pub enum BinaryOperator {
     Gt,
     /// `>=` represents left is greater than or equal to right.
     Gte,
-    ///
+    /// `starts with` represents right is an initial substring of left.
     StartsWith,
 }
 
