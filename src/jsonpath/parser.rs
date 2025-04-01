@@ -63,7 +63,7 @@ pub fn parse_json_path(input: &[u8]) -> Result<JsonPath<'_>, Error> {
 
 fn json_path(input: &[u8]) -> IResult<&[u8], JsonPath<'_>> {
     map(
-        delimited(multispace0, predicate_or_paths, multispace0),
+        delimited(multispace0, expr_or_paths, multispace0),
         |paths| JsonPath { paths },
     )(input)
 }
@@ -322,14 +322,14 @@ fn path(input: &[u8]) -> IResult<&[u8], Path<'_>> {
     ))(input)
 }
 
-fn predicate_or_paths(input: &[u8]) -> IResult<&[u8], Vec<Path<'_>>> {
-    alt((predicate, paths))(input)
+fn expr_or_paths(input: &[u8]) -> IResult<&[u8], Vec<Path<'_>>> {
+    alt((root_expr, paths))(input)
 }
 
-fn predicate(input: &[u8]) -> IResult<&[u8], Vec<Path<'_>>> {
+fn root_expr(input: &[u8]) -> IResult<&[u8], Vec<Path<'_>>> {
     map(
         delimited(multispace0, |i| expr_or(i, true), multispace0),
-        |v| vec![Path::Predicate(Box::new(v))],
+        |v| vec![Path::Expr(Box::new(v))],
     )(input)
 }
 
@@ -345,9 +345,9 @@ fn paths(input: &[u8]) -> IResult<&[u8], Vec<Path<'_>>> {
     )(input)
 }
 
-fn expr_paths(input: &[u8], root_predicate: bool) -> IResult<&[u8], Vec<Path<'_>>> {
+fn expr_paths(input: &[u8], is_root_expr: bool) -> IResult<&[u8], Vec<Path<'_>>> {
     let parse_current = map_res(
-        cond(!root_predicate, value(Path::Current, char('@'))),
+        cond(!is_root_expr, value(Path::Current, char('@'))),
         |res| match res {
             Some(v) => Ok(v),
             None => Err(NomError::new(input, ErrorKind::Char)),
@@ -418,20 +418,20 @@ fn path_value(input: &[u8]) -> IResult<&[u8], PathValue<'_>> {
     ))(input)
 }
 
-fn inner_expr(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
+fn inner_expr(input: &[u8], is_root_expr: bool) -> IResult<&[u8], Expr<'_>> {
     alt((
-        map(|i| expr_paths(i, root_predicate), Expr::Paths),
+        map(|i| expr_paths(i, is_root_expr), Expr::Paths),
         map(path_value, |v| Expr::Value(Box::new(v))),
     ))(input)
 }
 
-fn expr_atom(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
+fn expr_atom(input: &[u8], is_root_expr: bool) -> IResult<&[u8], Expr<'_>> {
     alt((
         map(
             tuple((
-                delimited(multispace0, |i| inner_expr(i, root_predicate), multispace0),
+                delimited(multispace0, |i| inner_expr(i, is_root_expr), multispace0),
                 binary_arith_op,
-                delimited(multispace0, |i| inner_expr(i, root_predicate), multispace0),
+                delimited(multispace0, |i| inner_expr(i, is_root_expr), multispace0),
             )),
             |(left, op, right)| {
                 Expr::ArithmeticFunc(ArithmeticFunc::Binary {
@@ -444,7 +444,7 @@ fn expr_atom(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
         map(
             tuple((
                 unary_arith_op,
-                delimited(multispace0, |i| inner_expr(i, root_predicate), multispace0),
+                delimited(multispace0, |i| inner_expr(i, is_root_expr), multispace0),
             )),
             |(op, operand)| {
                 Expr::ArithmeticFunc(ArithmeticFunc::Unary {
@@ -455,9 +455,9 @@ fn expr_atom(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
         ),
         map(
             tuple((
-                delimited(multispace0, |i| inner_expr(i, root_predicate), multispace0),
+                delimited(multispace0, |i| inner_expr(i, is_root_expr), multispace0),
                 op,
-                delimited(multispace0, |i| inner_expr(i, root_predicate), multispace0),
+                delimited(multispace0, |i| inner_expr(i, is_root_expr), multispace0),
             )),
             |(left, op, right)| Expr::BinaryOp {
                 op,
@@ -468,7 +468,7 @@ fn expr_atom(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
         map(
             delimited(
                 terminated(char('('), multispace0),
-                |i| expr_or(i, root_predicate),
+                |i| expr_or(i, is_root_expr),
                 preceded(multispace0, char(')')),
             ),
             |expr| expr,
@@ -507,10 +507,10 @@ fn exists_paths(input: &[u8]) -> IResult<&[u8], Vec<Path<'_>>> {
     )(input)
 }
 
-fn expr_and(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
+fn expr_and(input: &[u8], is_root_expr: bool) -> IResult<&[u8], Expr<'_>> {
     map(
         separated_list1(delimited(multispace0, tag("&&"), multispace0), |i| {
-            expr_atom(i, root_predicate)
+            expr_atom(i, is_root_expr)
         }),
         |exprs| {
             let mut expr = exprs[0].clone();
@@ -526,10 +526,10 @@ fn expr_and(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
     )(input)
 }
 
-fn expr_or(input: &[u8], root_predicate: bool) -> IResult<&[u8], Expr<'_>> {
+fn expr_or(input: &[u8], is_root_expr: bool) -> IResult<&[u8], Expr<'_>> {
     map(
         separated_list1(delimited(multispace0, tag("||"), multispace0), |i| {
-            expr_and(i, root_predicate)
+            expr_and(i, is_root_expr)
         }),
         |exprs| {
             let mut expr = exprs[0].clone();

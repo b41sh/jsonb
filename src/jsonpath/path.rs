@@ -28,7 +28,7 @@ pub struct JsonPath<'a> {
 
 impl JsonPath<'_> {
     pub fn is_predicate(&self) -> bool {
-        self.paths.len() == 1 && matches!(self.paths[0], Path::Predicate(_))
+        self.paths.len() == 1 && matches!(self.paths[0], Path::Expr(_))
     }
 }
 
@@ -65,12 +65,11 @@ pub enum Path<'a> {
     /// There can be more than one index, e.g. `$[0, last-1 to last, 5]` represents the first,
     /// the last two, and the sixth element in an Array.
     ArrayIndices(Vec<ArrayIndex>),
-    /// `<expression>` standalone unary or binary arithmetic expression, like '-$.a[*]' or '$.a + 3'
-    ArithmeticExpr(Box<Expr<'a>>),
     /// `?(<expression>)` represents selecting all elements in an object or array that match the filter expression, like `$.book[?(@.price < 10)]`.
     FilterExpr(Box<Expr<'a>>),
+    /// `<expression>` standalone unary or binary arithmetic expression, like '-$.a[*]' or '$.a + 3'
     /// `<expression>` standalone filter expression, like `$.book[*].price > 10`.
-    Predicate(Box<Expr<'a>>),
+    Expr(Box<Expr<'a>>),
 }
 
 /// Represents the single index in an Array.
@@ -373,13 +372,10 @@ impl Display for Path<'_> {
                 }
                 write!(f, "]")?;
             }
-            Path::ArithmeticExpr(expr) => {
-                write!(f, "?({expr})")?;
-            }
             Path::FilterExpr(expr) => {
                 write!(f, "?({expr})")?;
             }
-            Path::Predicate(expr) => {
+            Path::Expr(expr) => {
                 write!(f, "{expr}")?;
             }
         }

@@ -75,7 +75,7 @@ impl<'a> Selector<'a> {
         self.items.push_front(root_item);
 
         if json_path.paths.len() == 1 {
-            if let Path::Predicate(expr) = &json_path.paths[0] {
+            if let Path::Expr(expr) = &json_path.paths[0] {
                 let root_item = self.items.pop_front().unwrap();
                 let res = self.filter_expr(root_item, expr)?;
                 let res_item = JsonbItem::Boolean(res);
@@ -152,7 +152,7 @@ impl<'a> Selector<'a> {
                 &Path::Root | &Path::Current => {
                     continue;
                 }
-                Path::FilterExpr(expr) | Path::Predicate(expr) => {
+                Path::FilterExpr(expr) | Path::Expr(expr) => {
                     let len = self.items.len();
                     for _ in 0..len {
                         let item = self.items.pop_front().unwrap();
@@ -372,7 +372,7 @@ impl<'a> Selector<'a> {
                 &Path::Root | &Path::Current => {
                     continue;
                 }
-                Path::FilterExpr(expr) | Path::Predicate(expr) => {
+                Path::FilterExpr(expr) | Path::Expr(expr) => {
                     let len = self.items.len();
                     for _ in 0..len {
                         let item = self.items.pop_front().unwrap();
