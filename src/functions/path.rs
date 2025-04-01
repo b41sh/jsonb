@@ -307,8 +307,7 @@ impl RawJsonb<'_> {
     /// ```
     pub fn select_by_path<'a>(&self, json_path: &'a JsonPath<'a>) -> Result<Vec<OwnedJsonb>> {
         let mut selector = Selector::new(*self);
-        selector.execute(json_path)?;
-        selector.build()
+        selector.select_values(json_path)
     }
 
     /// Selects elements from the `RawJsonb` by the given `JsonPath` and wraps them in a JSON array.
@@ -340,8 +339,7 @@ impl RawJsonb<'_> {
     /// ```
     pub fn select_array_by_path<'a>(&self, json_path: &'a JsonPath<'a>) -> Result<OwnedJsonb> {
         let mut selector = Selector::new(*self);
-        selector.execute(json_path)?;
-        selector.build_array()
+        selector.select_array(json_path)
     }
 
     /// Selects the first matching element from the `RawJsonb` by the given `JsonPath`.
@@ -381,8 +379,7 @@ impl RawJsonb<'_> {
         json_path: &'a JsonPath<'a>,
     ) -> Result<Option<OwnedJsonb>> {
         let mut selector = Selector::new(*self);
-        selector.execute(json_path)?;
-        selector.build_first()
+        selector.select_first(json_path)
     }
 
     /// Selects a value (or an array of values) from the `RawJsonb` by the given `JsonPath`.
@@ -428,8 +425,7 @@ impl RawJsonb<'_> {
         json_path: &'a JsonPath<'a>,
     ) -> Result<Option<OwnedJsonb>> {
         let mut selector = Selector::new(*self);
-        selector.execute(json_path)?;
-        selector.build_value()
+        selector.select_value(json_path)
     }
 
     /// Checks if a JSON path exists within the JSONB value.

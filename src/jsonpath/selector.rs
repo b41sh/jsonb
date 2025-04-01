@@ -99,26 +99,9 @@ impl<'a> Selector<'a> {
         }
     }
 
-    pub fn execute(&mut self, json_path: &'a JsonPath<'a>) -> Result<()> {
-        // add root jsonb
-        let root_item = JsonbItem::Raw(self.root_jsonb);
-        self.items.clear();
-        self.items.push_front(root_item);
 
-        if json_path.paths.len() == 1 {
-            if let Path::Expr(expr) = &json_path.paths[0] {
-                let root_item = self.items.pop_front().unwrap();
-                let res_item = self.eval_expr(root_item, expr)?;
-                self.items.push_back(res_item);
-                return Ok(());
-            }
-        }
-        self.select_by_paths(&json_path.paths)?;
-
-        Ok(())
-    }
-
-    pub fn build(&mut self) -> Result<Vec<OwnedJsonb>> {
+    pub fn select_values(&mut self, json_path: &'a JsonPath<'a>) -> Result<Vec<OwnedJsonb>> {
+        self.execute(json_path)?;
         let mut values = Vec::with_capacity(self.items.len());
         while let Some(item) = self.items.pop_front() {
             let value = OwnedJsonb::from_item(item)?;
@@ -127,7 +110,8 @@ impl<'a> Selector<'a> {
         Ok(values)
     }
 
-    pub fn build_array(&mut self) -> Result<OwnedJsonb> {
+    pub fn select_array(&mut self, json_path: &'a JsonPath<'a>) -> Result<OwnedJsonb> {
+        self.execute(json_path)?;
         let mut builder = ArrayBuilder::with_capacity(self.items.len());
         while let Some(item) = self.items.pop_front() {
             builder.push_jsonb_item(item);
@@ -135,7 +119,8 @@ impl<'a> Selector<'a> {
         builder.build()
     }
 
-    pub fn build_first(&mut self) -> Result<Option<OwnedJsonb>> {
+    pub fn select_first(&mut self, json_path: &'a JsonPath<'a>) -> Result<Option<OwnedJsonb>> {
+        self.execute(json_path)?;
         if let Some(item) = self.items.pop_front() {
             let value = OwnedJsonb::from_item(item)?;
             Ok(Some(value))
@@ -144,7 +129,8 @@ impl<'a> Selector<'a> {
         }
     }
 
-    pub fn build_value(&mut self) -> Result<Option<OwnedJsonb>> {
+    pub fn select_value(&mut self, json_path: &'a JsonPath<'a>) -> Result<Option<OwnedJsonb>> {
+        self.execute(json_path)?;
         if self.items.len() > 1 {
             let array = self.build_array()?;
             Ok(Some(array))
@@ -170,6 +156,25 @@ impl<'a> Selector<'a> {
             return Ok(v);
         }
         Err(Error::InvalidJsonPathPredicate)
+    }
+
+    fn execute(&mut self, json_path: &'a JsonPath<'a>) -> Result<()> {
+        // add root jsonb
+        let root_item = JsonbItem::Raw(self.root_jsonb);
+        self.items.clear();
+        self.items.push_front(root_item);
+
+        if json_path.paths.len() == 1 {
+            if let Path::Expr(expr) = &json_path.paths[0] {
+                let root_item = self.items.pop_front().unwrap();
+                let res_item = self.eval_expr(root_item, expr)?;
+                self.items.push_back(res_item);
+                return Ok(());
+            }
+        }
+        self.select_by_paths(&json_path.paths)?;
+
+        Ok(())
     }
 
     fn select_by_paths(&mut self, paths: &'a [Path<'a>]) -> Result<()> {
@@ -200,7 +205,7 @@ impl<'a> Selector<'a> {
         Ok(())
     }
 
-    pub(crate) fn select_by_path(&mut self, path: &'a Path<'a>) -> Result<bool> {
+    fn select_by_path(&mut self, path: &'a Path<'a>) -> Result<bool> {
         if self.items.is_empty() {
             return Ok(false);
         }
