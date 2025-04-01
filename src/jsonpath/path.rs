@@ -208,7 +208,7 @@ pub enum BinaryOperator {
     Gt,
     /// `>=` represents left is greater than or equal to right.
     Gte,
-    /// 
+    ///
     StartsWith,
 }
 
@@ -457,7 +457,7 @@ impl Display for BinaryArithmeticOperator {
             BinaryArithmeticOperator::Subtract => "-",
             BinaryArithmeticOperator::Multiply => "*",
             BinaryArithmeticOperator::Divide => "/",
-            BinaryArithmeticOperator::Modulus => "%",
+            BinaryArithmeticOperator::Modulo => "%",
         };
         write!(f, "{}", symbol)
     }

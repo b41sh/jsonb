@@ -22,14 +22,18 @@ use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
 use crate::core::ObjectValueIterator;
 use crate::error::Result;
+use crate::jsonpath::ArithmeticFunc;
 use crate::jsonpath::ArrayIndex;
+use crate::jsonpath::BinaryArithmeticOperator;
 use crate::jsonpath::BinaryOperator;
 use crate::jsonpath::Expr;
 use crate::jsonpath::JsonPath;
 use crate::jsonpath::Path;
 use crate::jsonpath::PathValue;
 use crate::jsonpath::RecursiveIndex;
+use crate::jsonpath::UnaryArithmeticOperator;
 use crate::number::Number;
+use crate::to_owned_jsonb;
 use crate::Error;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
@@ -40,28 +44,27 @@ enum ExprValue<'a> {
     Value(Box<PathValue<'a>>),
 }
 
-impl ExprValue {
-    fn as_number(&self) -> Result<Number> {
+impl ExprValue<'_> {
+    fn as_number(self) -> Result<Number> {
         match self {
-            ExprValue::Values(vals) => {
+            ExprValue::Values(mut vals) => {
                 if vals.len() != 1 {
                     return Err(Error::InvalidJsonPath);
                 }
-                match vals[0] {
-                    PathValue::Number(num) => Ok(num),
-                    _ => Err(Error::InvalidJsonPath),
-                }
-            }
-            ExprValue::Value(val) => {
+                let val = vals.pop().unwrap();
                 match val {
                     PathValue::Number(num) => Ok(num),
                     _ => Err(Error::InvalidJsonPath),
                 }
             }
+            ExprValue::Value(val) => match *val {
+                PathValue::Number(num) => Ok(num),
+                _ => Err(Error::InvalidJsonPath),
+            },
         }
     }
 
-    fn as_numbers(&self) -> Result<Vec<Number>> {
+    fn as_numbers(self) -> Result<Vec<Number>> {
         match self {
             ExprValue::Values(vals) => {
                 let mut nums = Vec::with_capacity(vals.len());
@@ -74,32 +77,29 @@ impl ExprValue {
                 }
                 Ok(nums)
             }
-            ExprValue::Value(val) => {
-                match val {
-                    PathValue::Number(num) => Ok(vec![num]),
-                    _ => Err(Error::InvalidJsonPath),
-                }
-            }
+            ExprValue::Value(val) => match *val {
+                PathValue::Number(num) => Ok(vec![num]),
+                _ => Err(Error::InvalidJsonPath),
+            },
         }
     }
-
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Selector<'a> {
+pub struct Selector<'a> {
     root_jsonb: RawJsonb<'a>,
     items: VecDeque<JsonbItem<'a>>,
 }
 
 impl<'a> Selector<'a> {
-    pub(crate) fn new(root_jsonb: RawJsonb<'a>) -> Selector<'a> {
+    pub fn new(root_jsonb: RawJsonb<'a>) -> Selector<'a> {
         Self {
             root_jsonb,
             items: VecDeque::new(),
         }
     }
 
-    pub(crate) fn execute(&mut self, json_path: &'a JsonPath<'a>) -> Result<()> {
+    pub fn execute(&mut self, json_path: &'a JsonPath<'a>) -> Result<()> {
         // add root jsonb
         let root_item = JsonbItem::Raw(self.root_jsonb);
         self.items.clear();
@@ -118,7 +118,7 @@ impl<'a> Selector<'a> {
         Ok(())
     }
 
-    pub(crate) fn build(&mut self) -> Result<Vec<OwnedJsonb>> {
+    pub fn build(&mut self) -> Result<Vec<OwnedJsonb>> {
         let mut values = Vec::with_capacity(self.items.len());
         while let Some(item) = self.items.pop_front() {
             let value = OwnedJsonb::from_item(item)?;
@@ -127,7 +127,7 @@ impl<'a> Selector<'a> {
         Ok(values)
     }
 
-    pub(crate) fn build_array(&mut self) -> Result<OwnedJsonb> {
+    pub fn build_array(&mut self) -> Result<OwnedJsonb> {
         let mut builder = ArrayBuilder::with_capacity(self.items.len());
         while let Some(item) = self.items.pop_front() {
             builder.push_jsonb_item(item);
@@ -135,7 +135,7 @@ impl<'a> Selector<'a> {
         builder.build()
     }
 
-    pub(crate) fn build_first(&mut self) -> Result<Option<OwnedJsonb>> {
+    pub fn build_first(&mut self) -> Result<Option<OwnedJsonb>> {
         if let Some(item) = self.items.pop_front() {
             let value = OwnedJsonb::from_item(item)?;
             Ok(Some(value))
@@ -144,7 +144,7 @@ impl<'a> Selector<'a> {
         }
     }
 
-    pub(crate) fn build_value(&mut self) -> Result<Option<OwnedJsonb>> {
+    pub fn build_value(&mut self) -> Result<Option<OwnedJsonb>> {
         if self.items.len() > 1 {
             let array = self.build_array()?;
             Ok(Some(array))
@@ -153,7 +153,7 @@ impl<'a> Selector<'a> {
         }
     }
 
-    pub(crate) fn exists(&mut self, json_path: &'a JsonPath<'a>) -> Result<bool> {
+    pub fn exists(&mut self, json_path: &'a JsonPath<'a>) -> Result<bool> {
         if json_path.is_predicate() {
             return Ok(true);
         }
@@ -161,7 +161,7 @@ impl<'a> Selector<'a> {
         Ok(!self.items.is_empty())
     }
 
-    pub(crate) fn predicate_match(&mut self, json_path: &'a JsonPath<'a>) -> Result<bool> {
+    pub fn predicate_match(&mut self, json_path: &'a JsonPath<'a>) -> Result<bool> {
         if !json_path.is_predicate() {
             return Err(Error::InvalidJsonPathPredicate);
         }
@@ -186,7 +186,7 @@ impl<'a> Selector<'a> {
                     let len = self.items.len();
                     for _ in 0..len {
                         let item = self.items.pop_front().unwrap();
-                        let res = self.filter_expr(item.clone(), expr)?;
+                        let res = self.eval_filter_expr(item.clone(), expr)?;
                         if res {
                             self.items.push_back(item);
                         }
@@ -355,17 +355,20 @@ impl<'a> Selector<'a> {
     fn eval_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<JsonbItem<'a>> {
         match expr {
             Expr::ArithmeticFunc(func) => self.eval_arithmetic_func(item.clone(), func),
-            Expr::BinaryOp{ .. } || Expr::ExistsFunc(_) => {
+            Expr::BinaryOp { .. } | Expr::ExistsFunc(_) => {
                 let res = self.eval_filter_expr(item, expr)?;
-                Ok(JsonbItem::Boolean(res)))
+                Ok(JsonbItem::Boolean(res))
             }
-            Expr::Value(val) => eval_value(val)?,
+            Expr::Value(val) => self.eval_value(val),
             Expr::Paths(_) => Err(Error::InvalidJsonPath),
         }
     }
 
-
-    fn eval_arithmetic_func(&mut self, item: JsonbItem<'a>, func: &'a ArithmeticFunc<'a>) -> Result<JsonbItem<'a>> {
+    fn eval_arithmetic_func(
+        &mut self,
+        item: JsonbItem<'a>,
+        func: &'a ArithmeticFunc<'a>,
+    ) -> Result<JsonbItem<'a>> {
         match func {
             ArithmeticFunc::Unary { op, operand } => {
                 let operand = self.convert_expr_val(item.clone(), operand)?;
@@ -375,12 +378,15 @@ impl<'a> Selector<'a> {
                 let num_vals = match op {
                     UnaryArithmeticOperator::Add => nums,
                     UnaryArithmeticOperator::Subtract => {
-                        nums.iter()
-                            .map(|n| n.neg())
-                            .collect()?
+                        let mut neg_nums = Vec::with_capacity(nums.len());
+                        for num in nums {
+                            let neg_num = num.neg()?;
+                            neg_nums.push(neg_num);
+                        }
+                        neg_nums
                     }
                 };
-                let owned_nums = to_owned_jsonb(num_vals)?
+                let owned_nums = to_owned_jsonb(&num_vals)?;
                 Ok(JsonbItem::Owned(owned_nums))
             }
             ArithmeticFunc::Binary { op, left, right } => {
@@ -401,21 +407,20 @@ impl<'a> Selector<'a> {
                     BinaryArithmeticOperator::Divide => lnum.div(rnum)?,
                     BinaryArithmeticOperator::Modulo => lnum.rem(rnum)?,
                 };
-                let owned_num = to_owned_jsonb(num_val)?
+                let owned_num = to_owned_jsonb(&num_val)?;
                 Ok(JsonbItem::Owned(owned_num))
             }
         }
     }
 
     fn eval_value(&mut self, val: &PathValue<'a>) -> Result<JsonbItem<'a>> {
-        let mut builder = ArrayBuilder::with_capacity(1);
         let owned_val = match val {
-            PathValue::Null => to_owned_jsonb(vec![&()])?,
-            PathValue::Boolean(v) => to_owned_jsonb(vec![&v])?,
-            PathValue::Number(v) => to_owned_jsonb(vec![&v])?,
-            PathValue::String(v) => to_owned_jsonb(vec![&v.to_string()])?,
-        }
-        Ok(JsonbItem::Owned(owned_nums))
+            PathValue::Null => to_owned_jsonb(&vec![&()])?,
+            PathValue::Boolean(v) => to_owned_jsonb(&vec![v])?,
+            PathValue::Number(v) => to_owned_jsonb(&vec![v])?,
+            PathValue::String(v) => to_owned_jsonb(&vec![v.to_string()])?,
+        };
+        Ok(JsonbItem::Owned(owned_val))
     }
 
     fn eval_filter_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<bool> {
@@ -439,9 +444,7 @@ impl<'a> Selector<'a> {
                 }
             },
             Expr::ExistsFunc(paths) => self.eval_exists(item, paths),
-            _ => {
-                Err(Error::InvalidJsonPath)
-            }
+            _ => Err(Error::InvalidJsonPath),
         }
     }
 
@@ -565,12 +568,8 @@ impl<'a> Selector<'a> {
     ) -> bool {
         if op == &BinaryOperator::StartsWith {
             let res = match (lhs, rhs) {
-                (PathValue::String(lhs), PathValue::String(rhs)) => {
-                    lhs.starts_with(&*rhs)
-                }
-                (_, _) => {
-                    false
-                }
+                (PathValue::String(lhs), PathValue::String(rhs)) => lhs.starts_with(&*rhs),
+                (_, _) => false,
             };
             return res;
         }
