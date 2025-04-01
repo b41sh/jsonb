@@ -41,8 +41,9 @@ pub enum Path<'a> {
     Current,
     /// `.*` represents selecting all elements in an Object.
     DotWildcard,
-    /// `.**` represents
-    RecursiveDotWildcard(Option<RecursiveIndex>),
+    /// `.**` represents recursive selecting all elements in Array and Object.
+    /// The optional `RecursiveLevel` indicates the seleted levels.
+    RecursiveDotWildcard(Option<RecursiveLevel>),
     /// `[*]` represents selecting all elements in an Array.
     BracketWildcard,
     /// `.<name>` represents selecting element that matched the name in an Object, like `$.event`.
@@ -67,8 +68,8 @@ pub enum Path<'a> {
     ArrayIndices(Vec<ArrayIndex>),
     /// `?(<expression>)` represents selecting all elements in an object or array that match the filter expression, like `$.book[?(@.price < 10)]`.
     FilterExpr(Box<Expr<'a>>),
-    /// `<expression>` standalone unary or binary arithmetic expression, like '-$.a[*]' or '$.a + 3'
-    /// `<expression>` standalone filter expression, like `$.book[*].price > 10`.
+    /// `<expression>` standalone filter expression, like `$.book[*].price > 10`,
+    /// and arithmetic expression, like `-$.a[*]` or `$.a + 3`
     Expr(Box<Expr<'a>>),
 }
 
@@ -91,6 +92,15 @@ pub enum ArrayIndex {
 }
 
 impl ArrayIndex {
+    /// Converts an `ArrayIndex` to a `HashSet` of indices that should be selected from an Array.
+    ///
+    /// # Arguments
+    ///
+    /// * `length` - The length of the array.
+    ///
+    /// # Returns
+    ///
+    /// A `HashSet<usize>` containing the indices to select.
     pub fn to_indices(&self, length: usize) -> HashSet<usize> {
         let length = length as i32;
 
@@ -128,45 +138,59 @@ impl ArrayIndex {
     }
 }
 
-/// Represents the index in an Array.
+/// Represents the end level in hierarchical structure.
 #[derive(Debug, Clone, PartialEq)]
-pub enum RecursiveEnd {
-    /// The single number index.
+pub enum RecursiveLevelEnd {
+    /// Specifies the end of the recursive level.
     Index(u8),
-    /// The range index between two number.
+    /// Specifies that the recursion should continue to the last level.
     Last,
 }
 
+/// Represents the selected levels in hierarchical structure.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RecursiveIndex {
+pub struct RecursiveLevel {
+    /// The starting level of the recursive level.
     pub start: u8,
-    pub end: Option<RecursiveEnd>,
+    /// The optional end of the recursive level. If None, the level applies only to the start level.
+    pub end: Option<RecursiveLevelEnd>,
 }
 
-impl RecursiveIndex {
-    pub fn check_recursive_index(&self, depth: u8) -> (bool, bool) {
+impl RecursiveLevel {
+    /// Checks if the current level matches the recursive level.
+    ///
+    /// # Arguments
+    ///
+    /// * `level` - The current level in hierarchical structure.
+    ///
+    /// # Returns
+    ///
+    /// A tuple (is_match, should_continue):
+    /// - is_match: Indicates whether the current level matches the level criteria.
+    /// - should_continue: Indicates whether to continue processing data at the next level.
+    pub fn check_recursive_level(&self, level: u8) -> (bool, bool) {
         if let Some(end) = &self.end {
             match end {
                 RecursiveEnd::Index(end) => {
-                    if depth < self.start && self.start <= *end {
+                    if level < self.start && self.start <= *end {
                         (false, true)
-                    } else if depth >= self.start && depth <= *end {
+                    } else if level >= self.start && level <= *end {
                         (true, true)
                     } else {
                         (false, false)
                     }
                 }
                 RecursiveEnd::Last => {
-                    if depth < self.start {
+                    if level < self.start {
                         (false, true)
                     } else {
                         (true, true)
                     }
                 }
             }
-        } else if depth < self.start {
+        } else if level < self.start {
             (false, true)
-        } else if depth == self.start {
+        } else if level == self.start {
             (true, false)
         } else {
             (false, false)

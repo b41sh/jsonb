@@ -180,15 +180,15 @@ fn bracket_wildcard(input: &[u8]) -> IResult<&[u8], ()> {
     )(input)
 }
 
-fn recursive_dot_wildcard(input: &[u8]) -> IResult<&[u8], Option<RecursiveIndex>> {
-    preceded(tag(".**"), opt(recursive_dot_wildcard_index))(input)
+fn recursive_dot_wildcard(input: &[u8]) -> IResult<&[u8], Option<RecursiveLevel>> {
+    preceded(tag(".**"), opt(recursive_level))(input)
 }
 
-fn recursive_dot_wildcard_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> {
+fn recursive_level(input: &[u8]) -> IResult<&[u8], RecursiveLevel> {
     alt((
         delimited(
             char('{'),
-            delimited(multispace0, recursive_index, multispace0),
+            delimited(multispace0, recursive_level_range, multispace0),
             char('}'),
         ),
         map(
@@ -197,7 +197,7 @@ fn recursive_dot_wildcard_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> 
                 delimited(multispace0, u8, multispace0),
                 char('}'),
             ),
-            |s| RecursiveIndex {
+            |s| RecursiveLevel {
                 start: s,
                 end: None,
             },
@@ -205,7 +205,7 @@ fn recursive_dot_wildcard_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> 
     ))(input)
 }
 
-fn recursive_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> {
+fn recursive_level_range(input: &[u8]) -> IResult<&[u8], RecursiveLevel> {
     alt((
         map(
             separated_pair(
@@ -213,9 +213,9 @@ fn recursive_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> {
                 delimited(multispace0, tag_no_case("to"), multispace0),
                 u8,
             ),
-            |(s, e)| RecursiveIndex {
+            |(s, e)| RecursiveLevel {
                 start: s,
-                end: Some(RecursiveEnd::Index(e)),
+                end: Some(RecursiveLevelEnd::Index(e)),
             },
         ),
         map(
@@ -224,9 +224,9 @@ fn recursive_index(input: &[u8]) -> IResult<&[u8], RecursiveIndex> {
                 delimited(multispace0, tag_no_case("to"), multispace0),
                 tag_no_case("last"),
             ),
-            |(s, _)| RecursiveIndex {
+            |(s, _)| RecursiveLevel {
                 start: s,
-                end: Some(RecursiveEnd::Last),
+                end: Some(RecursiveLevelEnd::Last),
             },
         ),
     ))(input)

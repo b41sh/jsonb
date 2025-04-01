@@ -85,13 +85,23 @@ impl ExprValue<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Represents the state of a JSON Path selection process.
+///
+/// It holds the root JSONB value and the intermediate results (items) found during
+/// the execution of a `JsonPath`.
 pub struct Selector<'a> {
+    /// The root JSONB value against which the path is executed.
     root_jsonb: RawJsonb<'a>,
+    /// A queue holding the JSONB items that match the path criteria during execution.
     items: VecDeque<JsonbItem<'a>>,
 }
 
 impl<'a> Selector<'a> {
+    /// Creates a new `Selector` for the given root `RawJsonb`.
+    ///
+    /// # Arguments
+    ///
+    /// * `root_jsonb` - The `RawJsonb` data to select from.
     pub fn new(root_jsonb: RawJsonb<'a>) -> Selector<'a> {
         Self {
             root_jsonb,
@@ -99,6 +109,42 @@ impl<'a> Selector<'a> {
         }
     }
 
+    /// Executes the `JsonPath` and collects all matching items into a `Vec<OwnedJsonb>`.
+    ///
+    /// This function returns all matching elements as a `Vec<OwnedJsonb>`.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONPath selector.
+    /// * `json_path` - The JSONPath expression.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<OwnedJsonb>)` - A vector containing the selected `OwnedJsonb` values.
+    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jsonb::jsonpath::parse_json_path;
+    /// use jsonb::jsonpath::Selector;
+    /// use jsonb::OwnedJsonb;
+    ///
+    /// let jsonb_value = r#"{"a": {"b": [1, 2, 3]}, "c": 4}"#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = jsonb_value.as_raw();
+    /// let mut selector = Selector::new(raw_jsonb);
+    ///
+    /// let path = parse_json_path("$.a.b[*]".as_bytes()).unwrap();
+    /// let result = selector.select_values(&path).unwrap();
+    /// assert_eq!(result.len(), 3);
+    /// assert_eq!(result[0].to_string(), "1");
+    /// assert_eq!(result[1].to_string(), "2");
+    /// assert_eq!(result[2].to_string(), "3");
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// * `RawJsonb::select_by_path`.
     pub fn select_values(&mut self, json_path: &'a JsonPath<'a>) -> Result<Vec<OwnedJsonb>> {
         self.execute(json_path)?;
         let mut values = Vec::with_capacity(self.items.len());
@@ -109,6 +155,39 @@ impl<'a> Selector<'a> {
         Ok(values)
     }
 
+    /// Executes the `JsonPath` and builds a JSON array `OwnedJsonb` from all matching items.
+    ///
+    /// This function returns all matching elements as a single `OwnedJsonb` representing a JSON array.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONPath selector.
+    /// * `json_path` - The JSONPath expression.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(OwnedJsonb)` - A single `OwnedJsonb` (a JSON array) containing the selected values.
+    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jsonb::jsonpath::parse_json_path;
+    /// use jsonb::jsonpath::Selector;
+    /// use jsonb::OwnedJsonb;
+    ///
+    /// let jsonb_value = r#"{"a": {"b": [1, 2, 3]}, "c": 4}"#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = jsonb_value.as_raw();
+    /// let mut selector = Selector::new(raw_jsonb);
+    ///
+    /// let path = parse_json_path("$.a.b[*]".as_bytes()).unwrap();
+    /// let result = selector.select_array(&path).unwrap();
+    /// assert_eq!(result.to_string(), "[1,2,3]");
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// * `RawJsonb::select_array_by_path`.
     pub fn select_array(&mut self, json_path: &'a JsonPath<'a>) -> Result<OwnedJsonb> {
         self.execute(json_path)?;
         let mut builder = ArrayBuilder::with_capacity(self.items.len());
@@ -118,6 +197,44 @@ impl<'a> Selector<'a> {
         builder.build()
     }
 
+    /// Executes the `JsonPath` and returns the first matching item as an `Option<OwnedJsonb>`.
+    ///
+    /// This function returns the first matched element wrapped in `Some`, or `None` if no element matches the path.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONPath selector.
+    /// * `json_path` - The JSONPath expression.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(OwnedJsonb))` - A single `OwnedJsonb` containing the first matched value.
+    /// * `Ok(None)` - The path does not match any values.
+    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jsonb::jsonpath::parse_json_path;
+    /// use jsonb::jsonpath::Selector;
+    /// use jsonb::OwnedJsonb;
+    ///
+    /// let jsonb_value = r#"{"a": [{"b": 1}, {"b": 2}], "c": 3}"#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = jsonb_value.as_raw();
+    /// let mut selector = Selector::new(raw_jsonb);
+    ///
+    /// let path = parse_json_path("$.a[0].b".as_bytes()).unwrap(); // Matches multiple values.
+    /// let result = selector.select_first(&path).unwrap();
+    /// assert_eq!(result.unwrap().to_string(), "1");
+    ///
+    /// let path = parse_json_path("$.d".as_bytes()).unwrap(); // No match.
+    /// let result = selector.select_first(&path).unwrap();
+    /// assert!(result.is_none());
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// * `RawJsonb::select_first_by_path`.
     pub fn select_first(&mut self, json_path: &'a JsonPath<'a>) -> Result<Option<OwnedJsonb>> {
         self.execute(json_path)?;
         if let Some(item) = self.items.pop_front() {
@@ -128,6 +245,50 @@ impl<'a> Selector<'a> {
         }
     }
 
+    /// Executes the `JsonPath` and returns a single value or an array of values.
+    ///
+    /// If exactly one element matches, it is returned directly (wrapped in `Some`).
+    /// If multiple elements match, they are returned as a JSON array (wrapped in `Some`).
+    /// If no elements match, `None` is returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONPath selector.
+    /// * `json_path` - The JSONPath expression.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(OwnedJsonb))` - A single `OwnedJsonb` containing the matched values.
+    /// * `Ok(None)` - The path does not match any values.
+    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jsonb::jsonpath::parse_json_path;
+    /// use jsonb::jsonpath::Selector;
+    /// use jsonb::OwnedJsonb;
+    ///
+    /// let jsonb_value = r#"{"a": [{"b": 1}, {"b": 2}], "c": 3}"#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = jsonb_value.as_raw();
+    /// let mut selector = Selector::new(raw_jsonb);
+    ///
+    /// let path = parse_json_path("$.c".as_bytes()).unwrap(); // Matches a single value.
+    /// let result = selector.select_value(&path).unwrap();
+    /// assert_eq!(result.unwrap().to_string(), "3");
+    ///
+    /// let path = parse_json_path("$.a[*].b".as_bytes()).unwrap(); // Matches multiple values.
+    /// let result = selector.select_value(&path).unwrap();
+    /// assert_eq!(result.unwrap().to_string(), "[1,2]");
+    ///
+    /// let path = parse_json_path("$.x".as_bytes()).unwrap(); // No match.
+    /// let result = selector.select_value(&path).unwrap();
+    /// assert!(result.is_none());
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// * `RawJsonb::select_value_by_path`.
     pub fn select_value(&mut self, json_path: &'a JsonPath<'a>) -> Result<Option<OwnedJsonb>> {
         self.execute(json_path)?;
         if self.items.len() > 1 {
@@ -145,6 +306,46 @@ impl<'a> Selector<'a> {
         }
     }
 
+    /// Executes the `JsonPath` and checks if any item matches.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONPath selector.
+    /// * `json_path` - The JSONPath expression.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - If the JSON path exists.
+    /// * `Ok(false)` - If the JSON path does not exist.
+    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation.
+    ///   This could also indicate issues with the `json_path` itself.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jsonb::jsonpath::parse_json_path;
+    /// use jsonb::jsonpath::Selector;
+    /// use jsonb::OwnedJsonb;
+    ///
+    /// let jsonb_value = r#"{"a": {"b": [1, 2, 3]}, "c": 4}"#.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = jsonb_value.as_raw();
+    /// let mut selector = Selector::new(raw_jsonb);
+    ///
+    /// // Valid paths
+    /// let path1 = parse_json_path("$.a.b[1]".as_bytes()).unwrap();
+    /// assert!(selector.exists(&path1).unwrap());
+    ///
+    /// let path2 = parse_json_path("$.c".as_bytes()).unwrap();
+    /// assert!(selector.exists(&path2).unwrap());
+    ///
+    /// // Invalid paths
+    /// let path3 = parse_json_path("$.a.x".as_bytes()).unwrap(); // "x" does not exist
+    /// assert!(!selector.exists(&path3).unwrap());
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// * `RawJsonb::path_exists`.
     pub fn exists(&mut self, json_path: &'a JsonPath<'a>) -> Result<bool> {
         if json_path.is_predicate() {
             return Ok(true);
@@ -153,6 +354,53 @@ impl<'a> Selector<'a> {
         Ok(!self.items.is_empty())
     }
 
+    /// Executes a `JsonPath` predicate and returns the boolean result.
+    ///
+    /// This function requires that the `JsonPath` represents a predicate expression
+    /// (e.g., `$.c > 1`, `exists($.a)`). It executes the path and expects a single
+    /// boolean `JsonbItem` as the result.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - The JSONPath selector.
+    /// * `json_path` - The JSONPath expression.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` - If the JSON path with its predicate matches at least one value in the JSONB data.
+    /// * `Ok(false)` - If the JSON path with its predicate does not match any values.
+    /// * `Err(Error)` - If the JSONB data is invalid or if an error occurs during path evaluation or predicate checking.
+    ///   This could also indicate issues with the `json_path` itself (invalid syntax, etc.).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jsonb::jsonpath::parse_json_path;
+    /// use jsonb::jsonpath::Selector;
+    /// use jsonb::OwnedJsonb;
+    ///
+    /// let jsonb_value = r#"[
+    ///     {"price": 12, "title": "Book A"},
+    ///     {"price": 8, "title": "Book B"},
+    ///     {"price": 5, "title": "Book C"}
+    /// ]"#
+    /// .parse::<OwnedJsonb>()
+    /// .unwrap();
+    /// let raw_jsonb = jsonb_value.as_raw();
+    /// let mut selector = Selector::new(raw_jsonb);
+    ///
+    /// // Path with predicate (select books with price < 10)
+    /// let path = parse_json_path("$[*].price < 10".as_bytes()).unwrap();
+    /// assert!(selector.predicate_match(&path).unwrap()); // True because Book B and Book C match.
+    ///
+    /// // Path with predicate (select books with title "Book D")
+    /// let path = parse_json_path("$[*].title == \"Book D\"".as_bytes()).unwrap();
+    /// assert!(!selector.predicate_match(&path).unwrap()); // False because no book has this title.
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// * `RawJsonb::path_match`.
     pub fn predicate_match(&mut self, json_path: &'a JsonPath<'a>) -> Result<bool> {
         if !json_path.is_predicate() {
             return Err(Error::InvalidJsonPathPredicate);
@@ -260,35 +508,35 @@ impl<'a> Selector<'a> {
     fn recursive_select_values(
         &mut self,
         parent_item: JsonbItem<'a>,
-        depth: u8,
+        level: u8,
         index_opt: &Option<RecursiveIndex>,
     ) -> Result<()> {
-        let (matched, continued) = if let Some(recursive_index) = index_opt {
-            recursive_index.check_recursive_index(depth)
+        let (is_match, should_continue) = if let Some(recursive_index) = index_opt {
+            recursive_index.check_recursive_level(level)
         } else {
             (true, true)
         };
-        if matched {
+        if is_match {
             self.items.push_back(parent_item.clone());
         }
         let Some(curr_raw_jsonb) = parent_item.as_raw_jsonb() else {
             return Ok(());
         };
-        if !continued {
+        if !should_continue {
             return Ok(());
         }
         let object_val_iter_opt = ObjectValueIterator::new(curr_raw_jsonb)?;
         if let Some(mut object_val_iter) = object_val_iter_opt {
             for result in &mut object_val_iter {
                 let val_item = result?;
-                self.recursive_select_values(val_item, depth + 1, index_opt)?;
+                self.recursive_select_values(val_item, level + 1, index_opt)?;
             }
         }
         let array_iter_opt = ArrayIterator::new(curr_raw_jsonb)?;
         if let Some(mut array_iter) = array_iter_opt {
             for item_result in &mut array_iter {
                 let item = item_result?;
-                self.recursive_select_values(item, depth + 1, index_opt)?;
+                self.recursive_select_values(item, level + 1, index_opt)?;
             }
         }
         Ok(())

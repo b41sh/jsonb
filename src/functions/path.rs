@@ -282,7 +282,7 @@ impl RawJsonb<'_> {
     /// # Arguments
     ///
     /// * `self` - The JSONB value.
-    /// * `json_path` - The JSONPath expression (from the `jsonpath` crate).
+    /// * `json_path` - The JSONPath expression.
     ///
     /// # Returns
     ///
@@ -317,7 +317,7 @@ impl RawJsonb<'_> {
     /// # Arguments
     ///
     /// * `self` - The JSONB value.
-    /// * `json_path` - The JSONPath expression (from the `jsonpath` crate).
+    /// * `json_path` - The JSONPath expression.
     ///
     /// # Returns
     ///
@@ -349,7 +349,7 @@ impl RawJsonb<'_> {
     /// # Arguments
     ///
     /// * `self` - The JSONB value.
-    /// * `json_path` - The JSONPath expression (from the `jsonpath` crate).
+    /// * `json_path` - The JSONPath expression.
     ///
     /// # Returns
     ///
@@ -391,7 +391,7 @@ impl RawJsonb<'_> {
     /// # Arguments
     ///
     /// * `self` - The JSONB value.
-    /// * `json_path` - The JSONPath expression (from the `jsonpath` crate).
+    /// * `json_path` - The JSONPath expression.
     ///
     /// # Returns
     ///
@@ -430,12 +430,10 @@ impl RawJsonb<'_> {
 
     /// Checks if a JSON path exists within the JSONB value.
     ///
-    /// This function uses the `jsonpath` crate to check if a given JSON path exists within the JSONB value.
-    ///
     /// # Arguments
     ///
     /// * `self` - The JSONB value.
-    /// * `json_path` - The JSON path to check (from the `jsonpath` crate).
+    /// * `json_path` - The JSONPath expression.
     ///
     /// # Returns
     ///
@@ -471,13 +469,13 @@ impl RawJsonb<'_> {
 
     /// Checks if a JSON path matches the JSONB value using a predicate.
     ///
-    /// This function uses the `jsonpath` crate to check if a given JSON path, along with an associated predicate, matches the JSONB value.
+    /// This function checks if a given JSON Path, along with an associated predicate, matches the JSONB value.
     /// The predicate determines the conditions that the selected value(s) must satisfy for the match to be considered successful.
     ///
     /// # Arguments
     ///
     /// * `self` - The JSONB value.
-    /// * `json_path` - The JSON path with a predicate (from the `jsonpath` crate).
+    /// * `json_path` - The JSONPath expression with a predicate.
     ///   The predicate is specified within the `json_path` using the standard JSONPath syntax.
     ///   For example, `$.store.book[?(@.price < 10)]` selects books with a price less than 10.
     ///
