@@ -99,7 +99,6 @@ impl<'a> Selector<'a> {
         }
     }
 
-
     pub fn select_values(&mut self, json_path: &'a JsonPath<'a>) -> Result<Vec<OwnedJsonb>> {
         self.execute(json_path)?;
         let mut values = Vec::with_capacity(self.items.len());
@@ -132,10 +131,17 @@ impl<'a> Selector<'a> {
     pub fn select_value(&mut self, json_path: &'a JsonPath<'a>) -> Result<Option<OwnedJsonb>> {
         self.execute(json_path)?;
         if self.items.len() > 1 {
-            let array = self.build_array()?;
+            let mut builder = ArrayBuilder::with_capacity(self.items.len());
+            while let Some(item) = self.items.pop_front() {
+                builder.push_jsonb_item(item);
+            }
+            let array = builder.build()?;
             Ok(Some(array))
+        } else if let Some(item) = self.items.pop_front() {
+            let value = OwnedJsonb::from_item(item)?;
+            Ok(Some(value))
         } else {
-            self.build_first()
+            Ok(None)
         }
     }
 
