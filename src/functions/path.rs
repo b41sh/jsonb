@@ -452,7 +452,6 @@ impl RawJsonb<'_> {
     ///
     /// ```rust
     /// use jsonb::jsonpath::parse_json_path;
-    /// use jsonb::jsonpath::Mode;
     /// use jsonb::OwnedJsonb;
     ///
     /// let jsonb_value = r#"{"a": {"b": [1, 2, 3]}, "c": 4}"#.parse::<OwnedJsonb>().unwrap();
@@ -497,7 +496,6 @@ impl RawJsonb<'_> {
     ///
     /// ```rust
     /// use jsonb::jsonpath::parse_json_path;
-    /// use jsonb::jsonpath::Mode;
     /// use jsonb::OwnedJsonb;
     ///
     /// let jsonb_value = r#"[
