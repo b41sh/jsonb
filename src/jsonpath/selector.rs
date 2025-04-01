@@ -30,7 +30,7 @@ use crate::jsonpath::Expr;
 use crate::jsonpath::JsonPath;
 use crate::jsonpath::Path;
 use crate::jsonpath::PathValue;
-use crate::jsonpath::RecursiveIndex;
+use crate::jsonpath::RecursiveLevel;
 use crate::jsonpath::UnaryArithmeticOperator;
 use crate::number::Number;
 use crate::to_owned_jsonb;
@@ -508,11 +508,11 @@ impl<'a> Selector<'a> {
     fn recursive_select_values(
         &mut self,
         parent_item: JsonbItem<'a>,
-        level: u8,
-        index_opt: &Option<RecursiveIndex>,
+        curr_level: u8,
+        recursive_level_opt: &Option<RecursiveLevel>,
     ) -> Result<()> {
-        let (is_match, should_continue) = if let Some(recursive_index) = index_opt {
-            recursive_index.check_recursive_level(level)
+        let (is_match, should_continue) = if let Some(recursive_level) = recursive_level_opt {
+            recursive_level.check_recursive_level(curr_level)
         } else {
             (true, true)
         };
@@ -529,14 +529,14 @@ impl<'a> Selector<'a> {
         if let Some(mut object_val_iter) = object_val_iter_opt {
             for result in &mut object_val_iter {
                 let val_item = result?;
-                self.recursive_select_values(val_item, level + 1, index_opt)?;
+                self.recursive_select_values(val_item, curr_level + 1, recursive_level_opt)?;
             }
         }
         let array_iter_opt = ArrayIterator::new(curr_raw_jsonb)?;
         if let Some(mut array_iter) = array_iter_opt {
             for item_result in &mut array_iter {
                 let item = item_result?;
-                self.recursive_select_values(item, level + 1, index_opt)?;
+                self.recursive_select_values(item, curr_level + 1, recursive_level_opt)?;
             }
         }
         Ok(())

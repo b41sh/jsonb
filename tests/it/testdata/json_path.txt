@@ -48,7 +48,7 @@ JsonPath {
         Root,
         RecursiveDotWildcard(
             Some(
-                RecursiveIndex {
+                RecursiveLevel {
                     start: 2,
                     end: Some(
                         Last,

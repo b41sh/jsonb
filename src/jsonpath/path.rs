@@ -171,7 +171,7 @@ impl RecursiveLevel {
     pub fn check_recursive_level(&self, level: u8) -> (bool, bool) {
         if let Some(end) = &self.end {
             match end {
-                RecursiveEnd::Index(end) => {
+                RecursiveLevelEnd::Index(end) => {
                     if level < self.start && self.start <= *end {
                         (false, true)
                     } else if level >= self.start && level <= *end {
@@ -180,7 +180,7 @@ impl RecursiveLevel {
                         (false, false)
                     }
                 }
-                RecursiveEnd::Last => {
+                RecursiveLevelEnd::Last => {
                     if level < self.start {
                         (false, true)
                     } else {
@@ -334,14 +334,14 @@ impl Display for ArrayIndex {
     }
 }
 
-impl Display for RecursiveIndex {
+impl Display for RecursiveLevel {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(end_index) = &self.end {
             match end_index {
-                RecursiveEnd::Index(end) => {
+                RecursiveLevelEnd::Index(end) => {
                     write!(f, "{} to {}", self.start, end)?;
                 }
-                RecursiveEnd::Last => {
+                RecursiveLevelEnd::Last => {
                     write!(f, "{} to last", self.start)?;
                 }
             }
@@ -364,11 +364,11 @@ impl Display for Path<'_> {
             Path::DotWildcard => {
                 write!(f, ".*")?;
             }
-            Path::RecursiveDotWildcard(index_opt) => {
+            Path::RecursiveDotWildcard(level_opt) => {
                 write!(f, ".**")?;
-                if let Some(index) = index_opt {
+                if let Some(level) = level_opt {
                     write!(f, "{{")?;
-                    write!(f, "{index}")?;
+                    write!(f, "{level}")?;
                     write!(f, "}}")?;
                 }
             }
