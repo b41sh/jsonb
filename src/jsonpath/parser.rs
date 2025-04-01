@@ -402,7 +402,7 @@ fn binary_arith_op(input: &[u8]) -> IResult<&[u8], BinaryArithmeticOperator> {
         value(BinaryArithmeticOperator::Subtract, char('-')),
         value(BinaryArithmeticOperator::Multiply, char('*')),
         value(BinaryArithmeticOperator::Divide, char('/')),
-        value(BinaryArithmeticOperator::Modulus, char('%')),
+        value(BinaryArithmeticOperator::Modulo, char('%')),
     ))(input)
 }
 

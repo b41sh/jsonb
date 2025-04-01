@@ -40,18 +40,49 @@ enum ExprValue<'a> {
     Value(Box<PathValue<'a>>),
 }
 
-/// Mode determines the different forms of the return value.
-#[derive(Clone, PartialEq, Debug)]
-pub enum Mode {
-    /// Only return the first jsonb value.
-    First,
-    /// Return all values as a jsonb Array.
-    Array,
-    /// Return each jsonb value separately.
-    All,
-    /// If there are multiple values, return a jsonb Array,
-    /// if there is only one value, return the jsonb value directly.
-    Mixed,
+impl ExprValue {
+    fn as_number(&self) -> Result<Number> {
+        match self {
+            ExprValue::Values(vals) => {
+                if vals.len() != 1 {
+                    return Err(Error::InvalidJsonPath);
+                }
+                match vals[0] {
+                    PathValue::Number(num) => Ok(num),
+                    _ => Err(Error::InvalidJsonPath),
+                }
+            }
+            ExprValue::Value(val) => {
+                match val {
+                    PathValue::Number(num) => Ok(num),
+                    _ => Err(Error::InvalidJsonPath),
+                }
+            }
+        }
+    }
+
+    fn as_numbers(&self) -> Result<Vec<Number>> {
+        match self {
+            ExprValue::Values(vals) => {
+                let mut nums = Vec::with_capacity(vals.len());
+                for val in vals {
+                    if let PathValue::Number(num) = val {
+                        nums.push(num);
+                    } else {
+                        return Err(Error::InvalidJsonPath);
+                    }
+                }
+                Ok(nums)
+            }
+            ExprValue::Value(val) => {
+                match val {
+                    PathValue::Number(num) => Ok(vec![num]),
+                    _ => Err(Error::InvalidJsonPath),
+                }
+            }
+        }
+    }
+
 }
 
 #[derive(Debug, Clone)]
@@ -77,8 +108,7 @@ impl<'a> Selector<'a> {
         if json_path.paths.len() == 1 {
             if let Path::Expr(expr) = &json_path.paths[0] {
                 let root_item = self.items.pop_front().unwrap();
-                let res = self.filter_expr(root_item, expr)?;
-                let res_item = JsonbItem::Boolean(res);
+                let res_item = self.eval_expr(root_item, expr)?;
                 self.items.push_back(res_item);
                 return Ok(());
             }
@@ -322,17 +352,83 @@ impl<'a> Selector<'a> {
         Ok(())
     }
 
-    fn filter_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<bool> {
+    fn eval_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<JsonbItem<'a>> {
+        match expr {
+            Expr::ArithmeticFunc(func) => self.eval_arithmetic_func(item.clone(), func),
+            Expr::BinaryOp{ .. } || Expr::ExistsFunc(_) => {
+                let res = self.eval_filter_expr(item, expr)?;
+                Ok(JsonbItem::Boolean(res)))
+            }
+            Expr::Value(val) => eval_value(val)?,
+            Expr::Paths(_) => Err(Error::InvalidJsonPath),
+        }
+    }
+
+
+    fn eval_arithmetic_func(&mut self, item: JsonbItem<'a>, func: &'a ArithmeticFunc<'a>) -> Result<JsonbItem<'a>> {
+        match func {
+            ArithmeticFunc::Unary { op, operand } => {
+                let operand = self.convert_expr_val(item.clone(), operand)?;
+                let Ok(nums) = operand.as_numbers() else {
+                    return Err(Error::InvalidJsonPath);
+                };
+                let num_vals = match op {
+                    UnaryArithmeticOperator::Add => nums,
+                    UnaryArithmeticOperator::Subtract => {
+                        nums.iter()
+                            .map(|n| n.neg())
+                            .collect()?
+                    }
+                };
+                let owned_nums = to_owned_jsonb(num_vals)?
+                Ok(JsonbItem::Owned(owned_nums))
+            }
+            ArithmeticFunc::Binary { op, left, right } => {
+                let lhs = self.convert_expr_val(item.clone(), left)?;
+                let rhs = self.convert_expr_val(item.clone(), right)?;
+
+                let Ok(lnum) = lhs.as_number() else {
+                    return Err(Error::InvalidJsonPath);
+                };
+                let Ok(rnum) = rhs.as_number() else {
+                    return Err(Error::InvalidJsonPath);
+                };
+
+                let num_val = match op {
+                    BinaryArithmeticOperator::Add => lnum.add(rnum)?,
+                    BinaryArithmeticOperator::Subtract => lnum.sub(rnum)?,
+                    BinaryArithmeticOperator::Multiply => lnum.mul(rnum)?,
+                    BinaryArithmeticOperator::Divide => lnum.div(rnum)?,
+                    BinaryArithmeticOperator::Modulo => lnum.rem(rnum)?,
+                };
+                let owned_num = to_owned_jsonb(num_val)?
+                Ok(JsonbItem::Owned(owned_num))
+            }
+        }
+    }
+
+    fn eval_value(&mut self, val: &PathValue<'a>) -> Result<JsonbItem<'a>> {
+        let mut builder = ArrayBuilder::with_capacity(1);
+        let owned_val = match val {
+            PathValue::Null => to_owned_jsonb(vec![&()])?,
+            PathValue::Boolean(v) => to_owned_jsonb(vec![&v])?,
+            PathValue::Number(v) => to_owned_jsonb(vec![&v])?,
+            PathValue::String(v) => to_owned_jsonb(vec![&v.to_string()])?,
+        }
+        Ok(JsonbItem::Owned(owned_nums))
+    }
+
+    fn eval_filter_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<bool> {
         match expr {
             Expr::BinaryOp { op, left, right } => match op {
                 BinaryOperator::Or => {
-                    let lhs = self.filter_expr(item.clone(), left)?;
-                    let rhs = self.filter_expr(item.clone(), right)?;
+                    let lhs = self.eval_filter_expr(item.clone(), left)?;
+                    let rhs = self.eval_filter_expr(item.clone(), right)?;
                     Ok(lhs || rhs)
                 }
                 BinaryOperator::And => {
-                    let lhs = self.filter_expr(item.clone(), left)?;
-                    let rhs = self.filter_expr(item.clone(), right)?;
+                    let lhs = self.eval_filter_expr(item.clone(), left)?;
+                    let rhs = self.eval_filter_expr(item.clone(), right)?;
                     Ok(lhs && rhs)
                 }
                 _ => {
@@ -343,7 +439,9 @@ impl<'a> Selector<'a> {
                 }
             },
             Expr::ExistsFunc(paths) => self.eval_exists(item, paths),
-            _ => todo!(),
+            _ => {
+                Err(Error::InvalidJsonPath)
+            }
         }
     }
 
@@ -372,11 +470,11 @@ impl<'a> Selector<'a> {
                 &Path::Root | &Path::Current => {
                     continue;
                 }
-                Path::FilterExpr(expr) | Path::Expr(expr) => {
+                Path::FilterExpr(expr) => {
                     let len = self.items.len();
                     for _ in 0..len {
                         let item = self.items.pop_front().unwrap();
-                        let res = self.filter_expr(item.clone(), expr)?;
+                        let res = self.eval_filter_expr(item.clone(), expr)?;
                         if res {
                             self.items.push_back(item);
                         }

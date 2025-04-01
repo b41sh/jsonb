@@ -230,8 +230,8 @@ pub enum BinaryArithmeticOperator {
     Multiply,
     /// `Divide` represents binary arithmetic / operation.
     Divide,
-    /// `Modulus` represents binary arithmetic % operation.
-    Modulus,
+    /// `Modulo` represents binary arithmetic % operation.
+    Modulo,
 }
 
 #[derive(Debug, Clone, PartialEq)]
