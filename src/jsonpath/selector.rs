@@ -697,7 +697,7 @@ impl<'a> Selector<'a> {
             PathValue::Number(v) => to_owned_jsonb(&vec![v])?,
             PathValue::String(v) => to_owned_jsonb(&vec![v.to_string()])?,
             PathValue::Raw(v) => {
-                return Ok(JsonbItem::Raw(v.clone()));
+                return Ok(JsonbItem::Raw(*v));
             }
         };
         Ok(JsonbItem::Owned(owned_val))
@@ -825,7 +825,7 @@ impl<'a> Selector<'a> {
                                                 std::str::from_utf8_unchecked(data)
                                             }))
                                         }
-                                        JsonbItem::Raw(raw) => PathValue::Raw(raw.clone()),
+                                        JsonbItem::Raw(raw) => PathValue::Raw(raw),
                                         _ => {
                                             continue;
                                         }
@@ -833,7 +833,7 @@ impl<'a> Selector<'a> {
                                     values.push(value);
                                 }
                             } else {
-                                values.push(PathValue::Raw(raw.clone()));
+                                values.push(PathValue::Raw(raw));
                             }
                             continue;
                         }

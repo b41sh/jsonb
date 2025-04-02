@@ -257,8 +257,8 @@ impl Number {
     }
 
     pub fn div(&self, other: Number) -> Result<Number> {
-        let a_float = a.as_f64().unwrap();
-        let b_float = b.as_f64().unwrap();
+        let a_float = self.as_f64().unwrap();
+        let b_float = other.as_f64().unwrap();
         if b_float == 0.0 {
             return Err(Error::Message("Division by zero".to_string()));
         }

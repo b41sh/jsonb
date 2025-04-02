@@ -218,7 +218,7 @@ fn test_path_exists_expr() {
 
 #[test]
 fn test_select_by_path() {
-    let source = r#"{"name":"Fred","phones":[{"type":"home","number":3720453},{"type":"work","number":5062051}],"car_no":123,"测试\"\uD83D\uDC8E":"ab"}"#;
+    let source = r#"{"name":"Fred","phones":[{"type":"home","number":3720453},{"type":"work","number":5062051}],"car_no":123,"测试\"\uD83D\uDC8E":"ab","numbers":[2,3,4]}"#;
 
     let paths = vec![
         (r#"$.name"#, vec![r#""Fred""#]),
@@ -304,6 +304,9 @@ fn test_select_by_path() {
         (r#"$.phones[0].number + 3"#, vec![r#"3720456"#]),
         (r#"$.phones[0].number % 10"#, vec![r#"3"#]),
         (r#"7 - $.phones[1].number"#, vec![r#"-5062044"#]),
+        (r#"+$.numbers"#, vec![r#"2"#, r#"3"#, r#"4"#]),
+        (r#"-$.numbers"#, vec![r#"-2"#, r#"-3"#, r#"-4"#]),
+        (r#"$.numbers[1] / 2"#, vec![r#"1.5"#]),
     ];
 
     let owned_jsonb = source.parse::<OwnedJsonb>().unwrap();
