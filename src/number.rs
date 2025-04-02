@@ -257,68 +257,12 @@ impl Number {
     }
 
     pub fn div(&self, other: Number) -> Result<Number> {
-        match (self, other) {
-            (Number::Int64(a), Number::Int64(b)) => {
-                if b == 0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                a.checked_div(b)
-                    .map(Number::Int64)
-                    .ok_or(Error::Message("Int64 overflow".to_string()))
-            }
-            (Number::UInt64(a), Number::UInt64(b)) => {
-                if b == 0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                a.checked_div(b)
-                    .map(Number::UInt64)
-                    .ok_or(Error::Message("UInt64 overflow".to_string()))
-            }
-            (Number::Int64(a), Number::UInt64(b)) => {
-                if b == 0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                if *a < 0 {
-                    a.checked_div(b as i64)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    (*a as u64)
-                        .checked_div(b)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
-            (Number::UInt64(a), Number::Int64(b)) => {
-                if b == 0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                if b < 0 {
-                    (*a as i64)
-                        .checked_div(b)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    a.checked_div(b as u64)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
-            (Number::Float64(a), Number::Float64(b)) => {
-                if b == 0.0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                Ok(Number::Float64(a / b))
-            }
-            (a, b) => {
-                let a_float = a.as_f64().unwrap();
-                let b_float = b.as_f64().unwrap();
-                if b_float == 0.0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                Ok(Number::Float64(a_float / b_float))
-            }
+        let a_float = a.as_f64().unwrap();
+        let b_float = b.as_f64().unwrap();
+        if b_float == 0.0 {
+            return Err(Error::Message("Division by zero".to_string()));
         }
+        Ok(Number::Float64(a_float / b_float))
     }
 
     pub fn rem(&self, other: Number) -> Result<Number> {
