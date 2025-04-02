@@ -421,8 +421,7 @@ impl<'a> Selector<'a> {
         if json_path.paths.len() == 1 {
             if let Path::Expr(expr) = &json_path.paths[0] {
                 let root_item = self.items.pop_front().unwrap();
-                let res_item = self.eval_expr(root_item, expr)?;
-                self.items.push_back(res_item);
+                self.eval_expr(root_item, expr)?;
                 return Ok(());
             }
         }
@@ -445,7 +444,7 @@ impl<'a> Selector<'a> {
                     let len = self.items.len();
                     for _ in 0..len {
                         let item = self.items.pop_front().unwrap();
-                        let res = self.eval_filter_expr(item.clone(), expr)?;
+                        let res = self.eval_filter_expr(item.clone(), expr)?.unwrap_or(false);
                         if res {
                             self.items.push_back(item);
                         }
@@ -611,42 +610,60 @@ impl<'a> Selector<'a> {
         Ok(())
     }
 
-    fn eval_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<JsonbItem<'a>> {
+    fn eval_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<()> {
         match expr {
-            Expr::ArithmeticFunc(func) => self.eval_arithmetic_func(item.clone(), func),
+            Expr::ArithmeticFunc(func) => {
+                let res_items = self.eval_arithmetic_func(item.clone(), func)?;
+                for res_item in res_items {
+                    self.items.push_back(res_item);
+                }
+            }
             Expr::BinaryOp { .. } | Expr::ExistsFunc(_) => {
                 let res = self.eval_filter_expr(item, expr)?;
-                Ok(JsonbItem::Boolean(res))
+                let res_item = if let Some(res) = res {
+                    JsonbItem::Boolean(res)
+                } else {
+                    JsonbItem::Null
+                }
+                self.items.push_back(res_item);
             }
-            Expr::Value(val) => self.eval_value(val),
-            Expr::Paths(_) => Err(Error::InvalidJsonPath),
+            Expr::Value(val) => {
+                let res_item = self.eval_value(val)?;
+                self.items.push_back(res_item);
+            }                
+            Expr::Paths(_) => {
+                return Err(Error::InvalidJsonPath);
+            }
         }
+        Ok(())
     }
 
     fn eval_arithmetic_func(
         &mut self,
         item: JsonbItem<'a>,
         func: &'a ArithmeticFunc<'a>,
-    ) -> Result<JsonbItem<'a>> {
+    ) -> Result<Vec<JsonbItem<'a>>> {
         match func {
             ArithmeticFunc::Unary { op, operand } => {
                 let operand = self.convert_expr_val(item.clone(), operand)?;
                 let Ok(nums) = operand.convert_to_numbers() else {
                     return Err(Error::InvalidJsonPath);
                 };
-                let num_vals = match op {
-                    UnaryArithmeticOperator::Add => nums,
+                let mut num_vals = Vec::with_capacity(nums.len());
+                match op {
+                    UnaryArithmeticOperator::Add => {
+                        for num in nums {
+                            num_vals.push(to_owned_jsonb(&num)?);
+                        }
+                    }
                     UnaryArithmeticOperator::Subtract => {
-                        let mut neg_nums = Vec::with_capacity(nums.len());
                         for num in nums {
                             let neg_num = num.neg()?;
-                            neg_nums.push(neg_num);
+                            num_vals.push(to_owned_jsonb(&neg_num)?);
                         }
-                        neg_nums
                     }
                 };
-                let owned_nums = to_owned_jsonb(&num_vals)?;
-                Ok(JsonbItem::Owned(owned_nums))
+                Ok(num_vals)
             }
             ArithmeticFunc::Binary { op, left, right } => {
                 let lhs = self.convert_expr_val(item.clone(), left)?;
@@ -666,7 +683,7 @@ impl<'a> Selector<'a> {
                     BinaryArithmeticOperator::Modulo => lnum.rem(rnum)?,
                 };
                 let owned_num = to_owned_jsonb(&num_val)?;
-                Ok(JsonbItem::Owned(owned_num))
+                Ok(vec![JsonbItem::Owned(owned_num)])
             }
         }
     }
@@ -681,27 +698,36 @@ impl<'a> Selector<'a> {
         Ok(JsonbItem::Owned(owned_val))
     }
 
-    fn eval_filter_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<bool> {
+    fn eval_filter_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<Option<bool>> {
         match expr {
             Expr::BinaryOp { op, left, right } => match op {
                 BinaryOperator::Or => {
                     let lhs = self.eval_filter_expr(item.clone(), left)?;
                     let rhs = self.eval_filter_expr(item.clone(), right)?;
-                    Ok(lhs || rhs)
+                    match (lhs, rhs) {
+                        (Some(lhs), Some(rhs)) => Ok(Some(lhs || rhs))
+                        (_, _) => Ok(None)
+                    }
                 }
                 BinaryOperator::And => {
                     let lhs = self.eval_filter_expr(item.clone(), left)?;
                     let rhs = self.eval_filter_expr(item.clone(), right)?;
-                    Ok(lhs && rhs)
+                    match (lhs, rhs) {
+                        (Some(lhs), Some(rhs)) => Ok(Some(lhs && rhs))
+                        (_, _) => Ok(None)
+                    }
                 }
                 _ => {
                     let lhs = self.convert_expr_val(item.clone(), left)?;
                     let rhs = self.convert_expr_val(item.clone(), right)?;
-                    let res = self.compare(op, &lhs, &rhs);
+                    let res = self.eval_compare(op, &lhs, &rhs);
                     Ok(res)
                 }
             },
-            Expr::ExistsFunc(paths) => self.eval_exists(item, paths),
+            Expr::ExistsFunc(paths) => {
+                let res = self.eval_exists(item, paths)?;
+                Ok(Some(res))
+            },
             _ => Err(Error::InvalidJsonPath),
         }
     }
@@ -735,7 +761,7 @@ impl<'a> Selector<'a> {
                     let len = self.items.len();
                     for _ in 0..len {
                         let item = self.items.pop_front().unwrap();
-                        let res = self.eval_filter_expr(item.clone(), expr)?;
+                        let res = self.eval_filter_expr(item.clone(), expr)?.unwrap_or(false);
                         if res {
                             self.items.push_back(item);
                         }
@@ -772,6 +798,31 @@ impl<'a> Selector<'a> {
                         JsonbItem::String(data) => PathValue::String(Cow::Borrowed(unsafe {
                             std::str::from_utf8_unchecked(data)
                         })),
+                        JsonbItem::Raw(raw) => {
+                            // collect values in the array.
+                            let array_iter_opt = ArrayIterator::new(raw)?;
+                            if let Some(mut array_iter) = array_iter_opt {
+                                for item_result in &mut array_iter {
+                                    let item = item_result?;
+                                    let value = match item {
+                                        JsonbItem::Null => PathValue::Null,
+                                        JsonbItem::Boolean(v) => PathValue::Boolean(v),
+                                        JsonbItem::Number(data) => {
+                                            let n = Number::decode(data)?;
+                                            PathValue::Number(n)
+                                        }
+                                        JsonbItem::String(data) => PathValue::String(Cow::Borrowed(unsafe {
+                                            std::str::from_utf8_unchecked(data)
+                                        })),
+                                        _ => PathValue::Container,
+                                    };
+                                    values.push(value);
+                                }
+                            } else {
+                                values.push(PathValue::Container);
+                            }
+                            continue;
+                        }
                         _ => {
                             continue;
                         }
@@ -784,38 +835,34 @@ impl<'a> Selector<'a> {
         }
     }
 
-    fn compare(&mut self, op: &BinaryOperator, lhs: &ExprValue<'a>, rhs: &ExprValue<'a>) -> bool {
-        match (lhs, rhs) {
+    fn eval_compare(&mut self, op: &BinaryOperator, lhs: &ExprValue<'a>, rhs: &ExprValue<'a>) -> Option<bool> {
+        let (lvals, rvals) = match (lhs, rhs) {
             (ExprValue::Value(lhs), ExprValue::Value(rhs)) => {
-                self.compare_value(op, *lhs.clone(), *rhs.clone())
+                (vec![lhs.clone()], vec![rhs.clone()])
             }
             (ExprValue::Values(lhses), ExprValue::Value(rhs)) => {
-                for lhs in lhses.iter() {
-                    if self.compare_value(op, lhs.clone(), *rhs.clone()) {
-                        return true;
-                    }
-                }
-                false
+                (lhses.clone(), vec![rhs.clone()])
             }
             (ExprValue::Value(lhs), ExprValue::Values(rhses)) => {
-                for rhs in rhses.iter() {
-                    if self.compare_value(op, *lhs.clone(), rhs.clone()) {
-                        return true;
-                    }
-                }
-                false
+                (vec![lhs.clone()], rhses.clone())
             }
             (ExprValue::Values(lhses), ExprValue::Values(rhses)) => {
-                for lhs in lhses.iter() {
-                    for rhs in rhses.iter() {
-                        if self.compare_value(op, lhs.clone(), rhs.clone()) {
-                            return true;
-                        }
+                (lhses.clone(), rhses.clone())
+            }
+        };
+
+        for lval in lvals.into_iter() {
+            for rval in rvals.into_iter() {
+                if let Some(res) = self.compare_value(op, lval, rval) {
+                    if res {
+                        return Some(true);
                     }
+                } else {
+                    return None;
                 }
-                false
             }
         }
+        Some(false)
     }
 
     fn compare_value(
@@ -823,17 +870,21 @@ impl<'a> Selector<'a> {
         op: &BinaryOperator,
         lhs: PathValue<'a>,
         rhs: PathValue<'a>,
-    ) -> bool {
+    ) -> Option<bool> {
+        // container value can't compare values.
+        if lhs == PathValue::Container || rhs == PathValue::Container {
+            return None;
+        }
         if op == &BinaryOperator::StartsWith {
             let res = match (lhs, rhs) {
-                (PathValue::String(lhs), PathValue::String(rhs)) => lhs.starts_with(&*rhs),
-                (_, _) => false,
+                (PathValue::String(lhs), PathValue::String(rhs)) => Some(lhs.starts_with(&*rhs)),
+                (_, _) => None,
             };
             return res;
         }
         let order = lhs.partial_cmp(&rhs);
         if let Some(order) = order {
-            match op {
+            let res = match op {
                 BinaryOperator::Eq => order == Ordering::Equal,
                 BinaryOperator::NotEq => order != Ordering::Equal,
                 BinaryOperator::Lt => order == Ordering::Less,
@@ -841,9 +892,10 @@ impl<'a> Selector<'a> {
                 BinaryOperator::Gt => order == Ordering::Greater,
                 BinaryOperator::Gte => order == Ordering::Equal || order == Ordering::Greater,
                 _ => unreachable!(),
-            }
+            };
+            Some(res)
         } else {
-            false
+            None
         }
     }
 }

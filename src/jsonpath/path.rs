@@ -209,6 +209,8 @@ pub enum PathValue<'a> {
     Number(Number),
     /// UTF-8 string.
     String(Cow<'a, str>),
+    /// Container(Array or Object) value, can't be used for calculation.
+    Container,
 }
 
 /// Represents the operators used in filter expression.
