@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::RawJsonb;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -209,8 +210,8 @@ pub enum PathValue<'a> {
     Number(Number),
     /// UTF-8 string.
     String(Cow<'a, str>),
-    /// Container(Array or Object) value, can't be used for calculation.
-    Container,
+    /// RawJsonb (Array or Object) value, can't be used for calculation.
+    Raw(RawJsonb<'a>),
 }
 
 /// Represents the operators used in filter expression.
@@ -425,6 +426,9 @@ impl Display for PathValue<'_> {
             }
             PathValue::String(v) => {
                 write!(f, "\"{v}\"")
+            }
+            PathValue::Raw(v) => {
+                write!(f, "{}", v.to_string())
             }
         }
     }

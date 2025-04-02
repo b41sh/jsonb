@@ -624,13 +624,13 @@ impl<'a> Selector<'a> {
                     JsonbItem::Boolean(res)
                 } else {
                     JsonbItem::Null
-                }
+                };
                 self.items.push_back(res_item);
             }
             Expr::Value(val) => {
                 let res_item = self.eval_value(val)?;
                 self.items.push_back(res_item);
-            }                
+            }
             Expr::Paths(_) => {
                 return Err(Error::InvalidJsonPath);
             }
@@ -653,13 +653,15 @@ impl<'a> Selector<'a> {
                 match op {
                     UnaryArithmeticOperator::Add => {
                         for num in nums {
-                            num_vals.push(to_owned_jsonb(&num)?);
+                            let owned_num = to_owned_jsonb(&num)?;
+                            num_vals.push(JsonbItem::Owned(owned_num));
                         }
                     }
                     UnaryArithmeticOperator::Subtract => {
                         for num in nums {
                             let neg_num = num.neg()?;
-                            num_vals.push(to_owned_jsonb(&neg_num)?);
+                            let owned_num = to_owned_jsonb(&neg_num)?;
+                            num_vals.push(JsonbItem::Owned(owned_num));
                         }
                     }
                 };
@@ -694,27 +696,34 @@ impl<'a> Selector<'a> {
             PathValue::Boolean(v) => to_owned_jsonb(&vec![v])?,
             PathValue::Number(v) => to_owned_jsonb(&vec![v])?,
             PathValue::String(v) => to_owned_jsonb(&vec![v.to_string()])?,
+            PathValue::Raw(v) => {
+                return Ok(JsonbItem::Raw(v.clone()));
+            }
         };
         Ok(JsonbItem::Owned(owned_val))
     }
 
-    fn eval_filter_expr(&mut self, item: JsonbItem<'a>, expr: &'a Expr<'a>) -> Result<Option<bool>> {
+    fn eval_filter_expr(
+        &mut self,
+        item: JsonbItem<'a>,
+        expr: &'a Expr<'a>,
+    ) -> Result<Option<bool>> {
         match expr {
             Expr::BinaryOp { op, left, right } => match op {
                 BinaryOperator::Or => {
                     let lhs = self.eval_filter_expr(item.clone(), left)?;
                     let rhs = self.eval_filter_expr(item.clone(), right)?;
                     match (lhs, rhs) {
-                        (Some(lhs), Some(rhs)) => Ok(Some(lhs || rhs))
-                        (_, _) => Ok(None)
+                        (Some(lhs), Some(rhs)) => Ok(Some(lhs || rhs)),
+                        (_, _) => Ok(None),
                     }
                 }
                 BinaryOperator::And => {
                     let lhs = self.eval_filter_expr(item.clone(), left)?;
                     let rhs = self.eval_filter_expr(item.clone(), right)?;
                     match (lhs, rhs) {
-                        (Some(lhs), Some(rhs)) => Ok(Some(lhs && rhs))
-                        (_, _) => Ok(None)
+                        (Some(lhs), Some(rhs)) => Ok(Some(lhs && rhs)),
+                        (_, _) => Ok(None),
                     }
                 }
                 _ => {
@@ -727,7 +736,7 @@ impl<'a> Selector<'a> {
             Expr::ExistsFunc(paths) => {
                 let res = self.eval_exists(item, paths)?;
                 Ok(Some(res))
-            },
+            }
             _ => Err(Error::InvalidJsonPath),
         }
     }
@@ -811,15 +820,20 @@ impl<'a> Selector<'a> {
                                             let n = Number::decode(data)?;
                                             PathValue::Number(n)
                                         }
-                                        JsonbItem::String(data) => PathValue::String(Cow::Borrowed(unsafe {
-                                            std::str::from_utf8_unchecked(data)
-                                        })),
-                                        _ => PathValue::Container,
+                                        JsonbItem::String(data) => {
+                                            PathValue::String(Cow::Borrowed(unsafe {
+                                                std::str::from_utf8_unchecked(data)
+                                            }))
+                                        }
+                                        JsonbItem::Raw(raw) => PathValue::Raw(raw.clone()),
+                                        _ => {
+                                            continue;
+                                        }
                                     };
                                     values.push(value);
                                 }
                             } else {
-                                values.push(PathValue::Container);
+                                values.push(PathValue::Raw(raw.clone()));
                             }
                             continue;
                         }
@@ -835,25 +849,28 @@ impl<'a> Selector<'a> {
         }
     }
 
-    fn eval_compare(&mut self, op: &BinaryOperator, lhs: &ExprValue<'a>, rhs: &ExprValue<'a>) -> Option<bool> {
+    fn eval_compare(
+        &mut self,
+        op: &BinaryOperator,
+        lhs: &ExprValue<'a>,
+        rhs: &ExprValue<'a>,
+    ) -> Option<bool> {
         let (lvals, rvals) = match (lhs, rhs) {
             (ExprValue::Value(lhs), ExprValue::Value(rhs)) => {
-                (vec![lhs.clone()], vec![rhs.clone()])
+                (vec![*lhs.clone()], vec![*rhs.clone()])
             }
             (ExprValue::Values(lhses), ExprValue::Value(rhs)) => {
-                (lhses.clone(), vec![rhs.clone()])
+                (lhses.clone(), vec![*rhs.clone()])
             }
             (ExprValue::Value(lhs), ExprValue::Values(rhses)) => {
-                (vec![lhs.clone()], rhses.clone())
+                (vec![*lhs.clone()], rhses.clone())
             }
-            (ExprValue::Values(lhses), ExprValue::Values(rhses)) => {
-                (lhses.clone(), rhses.clone())
-            }
+            (ExprValue::Values(lhses), ExprValue::Values(rhses)) => (lhses.clone(), rhses.clone()),
         };
 
-        for lval in lvals.into_iter() {
-            for rval in rvals.into_iter() {
-                if let Some(res) = self.compare_value(op, lval, rval) {
+        for lval in lvals.iter() {
+            for rval in rvals.iter() {
+                if let Some(res) = self.compare_value(op, lval.clone(), rval.clone()) {
                     if res {
                         return Some(true);
                     }
@@ -872,7 +889,7 @@ impl<'a> Selector<'a> {
         rhs: PathValue<'a>,
     ) -> Option<bool> {
         // container value can't compare values.
-        if lhs == PathValue::Container || rhs == PathValue::Container {
+        if matches!(lhs, PathValue::Raw(_)) || matches!(rhs, PathValue::Raw(_)) {
             return None;
         }
         if op == &BinaryOperator::StartsWith {
