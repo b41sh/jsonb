@@ -493,12 +493,16 @@ impl Serialize for RawJsonb<'_> {
                             Number::UInt64(i) => serializer.serialize_u64(i),
                             Number::Float64(i) => serializer.serialize_f64(i),
                             Number::Decimal128(i) => {
-                                let v = i.to_float64();
-                                serializer.serialize_f64(v)
+                                let mut serialize_struct = serializer.serialize_struct(serde_json::number::TOKEN, 0)?;
+                                let val = "aaaa".to_string();
+                                let _ = serialize_struct.serialize_field(serde_json::number::TOKEN, val.as_str())?;
+                                serialize_struct.end()
                             }
                             Number::Decimal256(i) => {
-                                let v = i.to_float64();
-                                serializer.serialize_f64(v)
+                                let mut serialize_struct = serializer.serialize_struct(serde_json::number::TOKEN, 0)?;
+                                let val = "bbb".to_string();
+                                let _ = serialize_struct.serialize_field(serde_json::number::TOKEN, val.as_str())?;
+                                serialize_struct.end()
                             }
                         }
                     }
