@@ -29,6 +29,9 @@ use serde::de::Deserializer;
 use serde::de::Visitor;
 use serde::ser::Serialize;
 use serde::ser::Serializer;
+use serde::ser::SerializeStruct;
+
+const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
 #[derive(Debug, Clone)]
 pub struct Decimal128 {
@@ -115,13 +118,11 @@ impl Serialize for Number {
             Number::Int64(v) => serializer.serialize_i64(*v),
             Number::UInt64(v) => serializer.serialize_u64(*v),
             Number::Float64(v) => serializer.serialize_f64(*v),
-            Number::Decimal128(v) => {
-                let val = v.to_float64();
-                serializer.serialize_f64(val)
-            }
-            Number::Decimal256(v) => {
-                let val = v.to_float64();
-                serializer.serialize_f64(val)
+            Number::Decimal128(_) | Number::Decimal256(_) => {
+                let mut serialize_struct = serializer.serialize_struct(NUMBER_TOKEN, 0)?;
+                let val = format!("{}", self);
+                let _ = serialize_struct.serialize_field(NUMBER_TOKEN, val.as_str())?;
+                serialize_struct.end()
             }
         }
     }
@@ -548,3 +549,4 @@ impl Display for Number {
         }
     }
 }
+
