@@ -24,6 +24,11 @@ use super::value::Object;
 use super::value::Value;
 use crate::core::Decoder;
 
+const NUMBER_MAX_LEN: usize = 20;
+pub const MAX_DECIMAL64_PRECISION: u8 = 18;
+pub const MAX_DECIMAL128_PRECISION: u8 = 38;
+pub const MAX_DECIMAL256_PRECISION: u8 = 76;
+
 /// The binary `JSONB` contains three parts, `Header`, `JEntry` and `RawData`.
 /// This structure can be nested. Each group of structures starts with a `Header`.
 /// The upper-level `Value` will store the `Header` length or offset of
@@ -244,9 +249,20 @@ impl<'a> Parser<'a> {
     fn parse_json_number(&mut self) -> Result<Value<'a>> {
         let start_idx = self.idx;
 
+/**
         let mut has_fraction = false;
         let mut has_exponent = false;
-        let mut negative: bool = false;
+        let mut negative = false;
+        let mut number_len = 0;
+
+integer_part
+fraction_part
+exponent_part
+*/
+
+        let mut negative = false;
+        let mut fraction_offset = None;
+        let mut exponent_offset = None;
 
         if self.check_next(b'-') {
             negative = true;
@@ -266,7 +282,7 @@ impl<'a> Parser<'a> {
             }
         }
         if self.check_next(b'.') {
-            has_fraction = true;
+            fraction_offset = Some(self.idx);
             self.step();
             let len = self.step_digits()?;
             if len == 0 {
@@ -275,7 +291,7 @@ impl<'a> Parser<'a> {
             }
         }
         if self.check_next_either(b'E', b'e') {
-            has_exponent = true;
+            exponent_offset = Some(self.idx);
             self.step();
             if self.check_next_either(b'+', b'-') {
                 self.step();
@@ -286,22 +302,205 @@ impl<'a> Parser<'a> {
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
             }
         }
-        let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
 
-        if !has_fraction && !has_exponent {
-            if !negative {
-                if let Ok(v) = s.parse::<u64>() {
-                    return Ok(Value::Number(Number::UInt64(v)));
+        // Try to parse as integer types if no fraction or exponent and number length less than max length.
+        if fraction_offset.is_none() && exponent_offset.is_none() {
+            let number_len = self.idx - start_idx;
+            if number_len <= NUMBER_MAX_LEN {
+                let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
+                if !negative {
+                    if let Ok(v) = s.parse::<u64>() {
+                        return Ok(Value::Number(Number::UInt64(v)));
+                    }
+                } else if let Ok(v) = s.parse::<i64>() {
+                    return Ok(Value::Number(Number::Int64(v)));
                 }
-            } else if let Ok(v) = s.parse::<i64>() {
-                return Ok(Value::Number(Number::Int64(v)));
             }
         }
 
+        // Try to parse as decimal types first to preserve precision
+        let (exp_val, exp_idx) = if let Some(exp_idx) = exponent_offset {
+            let exp_str = unsafe { std::str::from_utf8_unchecked(&self.buf[exp_idx..self.idx]) };
+            let Ok(exp_val) = i128::from_str(exp_str) else {
+                return Err(self.error(ParseErrorCode::InvalidNumberValue));
+            }
+            (exp_val, exp_idx)
+        } else {
+            (0, self.idx)
+        };
+
+        let mut digit_buf = String::new();
+        let (digit_str, scale_val) = if let Some(frac_idx) = fraction_offset {
+            let int_str = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..frac_idx]) };
+            let frac_str = unsafe { std::str::from_utf8_unchecked(&self.buf[frac_idx + 1..exp_idx]) };
+
+            digit_buffer.reserve(int_str.len() + frac_str.len());
+            digit_buffer.push_str(int_str);
+            digit_buffer.push_str(frac_str);
+
+            (digit_buffer.as_str(), frac_str.len())
+        } else {
+            let int_str = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..exp_idx]) };
+            (int_str, 0)
+        };
+
+        let (scale, exp) = if scale_val >= exp_val {
+            (scale_val - exp_val, 0)
+        } else {
+            (0, exp_val - scale)
+        };
+/**
+        exp_val == 0
+        scale 不用计算
+        exp_val > 0
+        scale - exp_val
+        exp_val < 0
+        scale + exp_val
+
+exp_val 是负数，只需要判断 scale 是否溢出
+exp_val 是正数且小于等于 scale，直接用 scale 减就可以
+exp_val 是正数且大于 scale，用 exp_val - scale 之后乘以 int_num
+*/
+        let decimal_percision = digits.len() + exp;
+        if decimal_percision <= MAX_DECIMAL128_PRECISION {
+            if let Ok(digit) = i128::from_str(digit_str) {
+                if exp > 0 {
+                    if let Some(value) = digit.checked_mul(10.pow(exp as u32)) {
+                        return Ok(Value::Number(Number::Decimal128(Decimal128 {
+                            precision: 38,
+                            scale: scale,
+                            value,
+                        })));
+                    }
+                }
+                return Ok(Value::Number(Number::Decimal128(Decimal128 {
+                    precision: 38,
+                    scale: scale,
+                    value,
+                })));
+            }
+        } else if decimal_percision <= MAX_DECIMAL256_PRECISION {
+            if let Ok(digit) = i256::from_str(digit_str) {
+                if exp > 0 {
+                    if let Some(value) = digit.checked_mul(10.pow(exp as u32)) {
+                        return Ok(Value::Number(Number::Decimal256(Decimal256 {
+                            precision: 38,
+                            scale: scale,
+                            value,
+                        })));
+                    }
+                }
+                return Ok(Value::Number(Number::Decimal256(Decimal256 {
+                    precision: 38,
+                    scale: scale,
+                    value,
+                })));
+            }
+        }
+
+
+
+
+        let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
+
+
+        // Fall back to integer types if no fraction or exponent
+
+        // Last resort: parse as float64
         match fast_float2::parse(s) {
             Ok(v) => Ok(Value::Number(Number::Float64(v))),
             Err(_) => Err(self.error(ParseErrorCode::InvalidNumberValue)),
         }
+    }
+
+    fn try_parse_as_decimal(&self, s: &str, has_fraction: bool, has_exponent: bool) -> Option<Number> {
+        // For numbers with fraction or exponent, try to preserve precision with decimal types
+        if has_fraction || has_exponent {
+            // Parse the string to identify integer and fractional parts
+            let mut parts = s.split('.');
+            let int_part = parts.next().unwrap().replace(['e', 'E', '+', '-'], "");
+            
+            let mut scale = 0;
+            let mut value_str = int_part.clone();
+            
+            // Handle fractional part
+            if has_fraction {
+                if let Some(frac_part) = parts.next() {
+                    let mut frac = frac_part.to_string();
+                    
+                    // Handle exponent if present
+                    if has_exponent {
+                        if let Some(exp_idx) = frac.find(|c| c == 'e' || c == 'E') {
+                            let exp_part = &frac[exp_idx + 1..];
+                            frac = frac[..exp_idx].to_string();
+                            
+                            // Adjust scale based on exponent
+                            if let Ok(exp) = exp_part.replace('+', "").parse::<i32>() {
+                                scale = frac.len() as i32 - exp;
+                                if scale < 0 {
+                                    // Add trailing zeros for positive exponents
+                                    value_str = format!("{}{}", value_str, "0".repeat(-scale as usize));
+                                    scale = 0;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if scale >= 0 {
+                        scale = frac.len() as i32;
+                        value_str = format!("{}{}", value_str, frac);
+                    }
+                }
+            } else if has_exponent {
+                // Handle exponent without fraction
+                if let Some(exp_idx) = int_part.find(|c| c == 'e' || c == 'E') {
+                    let base = &int_part[..exp_idx];
+                    let exp_part = &int_part[exp_idx + 1..];
+                    
+                    if let Ok(exp) = exp_part.replace('+', "").parse::<i32>() {
+                        if exp >= 0 {
+                            // Add trailing zeros for positive exponents
+                            value_str = format!("{}{}", base, "0".repeat(exp as usize));
+                            scale = 0;
+                        } else {
+                            // For negative exponents, adjust scale
+                            value_str = base.to_string();
+                            scale = -exp as i32;
+                        }
+                    }
+                }
+            }
+            
+            // Remove any sign for parsing
+            let is_negative = value_str.starts_with('-');
+            let value_str = value_str.trim_start_matches('-');
+            
+            // Try to parse as Decimal128 first
+            if let Ok(mut value) = value_str.parse::<i128>() {
+                if is_negative {
+                    value = -value;
+                }
+                
+                return Some(Number::Decimal128(Decimal128 {
+                    precision: 38, // Maximum precision for Decimal128
+                    scale: scale as u8,
+                    value,
+                }));
+            }
+            
+            // If too large for Decimal128, try Decimal256
+            if let Ok(value_i256) = i256::from_str_radix(value_str, 10) {
+                let value = if is_negative { -value_i256 } else { value_i256 };
+                
+                return Some(Number::Decimal256(Decimal256 {
+                    precision: 76, // Maximum precision for Decimal256
+                    scale: scale as u8,
+                    value,
+                }));
+            }
+        }
+        
+        None
     }
 
     fn parse_json_string(&mut self) -> Result<Value<'a>> {
