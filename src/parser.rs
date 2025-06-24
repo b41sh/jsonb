@@ -325,47 +325,14 @@ impl<'a> Parser<'a> {
             return None;
         }
 
-        let mut value: u64 = 0;
-        let mut i = start_idx;
-        
-        // 跳过符号
         if negative {
-            i += 1;
-        }
-        
-        // 解析数字
-        while i < self.idx {
-            let digit = (self.buf[i] - b'0') as u64;
-            if digit > 9 {
-                return None;
-            }
-            
-            // 检查溢出
-            if let Some(new_value) = value.checked_mul(10) {
-                if let Some(new_value) = new_value.checked_add(digit) {
-                    value = new_value;
-                } else {
-                    return None; // 加法溢出
-                }
-            } else {
-                return None; // 乘法溢出
-            }
-            
-            i += 1;
-        }
-        
-        // 应用符号
-        if negative {
-            if value <= (i64::MAX as u64) + 1 {
-                Some(Value::Number(Number::Int64(-(value as i64))))
-            } else {
-                None
-            }
+            let value = self.parse_digits_to_number::<i64>(start_idx, self.idx, negative, false)?;
+            Some(Value::Number(Number::Int64(value)))
         } else {
+            let value = self.parse_digits_to_number::<u64>(start_idx, self.idx, negative, false)?;
             Some(Value::Number(Number::UInt64(value)))
         }
     }
-
 
     fn try_parse_decimal(&mut self, start_idx: usize, fraction_offset: Option<usize>, exponent_offset: Option<usize>, negative: bool) -> Option<Value<'a>> {
         // 解析指数部分
@@ -443,8 +410,22 @@ impl<'a> Parser<'a> {
 
     // 新增辅助方法：直接从字节解析为 i128，避免字符串转换
     fn parse_digits_to_i128(&self, start_idx: usize, end_idx: usize, exp: u32, negative: bool) -> Option<i128> {
-        let mut value: i128 = 0;
-        
+        let value = self.parse_digits_to_number::<i128>(start_idx, end_idx, negative, true)?;
+        // 应用指数
+        if exp > 0 {
+            value.checked_mul(10_i128.pow(exp))
+        } else {
+            Some(value)
+        }
+    }
+
+
+    // 通用辅助方法：从字节解析为数字类型
+    fn parse_digits_to_number<T>(&self, start_idx: usize, end_idx: usize, negative: bool, skip_dot: bool) -> Option<T> 
+    where 
+        T: num_traits::PrimInt + num_traits::CheckedMul + num_traits::CheckedAdd + num_traits::CheckedNeg,
+    {
+        let mut value: T = T::zero();
         let mut i = start_idx;
         
         // 跳过符号
@@ -454,19 +435,22 @@ impl<'a> Parser<'a> {
         
         // 解析数字
         while i < end_idx {
-            let digit = (self.buf[i] - b'0') as u64;
-            println!("i={:?} {} {}", i, self.buf[i], b'0');
-            if self.buf[i] == b'.' {
+            // 跳过小数点
+            if skip_dot && self.buf[i] == b'.' {
+                i += 1;
                 continue;
             }
-            let digit = (self.buf[i] - b'0') as i128;
-            if digit > 9 { // 非数字字符（可能是符号）
-                continue;
+            
+            let digit_byte = self.buf[i] - b'0';
+            if digit_byte > 9 { // 非数字字符
+                return None;
             }
-
+            
+            let digit = T::from(digit_byte).unwrap();
+            
             // 检查乘法溢出
-            if let Some(new_value) = value.checked_mul(10) {
-                if let Some(new_value) = new_value.checked_add(digit) {
+            if let Some(new_value) = value.checked_mul(&T::from(10).unwrap()) {
+                if let Some(new_value) = new_value.checked_add(&digit) {
                     value = new_value;
                 } else {
                     return None; // 加法溢出
@@ -474,15 +458,13 @@ impl<'a> Parser<'a> {
             } else {
                 return None; // 乘法溢出
             }
-        }
-
-        if negative {
-            value = value.checked_neg()?;
+            
+            i += 1;
         }
         
-        // 应用指数
-        if exp > 0 {
-            value.checked_mul(10_i128.pow(exp))
+        // 应用符号
+        if negative {
+            value.checked_neg()
         } else {
             Some(value)
         }
