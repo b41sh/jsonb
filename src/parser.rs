@@ -325,16 +325,34 @@ exponent_part
             }
         }
 
+        if let Some(val) = self.try_parse_decimal(start_idx, fraction_offset, exponent_offset) {
+            return Ok(val);
+        }
+
+
         println!("\n\n---------");
         // Try to parse as decimal types first to preserve precision
+
+        let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
+
+        // Fall back to integer types if no fraction or exponent
+
+        // Last resort: parse as float64
+        match fast_float2::parse(s) {
+            Ok(v) => Ok(Value::Number(Number::Float64(v))),
+            Err(_) => Err(self.error(ParseErrorCode::InvalidNumberValue)),
+        }
+    }
+
+    fn try_parse_decimal(&mut self, start_idx: usize, fraction_offset: Option<usize>, exponent_offset: Option<usize>) -> Option<Value<'a>> {
         let (exp_val, exp_idx) = if let Some(exp_idx) = exponent_offset {
             let exp_str = unsafe { std::str::from_utf8_unchecked(&self.buf[exp_idx+1..self.idx]) };
             println!("exp_str={:?}", exp_str);
-            let Ok(exp_val) = i128::from_str(exp_str) else {
-                println!("err");
-                return Err(self.error(ParseErrorCode::InvalidNumberValue));
-            };
-            (exp_val, exp_idx)
+            if let Ok(exp_val) = exp_str.parse::<i64>() {
+                (exp_val, exp_idx)
+            } else {
+                return None;
+            }
         } else {
             (0, self.idx)
         };
@@ -350,7 +368,10 @@ exponent_part
             digit_buf.push_str(int_str);
             digit_buf.push_str(frac_str);
 
-            (digit_buf.as_str(), frac_str.len() as i128)
+            if digit_buf.len() > MAX_DECIMAL256_PRECISION {
+                return None;
+            }
+            (digit_buf.as_str(), frac_str.len() as i64)
         } else {
             let int_str = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..exp_idx]) };
             println!("int_str={:?}", int_str);
@@ -358,79 +379,44 @@ exponent_part
         };
         println!("digit_str={:?}", digit_str);
 
-        let (scale, exp) = if scale_val >= exp_val {
-            (scale_val - exp_val, 0)
-        } else {
-            (0, exp_val - scale_val)
-        };
-/**
-        exp_val == 0
-        scale 不用计算
-        exp_val > 0
-        scale - exp_val
-        exp_val < 0
-        scale + exp_val
+        println!("scale_val=={:?} exp_val={:?}", scale_val, exp_val);
 
-exp_val 是负数，只需要判断 scale 是否溢出
-exp_val 是正数且小于等于 scale，直接用 scale 减就可以
-exp_val 是正数且大于 scale，用 exp_val - scale 之后乘以 int_num
-*/
+        let (scale, exp) = if scale_val >= exp_val {
+            ((scale_val - exp_val) as usize, 0)
+        } else {
+            (0, (exp_val - scale_val) as i32)
+        };
         println!("digit_len={:?}", digit_str.len());
         println!("exp={:?}", exp);
 
-        let decimal_percision = digit_str.len() + exp as usize;
-        println!("digit_len={:?}", decimal_percision);
-        if decimal_percision <= MAX_DECIMAL128_PRECISION {
-            if let Ok(value) = i128::from_str(digit_str) {
+        let percision = digit_str.len() + exp as usize;
+        println!("digit_len={:?}", percision);
+        if percision <= MAX_DECIMAL128_PRECISION && scale <= MAX_DECIMAL128_PRECISION {
+            if let Ok(mut value) = i128::from_str(digit_str) {
                 println!("----value111={:?}", value);
 
-                if exp > 0 {
-                    if let Some(value) = value.checked_mul(10_i128.pow(exp as u32)) {
-                        return Ok(Value::Number(Number::Decimal128(Decimal128 {
-                            precision: 38,
-                            scale: scale as u8,
-                            value,
-                        })));
-                    }
+                if let Some(value) = value.checked_mul(10_i128.pow(exp as u32)) {
+                    return Some(Value::Number(Number::Decimal128(Decimal128 {
+                        precision: 38,
+                        scale: scale as u8,
+                        value,
+                    })));
                 }
-                return Ok(Value::Number(Number::Decimal128(Decimal128 {
-                    precision: 38,
-                    scale: scale as u8,
-                    value,
-                })));
             }
-        } else if decimal_percision <= MAX_DECIMAL256_PRECISION {
+        }
+        if percision <= MAX_DECIMAL256_PRECISION && scale <= MAX_DECIMAL256_PRECISION {
             if let Ok(value) = i256::from_str(digit_str) {
-                if exp > 0 {
-                    if let Some(value) = value.checked_mul(i256::from(10).pow(exp as u32)) {
-                        return Ok(Value::Number(Number::Decimal256(Decimal256 {
-                            precision: 76,
-                            scale: scale as u8,
-                            value,
-                        })));
-                    }
+                if let Some(value) = value.checked_mul(i256::from(10).pow(exp as u32)) {
+                    return Some(Value::Number(Number::Decimal256(Decimal256 {
+                        precision: 76,
+                        scale: scale as u8,
+                        value,
+                    })));
                 }
-                return Ok(Value::Number(Number::Decimal256(Decimal256 {
-                    precision: 76,
-                    scale: scale as u8,
-                    value,
-                })));
             }
         }
 
-
-
-
-        let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
-
-
-        // Fall back to integer types if no fraction or exponent
-
-        // Last resort: parse as float64
-        match fast_float2::parse(s) {
-            Ok(v) => Ok(Value::Number(Number::Float64(v))),
-            Err(_) => Err(self.error(ParseErrorCode::InvalidNumberValue)),
-        }
+        None
     }
 
     fn parse_json_string(&mut self) -> Result<Value<'a>> {
@@ -543,3 +529,4 @@ exp_val 是正数且大于 scale，用 exp_val - scale 之后乘以 int_num
         Ok(Value::Object(obj))
     }
 }
+
