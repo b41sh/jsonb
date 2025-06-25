@@ -354,7 +354,7 @@ impl<'a> Parser<'a> {
                 i += 1;
             }
             if i == 0 {
-                Err(self.error(ParseErrorCode::InvalidNumberValue))
+                return Err(self.error(ParseErrorCode::InvalidNumberValue));
             } else if i < MAX_EXPONENT_PRECISION {
                 if negative {
                     exp = exp.checked_neg().unwrap();
@@ -417,11 +417,11 @@ impl<'a> Parser<'a> {
             };
 
             if let Ok(value) = i256::from_str(&digit_str) {
-                if let Some(value) = value.checked_mul(i256::from(10).pow(exp)) {
+                if let Some(mut value) = value.checked_mul(i256::from(10).pow(exp)) {
                     if negative {
                         value = value.checked_neg().unwrap();
                     }
-                    return Some(Value::Number(Number::Decimal256(Decimal256 {
+                    return Ok(Value::Number(Number::Decimal256(Decimal256 {
                         precision: 76,
                         scale: scale as u8,
                         value,
