@@ -307,14 +307,12 @@ impl Number {
             Self::Decimal128(v) => {
                 writer.write_all(&[NUMBER_DECIMAL])?;
                 writer.write_all(&v.value.to_be_bytes())?;
-                writer.write_all(&v.precision.to_be_bytes())?;
                 writer.write_all(&v.scale.to_be_bytes())?;
                 Ok(19)
             }
             Self::Decimal256(v) => {
                 writer.write_all(&[NUMBER_DECIMAL])?;
                 writer.write_all(&v.value.to_be_bytes())?;
-                writer.write_all(&v.precision.to_be_bytes())?;
                 writer.write_all(&v.scale.to_be_bytes())?;
                 Ok(35)
             }
@@ -353,26 +351,16 @@ impl Number {
             },
             NUMBER_FLOAT => Number::Float64(f64::from_be_bytes(bytes[1..].try_into().unwrap())),
             NUMBER_DECIMAL => match len {
-                18 => {
+                17 => {
                     let value = i128::from_be_bytes(bytes[1..17].try_into().unwrap());
-                    let precision = u8::from_be_bytes(bytes[17..18].try_into().unwrap());
-                    let scale = u8::from_be_bytes(bytes[18..19].try_into().unwrap());
-                    let dec = Decimal128 {
-                        precision,
-                        scale,
-                        value,
-                    };
+                    let scale = u8::from_be_bytes(bytes[17..18].try_into().unwrap());
+                    let dec = Decimal128 { scale, value };
                     Number::Decimal128(dec)
                 }
-                34 => {
+                33 => {
                     let value = i256::from_be_bytes(bytes[1..33].try_into().unwrap());
-                    let precision = u8::from_be_bytes(bytes[33..34].try_into().unwrap());
-                    let scale = u8::from_be_bytes(bytes[34..35].try_into().unwrap());
-                    let dec = Decimal256 {
-                        precision,
-                        scale,
-                        value,
-                    };
+                    let scale = u8::from_be_bytes(bytes[33..34].try_into().unwrap());
+                    let dec = Decimal256 { scale, value };
                     Number::Decimal256(dec)
                 }
                 _ => {

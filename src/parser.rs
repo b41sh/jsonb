@@ -31,8 +31,6 @@ use crate::Decimal256;
 use ethnum::i256;
 
 pub const MAX_EXPONENT_PRECISION: usize = 9;
-pub const MAX_INTGER_PRECISION: usize = 18;
-pub const MAX_DECIMAL64_PRECISION: usize = 18;
 pub const MAX_DECIMAL128_PRECISION: usize = 38;
 pub const MAX_DECIMAL256_PRECISION: usize = 76;
 
@@ -274,12 +272,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a JSON number using a single-pass approach with multiple fallback strategies.
-    /// 
+    ///
     /// This function implements a high-performance JSON number parsing algorithm that:
     /// 1. First attempts to parse the number as an i128 (for Decimal128/Int64/UInt64)
     /// 2. Falls back to i256 (for Decimal256) if precision exceeds i128 capacity
     /// 3. Finally falls back to Float64 if all other methods fail
-    /// 
+    ///
     /// The algorithm handles signs, leading zeros, decimal points, and exponents in a single pass,
     /// avoiding multiple traversals of the input for better performance. It uses unsafe operations
     /// for arithmetic to maximize speed, with appropriate overflow checks through precision limits.
@@ -423,7 +421,6 @@ impl<'a> Parser<'a> {
                 return Ok(Value::Number(Number::Int64(i64::try_from(value).unwrap())));
             } else {
                 return Ok(Value::Number(Number::Decimal128(Decimal128 {
-                    precision: 38,
                     scale: scale as u8,
                     value,
                 })));
@@ -456,7 +453,6 @@ impl<'a> Parser<'a> {
                         value = value.checked_neg().unwrap();
                     }
                     return Ok(Value::Number(Number::Decimal256(Decimal256 {
-                        precision: 76,
                         scale: scale as u8,
                         value,
                     })));

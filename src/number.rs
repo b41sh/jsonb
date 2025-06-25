@@ -35,7 +35,6 @@ const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
 #[derive(Debug, Clone)]
 pub struct Decimal128 {
-    pub precision: u8,
     pub scale: u8,
     pub value: i128,
 }
@@ -49,7 +48,6 @@ impl Decimal128 {
 
 #[derive(Debug, Clone)]
 pub struct Decimal256 {
-    pub precision: u8,
     pub scale: u8,
     pub value: i256,
 }
@@ -121,7 +119,7 @@ impl Serialize for Number {
             Number::Decimal128(_) | Number::Decimal256(_) => {
                 let mut serialize_struct = serializer.serialize_struct(NUMBER_TOKEN, 0)?;
                 let val = format!("{}", self);
-                let _ = serialize_struct.serialize_field(NUMBER_TOKEN, val.as_str())?;
+                serialize_struct.serialize_field(NUMBER_TOKEN, val.as_str())?;
                 serialize_struct.end()
             }
         }
@@ -191,7 +189,6 @@ impl Number {
             Number::Float64(v) => Ok(Number::Float64(*v * -1.0)),
             Number::Decimal128(v) => {
                 let neg_dec = Decimal128 {
-                    precision: v.precision,
                     scale: v.scale,
                     value: -v.value,
                 };
@@ -202,7 +199,6 @@ impl Number {
                     return Err(Error::Message("Decimal256 overflow".to_string()));
                 };
                 let neg_dec = Decimal256 {
-                    precision: v.precision,
                     scale: v.scale,
                     value: neg_value,
                 };
