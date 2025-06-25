@@ -107,7 +107,7 @@ impl<'a> Parser<'a> {
             b'n' => self.parse_json_null(),
             b't' => self.parse_json_true(),
             b'f' => self.parse_json_false(),
-            b'0'..=b'9' | b'-' => self.parse_json_number(),
+            b'0'..=b'9' | b'-' | b'+' | b'.' => self.parse_json_number(),
             b'"' => self.parse_json_string(),
             b'[' => self.parse_json_array(),
             b'{' => self.parse_json_object(),
