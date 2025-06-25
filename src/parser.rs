@@ -525,7 +525,7 @@ impl<'a> Parser<'a> {
 
         let mut first = true;
         let mut values = Vec::new();
-        loop {
+        'F: loop {
             self.skip_unused();
             let c = self.next()?;
             if *c == b']' {
@@ -539,6 +539,14 @@ impl<'a> Parser<'a> {
                 self.step();
             }
             first = false;
+            self.skip_unused();
+            // 检查是否有连续的逗号（空元素）
+            if self.check_next_either(b',', b']') {
+                // 发现空元素，添加 null 值
+                values.push(Value::Null);
+                continue;
+            }
+
             let value = self.parse_json_value()?;
             values.push(value);
         }
