@@ -34,6 +34,19 @@ use serde::ser::Serializer;
 const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
 #[derive(Debug, Clone)]
+pub struct Decimal64 {
+    pub scale: u8,
+    pub value: i64,
+}
+
+impl Decimal64 {
+    pub fn to_float64(&self) -> f64 {
+        let div = 10_f64.powi(self.scale as i32);
+        self.value as f64 / div
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Decimal128 {
     pub scale: u8,
     pub value: i128,
@@ -64,6 +77,7 @@ pub enum Number {
     Int64(i64),
     UInt64(u64),
     Float64(f64),
+    Decimal64(Decimal64),
     Decimal128(Decimal128),
     Decimal256(Decimal256),
 }
@@ -116,7 +130,7 @@ impl Serialize for Number {
             Number::Int64(v) => serializer.serialize_i64(*v),
             Number::UInt64(v) => serializer.serialize_u64(*v),
             Number::Float64(v) => serializer.serialize_f64(*v),
-            Number::Decimal128(_) | Number::Decimal256(_) => {
+            Number::Decimal64(_) | Number::Decimal128(_) | Number::Decimal256(_) => {
                 let mut serialize_struct = serializer.serialize_struct(NUMBER_TOKEN, 0)?;
                 let val = format!("{}", self);
                 serialize_struct.serialize_field(NUMBER_TOKEN, val.as_str())?;
@@ -492,6 +506,30 @@ impl Display for Number {
                 let mut buffer = ryu::Buffer::new();
                 let s = buffer.format(*v);
                 write!(f, "{}", s)
+            }
+            Number::Decimal64(v) => {
+                if v.scale == 0 {
+                    write!(f, "{}", v.value)
+                } else {
+                    let pow_scale = 10_i64.pow(v.scale as u32);
+                    if v.value >= 0 {
+                        write!(
+                            f,
+                            "{}.{:0>width$}",
+                            v.value / pow_scale,
+                            (v.value % pow_scale).abs(),
+                            width = v.scale as usize
+                        )
+                    } else {
+                        write!(
+                            f,
+                            "-{}.{:0>width$}",
+                            -v.value / pow_scale,
+                            (v.value % pow_scale).abs(),
+                            width = v.scale as usize
+                        )
+                    }
+                }
             }
             Number::Decimal128(v) => {
                 if v.scale == 0 {
