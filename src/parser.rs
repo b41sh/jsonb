@@ -127,6 +127,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[inline]
     fn next(&mut self) -> Result<&u8> {
         match self.buf.get(self.idx) {
             Some(c) => Ok(c),
@@ -134,6 +135,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[inline]
     fn must_is(&mut self, c: u8) -> Result<()> {
         match self.buf.get(self.idx) {
             Some(v) => {
@@ -148,6 +150,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[inline]
     fn check_next(&mut self, c: u8) -> bool {
         if self.idx < self.buf.len() {
             let v = self.buf.get(self.idx).unwrap();
@@ -158,6 +161,7 @@ impl<'a> Parser<'a> {
         false
     }
 
+    #[inline]
     fn check_next_either(&mut self, c1: u8, c2: u8) -> bool {
         if self.idx < self.buf.len() {
             let v = self.buf.get(self.idx).unwrap();
@@ -241,45 +245,32 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            // No more whitespace, exit loop
             break;
         }
     }
 
     fn parse_json_null(&mut self) -> Result<Value<'a>> {
-        if self.idx + 4 > self.buf.len() {
-            return Err(self.error(ParseErrorCode::InvalidEOF));
+        let data = [b'n', b'u', b'l', b'l'];
+        for v in data.into_iter() {
+            self.must_is(v)?;
         }
-        if &self.buf[self.idx..self.idx + 4] == b"null" {
-            self.step_by(4);
-            Ok(Value::Null)
-        } else {
-            Err(self.error(ParseErrorCode::ExpectedSomeIdent))
-        }
+        Ok(Value::Null)
     }
 
     fn parse_json_true(&mut self) -> Result<Value<'a>> {
-        if self.idx + 4 > self.buf.len() {
-            return Err(self.error(ParseErrorCode::InvalidEOF));
+        let data = [b't', b'r', b'u', b'e'];
+        for v in data.into_iter() {
+            self.must_is(v)?;
         }
-        if &self.buf[self.idx..self.idx + 4] == b"true" {
-            self.step_by(4);
-            Ok(Value::Bool(true))
-        } else {
-            Err(self.error(ParseErrorCode::ExpectedSomeIdent))
-        }
+        Ok(Value::Bool(true))
     }
 
     fn parse_json_false(&mut self) -> Result<Value<'a>> {
-        if self.idx + 5 > self.buf.len() {
-            return Err(self.error(ParseErrorCode::InvalidEOF));
+        let data = [b'f', b'a', b'l', b's', b'e'];
+        for v in data.into_iter() {
+            self.must_is(v)?;
         }
-        if &self.buf[self.idx..self.idx + 5] == b"false" {
-            self.step_by(5);
-            Ok(Value::Bool(false))
-        } else {
-            Err(self.error(ParseErrorCode::ExpectedSomeIdent))
-        }
+        Ok(Value::Bool(false))
     }
 
     /// Parse a JSON number using a single-pass approach with multiple fallback strategies.
@@ -556,9 +547,9 @@ impl<'a> Parser<'a> {
             }
             first = false;
             self.skip_unused();
-            // 检查是否有连续的逗号（空元素）
+            // Check if there are consecutive commas (empty elements)
             if self.check_next_either(b',', b']') {
-                // 发现空元素，添加 null 值
+                // treat as null value
                 values.push(Value::Null);
                 continue;
             }
