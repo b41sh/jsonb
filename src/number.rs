@@ -151,7 +151,10 @@ impl Number {
                     None
                 }
             }
-            Number::Float64(_) | Number::Decimal128(_) | Number::Decimal256(_) => None,
+            Number::Float64(_)
+            | Number::Decimal64(_)
+            | Number::Decimal128(_)
+            | Number::Decimal256(_) => None,
         }
     }
 
@@ -165,7 +168,10 @@ impl Number {
                 }
             }
             Number::UInt64(v) => Some(*v),
-            Number::Float64(_) | Number::Decimal128(_) | Number::Decimal256(_) => None,
+            Number::Float64(_)
+            | Number::Decimal64(_)
+            | Number::Decimal128(_)
+            | Number::Decimal256(_) => None,
         }
     }
 
@@ -174,6 +180,10 @@ impl Number {
             Number::Int64(v) => Some(*v as f64),
             Number::UInt64(v) => Some(*v as f64),
             Number::Float64(v) => Some(*v),
+            Number::Decimal64(v) => {
+                let val = v.to_float64();
+                Some(val)
+            }
             Number::Decimal128(v) => {
                 let val = v.to_float64();
                 Some(val)
@@ -201,6 +211,13 @@ impl Number {
                 }
             }
             Number::Float64(v) => Ok(Number::Float64(*v * -1.0)),
+            Number::Decimal64(v) => {
+                let neg_dec = Decimal64 {
+                    scale: v.scale,
+                    value: -v.value,
+                };
+                Ok(Number::Decimal64(neg_dec))
+            }
             Number::Decimal128(v) => {
                 let neg_dec = Decimal128 {
                     scale: v.scale,

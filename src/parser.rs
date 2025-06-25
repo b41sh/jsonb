@@ -28,6 +28,7 @@ use std::str::FromStr;
 
 use crate::Decimal128;
 use crate::Decimal256;
+use crate::Decimal64;
 use ethnum::i256;
 
 const MAX_EXPONENT_PRECISION: usize = 9;
@@ -36,7 +37,7 @@ const MAX_DECIMAL128_PRECISION: usize = 38;
 const MAX_DECIMAL256_PRECISION: usize = 76;
 
 const UINT64_MIN: i128 = 0i128;
-const UINT64_MAX: i128 = 18_446_744_073_709_551_615i128
+const UINT64_MAX: i128 = 18_446_744_073_709_551_615i128;
 const INT64_MIN: i128 = -9_223_372_036_854_775_808i128;
 const INT64_MAX: i128 = 9_223_372_036_854_775_807i128;
 const DECIMAL64_MIN: i128 = -999999999999999999i128;
@@ -430,12 +431,15 @@ impl<'a> Parser<'a> {
                 return Ok(Value::Number(Number::UInt64(u64::try_from(value).unwrap())));
             } else if scale == 0 && value >= INT64_MIN && value <= INT64_MAX {
                 return Ok(Value::Number(Number::Int64(i64::try_from(value).unwrap())));
-            } else if value >= DECIMAL64_MIN && value <= DECIMAL64_MAX && precision <= MAX_DECIMAL64_PRECISION {
+            } else if value >= DECIMAL64_MIN
+                && value <= DECIMAL64_MAX
+                && precision <= MAX_DECIMAL64_PRECISION
+            {
                 return Ok(Value::Number(Number::Decimal64(Decimal64 {
                     scale: scale as u8,
                     value: i64::try_from(value).unwrap(),
                 })));
-            } else {
+            } else if value >= DECIMAL128_MIN && value <= DECIMAL128_MAX {
                 return Ok(Value::Number(Number::Decimal128(Decimal128 {
                     scale: scale as u8,
                     value,
