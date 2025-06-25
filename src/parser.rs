@@ -202,55 +202,76 @@ impl<'a> Parser<'a> {
 
     #[inline]
     fn skip_unused(&mut self) {
-        while self.idx < self.buf.len() {
-            let c = self.buf.get(self.idx).unwrap();
-            if c.is_ascii_whitespace() {
-                self.step();
+    while self.idx < self.buf.len() {
+        let c = self.buf[self.idx];
+        
+        // 快速路径：处理常见的空白字符
+        if c.is_ascii_whitespace() {
+            self.idx += 1;
+            continue;
+        }
+        
+        // 慢路径：处理转义序列
+        if c == b'\\' && self.idx + 1 < self.buf.len() {
+            let next_c = self.buf[self.idx + 1];
+            
+            // 处理简单转义 \n, \r, \t
+            let simple_escape = matches!(next_c, b'n' | b'r' | b't');
+            if simple_escape {
+                self.idx += 2;
                 continue;
             }
-            // Allow parse escaped white space
-            if *c == b'\\' {
-                if self.idx + 1 < self.buf.len()
-                    && matches!(self.buf[self.idx + 1], b'n' | b'r' | b't')
-                {
-                    self.step_by(2);
-                    continue;
-                }
-                if self.idx + 3 < self.buf.len()
-                    && self.buf[self.idx + 1] == b'x'
-                    && self.buf[self.idx + 2] == b'0'
-                    && self.buf[self.idx + 3] == b'C'
-                {
-                    self.step_by(4);
-                    continue;
-                }
+            
+            // 处理 \x0C 转义
+            let hex_escape = self.idx + 3 < self.buf.len() && 
+                             next_c == b'x' && 
+                             self.buf[self.idx + 2] == b'0' && 
+                             self.buf[self.idx + 3] == b'C';
+            if hex_escape {
+                self.idx += 4;
+                continue;
             }
-            break;
         }
+        
+        // 没有更多空白字符，退出循环
+        break;
+    }
     }
 
     fn parse_json_null(&mut self) -> Result<Value<'a>> {
-        let data = [b'n', b'u', b'l', b'l'];
-        for v in data.into_iter() {
-            self.must_is(v)?;
+        if self.idx + 4 > self.buf.len() {
+            return Err(self.error(ParseErrorCode::InvalidEOF));
         }
-        Ok(Value::Null)
+        if &self.buf[self.idx..self.idx + 4] == b"null" {
+            self.step_by(4);
+            Ok(Value::Null)
+        } else {
+            Err(self.error(ParseErrorCode::ExpectedSomeIdent))
+        }
     }
 
     fn parse_json_true(&mut self) -> Result<Value<'a>> {
-        let data = [b't', b'r', b'u', b'e'];
-        for v in data.into_iter() {
-            self.must_is(v)?;
+        if self.idx + 4 > self.buf.len() {
+            return Err(self.error(ParseErrorCode::InvalidEOF));
         }
-        Ok(Value::Bool(true))
+        if &self.buf[self.idx..self.idx + 4] == b"true" {
+            self.step_by(4);
+            Ok(Value::Bool(true))
+        } else {
+            Err(self.error(ParseErrorCode::ExpectedSomeIdent))
+        }
     }
 
     fn parse_json_false(&mut self) -> Result<Value<'a>> {
-        let data = [b'f', b'a', b'l', b's', b'e'];
-        for v in data.into_iter() {
-            self.must_is(v)?;
+        if self.idx + 5 > self.buf.len() {
+            return Err(self.error(ParseErrorCode::InvalidEOF));
         }
-        Ok(Value::Bool(false))
+        if &self.buf[self.idx..self.idx + 5] == b"false" {
+            self.step_by(5);
+            Ok(Value::Bool(false))
+        } else {
+            Err(self.error(ParseErrorCode::ExpectedSomeIdent))
+        }
     }
 
     fn parse_json_number(&mut self) -> Result<Value<'a>> {
