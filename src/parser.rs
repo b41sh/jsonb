@@ -30,7 +30,7 @@ use ethnum::i256;
 use crate::Decimal128;
 use crate::Decimal256;
 
-
+pub const MAX_EXPONENT_PRECISION: usize = 9;
 pub const MAX_INTGER_PRECISION: usize = 18;
 pub const MAX_DECIMAL64_PRECISION: usize = 18;
 pub const MAX_DECIMAL128_PRECISION: usize = 38;
@@ -170,9 +170,9 @@ impl<'a> Parser<'a> {
     }
 
     fn step_digits(&mut self) -> Result<usize> {
-        if self.idx == self.buf.len() {
-            return Err(self.error(ParseErrorCode::InvalidEOF));
-        }
+        //if self.idx == self.buf.len() {
+        //    return Err(self.error(ParseErrorCode::InvalidEOF));
+        //}
         let mut len = 0;
         while self.idx < self.buf.len() {
             let c = self.buf.get(self.idx).unwrap();
@@ -257,128 +257,123 @@ impl<'a> Parser<'a> {
         let mut start_idx = self.idx;
 
         let mut negative = false;
+
+        // 处理符号
+        let c = self.next()?;
+        if *c == b'-' {
+            negative = true;
+            self.step();
+        } else if *c == b'+' {
+            self.step();
+        }
+
+        // ignore leading zeros
+        loop {
+            if self.check_next(b'0') {
+                self.step();
+            } else {
+                break;
+            }
+        }
+
+        let mut value = 0_i128;
+        let mut scale = 0_i32;
         let mut fraction_offset = None;
         let mut exponent_offset = None;
 
-        // 处理符号
-        if self.check_next(b'-') {
-            negative = true;
-            self.step();
-        } else if self.check_next(b'+') {
-            start_idx += 1;
-            self.step();
-        }
-        
-        // 处理整数部分
-        self.step_digits()?;
+        let mut precision = 0;
+        // 首先尝试解析 i256 的数字，避免重复遍历
+        while precision < MAX_DECIMAL128_PRECISION {
+            if self.check_digit() {
+                let digit = (self.buf[i] - b'0') as i128;
 
-        // 处理小数部分
-        if self.check_next(b'.') {
-            fraction_offset = Some(self.idx);
-            self.step();
-            let len = self.step_digits()?;
-            if len == 0 {
+                value = value.unchecked_mul(10_i128);
+                value = value.unchecked_add(digit);
                 self.step();
-                return Err(self.error(ParseErrorCode::InvalidNumberValue));
-            }
-        }
-        
-        // 处理指数部分
-        if self.check_next_either(b'E', b'e') {
-            exponent_offset = Some(self.idx);
-            self.step();
-            if self.check_next_either(b'+', b'-') {
+            } else if self.check_next(b'.') {
+                if fraction_offset.is_some() {
+                    return Err(self.error(ParseErrorCode::InvalidNumberValue));
+                }
+                fraction_offset = Some(self.idx);
                 self.step();
-            }
-            let len = self.step_digits()?;
-            if len == 0 {
-                self.step();
-                return Err(self.error(ParseErrorCode::InvalidNumberValue));
-            }
-        }
-
-        // 快速路径：如果没有小数点和指数，尝试解析为整数类型
-        if fraction_offset.is_none() && exponent_offset.is_none() {
-            // 尝试直接从字节解析为整数，避免字符串转换
-            if let Some(value) = self.try_parse_integer(start_idx, negative) {
-                return Ok(value);
-            }
-        }
-
-        // 尝试解析为十进制类型
-        if let Some(value) = self.try_parse_decimal(start_idx, fraction_offset, exponent_offset, negative) {
-            return Ok(value);
-        }
-
-        // 最后尝试解析为浮点数
-        let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
-        match fast_float2::parse(s) {
-            Ok(v) => Ok(Value::Number(Number::Float64(v))),
-            Err(_) => Err(self.error(ParseErrorCode::InvalidNumberValue)),
-        }
-    }
-
-    // 新增辅助方法：直接从字节解析为整数
-    fn try_parse_integer(&self, start_idx: usize, negative: bool) -> Option<Value<'a>> {
-        let integer_len = self.idx - start_idx;
-        if integer_len > MAX_INTGER_PRECISION {
-            return None;
-        }
-
-        if negative {
-            let value = self.parse_digits_to_number::<i64>(start_idx, self.idx, negative, false)?;
-            Some(Value::Number(Number::Int64(value)))
-        } else {
-            let value = self.parse_digits_to_number::<u64>(start_idx, self.idx, negative, false)?;
-            Some(Value::Number(Number::UInt64(value)))
-        }
-    }
-
-    fn try_parse_decimal(&mut self, start_idx: usize, fraction_offset: Option<usize>, exponent_offset: Option<usize>, negative: bool) -> Option<Value<'a>> {
-        // 解析指数部分
-        let (exp_val, exp_idx) = if let Some(exp_idx) = exponent_offset {
-            let exp_str = unsafe { std::str::from_utf8_unchecked(&self.buf[exp_idx+1..self.idx]) };
-            if let Ok(exp_val) = exp_str.parse::<i32>() {
-                (exp_val, exp_idx)
+                continue;
             } else {
-                return None;
+                break;
+            }
+            precision += 1;
+            if fraction_offset.is_some() {
+                scale += 1;
+            }
+        }
+
+        // 有三种情况
+        // 1. 整数还没处理完，已经溢出了
+        // 2. 整数处理完了，浮点数还没开始
+        // 3. 整数和浮点数部分都已经处理完了，再看看有没有 e
+
+        // precision 小于最大值，说明整数部分和小数部分都已经处理完成
+        if precision < MAX_DECIMAL128_PRECISION {
+            let exp = self.parse_exponent_value()?;
+            if let Some(exp) = exp {
+                let (new_scale, exp) = if scale >= exp {
+                    ((scale - exp) as usize, 0)
+                } else {
+                    (0, (exp - scale) as u32)
+                };
+                precision += exp as usize;
+                scale = new_scale;
+
+                // 首先尝试解析为 i128 (Decimal128)
+                if precision <= MAX_DECIMAL128_PRECISION && scale <= MAX_DECIMAL128_PRECISION {
+                    if exp > 0 {
+                        value = value.unchecked_mul(10_i128.pow(exp))
+                    }
+                    if negative {
+                        value = value.checked_neg().unwrap();
+                    }
+                    if scale == 0 && value >= 0 && value <= u64::MAX.into() {
+                        return Value::Number(Number::UInt64(value.into()));
+                    } else if scale == 0 && value >= i64::MIN.into() && value <= i64::MAX.into() {
+                        return Value::Number(Number::Int64(value.into()));
+                    } else {
+                        return Some(Value::Number(Number::Decimal128(Decimal128 {
+                            precision: 38,
+                            scale: scale as u8,
+                            value,
+                        })));
+                    }
+                }
             }
         } else {
-            (0, self.idx)
-        };
+            // precision 已经超过 i128 的最大值，回退到原来的方式处理
+            if fraction_offset.is_none() {
+                // 处理整数部分
+                let len = self.step_digits()?;
+                precision += len;
+                if self.check_next(b'.') {
+                    fraction_offset = Some(self.idx);
+                    self.step();
+                }
+            }
 
-        // 计算小数部分长度
-        let scale_val = if let Some(frac_idx) = fraction_offset {
-            (exp_idx - frac_idx - 1) as i32
-        } else {
-            0
-        };
-
-        // 计算最终的精度和缩放
-        let (scale, exp) = if scale_val >= exp_val {
-            ((scale_val - exp_val) as usize, 0)
-        } else {
-            (0, (exp_val - scale_val) as u32)
-        };
-
-        // 计算数字的总长度（不包括小数点和指数部分）
-        let digit_len = if let Some(frac_idx) = fraction_offset {
-            (frac_idx - start_idx) + (exp_idx - frac_idx - 1)
-        } else {
-            exp_idx - start_idx
-        };
-
-        let precision = digit_len + exp as usize;
-        
-        // 首先尝试解析为 i128 (Decimal128)
-        if precision <= MAX_DECIMAL128_PRECISION && scale <= MAX_DECIMAL128_PRECISION {
-            // 直接从字节解析为数字，避免字符串转换
-            if let Some(value) = self.parse_digits_to_i128(start_idx, exp_idx, exp, negative) {
-                return Some(Value::Number(Number::Decimal128(Decimal128 {
-                    precision: 38,
-                    scale: scale as u8,
-                    value,
-                })));
+            if fraction_offset.is_some() {
+                let len = self.step_digits()?;
+                precision += len;
+                scale += len;
+                if scale == 0 {
+                    Err(self.error(ParseErrorCode::InvalidNumberValue))
+                }
+            }
+            
+            let exp = self.parse_exponent_value()?;
+            if let Some(exp) = exp {
+                let (new_scale, exp) = if scale >= exp {
+                    ((scale - exp) as usize, 0)
+                } else {
+                    (0, (exp - scale) as u32)
+                };
+                precision += exp as usize;
+                scale = new_scale;
             }
         }
 
@@ -405,70 +400,66 @@ impl<'a> Parser<'a> {
             }
         }
 
-        None
-    }
-
-    // 新增辅助方法：直接从字节解析为 i128，避免字符串转换
-    fn parse_digits_to_i128(&self, start_idx: usize, end_idx: usize, exp: u32, negative: bool) -> Option<i128> {
-        let value = self.parse_digits_to_number::<i128>(start_idx, end_idx, negative, true)?;
-        // 应用指数
-        if exp > 0 {
-            value.checked_mul(10_i128.pow(exp))
-        } else {
-            Some(value)
+        // 最后尝试解析为浮点数
+        let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
+        match fast_float2::parse(s) {
+            Ok(v) => Ok(Value::Number(Number::Float64(v))),
+            Err(_) => Err(self.error(ParseErrorCode::InvalidNumberValue)),
         }
     }
 
 
-    // 通用辅助方法：从字节解析为数字类型
-    fn parse_digits_to_number<T>(&self, start_idx: usize, end_idx: usize, negative: bool, skip_dot: bool) -> Option<T> 
-    where 
-        T: num_traits::PrimInt + num_traits::CheckedMul + num_traits::CheckedAdd + num_traits::CheckedNeg,
-    {
-        let mut value: T = T::zero();
-        let mut i = start_idx;
-        
-        // 跳过符号
-        if negative {
-            i += 1;
-        }
-        
-        // 解析数字
-        while i < end_idx {
-            // 跳过小数点
-            if skip_dot && self.buf[i] == b'.' {
-                i += 1;
-                continue;
+
+    fn parse_exponent_value(&mut self) -> Result<Option<i32>> {
+        if self.check_next_either(b'E', b'e') {
+            self.step();
+            let negative = false;
+            let c = self.next()?;
+            if *c == b'-' {
+                negative = true;
+                self.step();
+            } else if *c == b'+' {
+                self.step();
             }
-            
-            let digit_byte = self.buf[i] - b'0';
-            if digit_byte > 9 { // 非数字字符
-                return None;
-            }
-            
-            let digit = T::from(digit_byte).unwrap();
-            
-            // 检查乘法溢出
-            if let Some(new_value) = value.checked_mul(&T::from(10).unwrap()) {
-                if let Some(new_value) = new_value.checked_add(&digit) {
-                    value = new_value;
+            let i = 0;
+            let exp_value = 0_i32;
+            while i < MAX_EXPONENT_PRECISION {
+                if self.check_digit() {
+                    let digit = (self.buf[i] - b'0') as i32;
+
+                    exp_value = exp_value.unchecked_mul(10_i128);
+                    exp_value = exp_value.unchecked_add(digit);
+                    self.step();
                 } else {
-                    return None; // 加法溢出
+                    break;
+                }
+                i += 1;
+            }
+            if i == 0 {
+                Err(self.error(ParseErrorCode::InvalidNumberValue))
+            } else if i < MAX_EXPONENT_PRECISION {
+                if negative {
+                    Ok(exp_value.checked_neg())
+                } else {
+                    Ok(Some(exp_val))
                 }
             } else {
-                return None; // 乘法溢出
+                loop {
+                    if self.check_digit() {
+                        self.step();
+                    } else {
+                        break;
+                    }
+                }
+                Ok(None)
             }
-            
-            i += 1;
-        }
-        
-        // 应用符号
-        if negative {
-            value.checked_neg()
         } else {
-            Some(value)
+            Ok(Some(0))
         }
     }
+
+
+
 
 
 
@@ -525,7 +516,7 @@ impl<'a> Parser<'a> {
 
         let mut first = true;
         let mut values = Vec::new();
-        'F: loop {
+        loop {
             self.skip_unused();
             let c = self.next()?;
             if *c == b']' {
