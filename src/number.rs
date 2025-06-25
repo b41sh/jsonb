@@ -28,8 +28,8 @@ use serde::de::Deserialize;
 use serde::de::Deserializer;
 use serde::de::Visitor;
 use serde::ser::Serialize;
-use serde::ser::Serializer;
 use serde::ser::SerializeStruct;
+use serde::ser::Serializer;
 
 const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
@@ -549,4 +549,3 @@ impl Display for Number {
         }
     }
 }
-

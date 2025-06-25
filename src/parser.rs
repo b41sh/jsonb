@@ -25,10 +25,10 @@ use super::value::Value;
 use crate::core::Decoder;
 
 use std::str::FromStr;
- 
-use ethnum::i256;
+
 use crate::Decimal128;
 use crate::Decimal256;
+use ethnum::i256;
 
 pub const MAX_EXPONENT_PRECISION: usize = 9;
 pub const MAX_INTGER_PRECISION: usize = 18;
@@ -159,6 +159,7 @@ impl<'a> Parser<'a> {
         false
     }
 
+    #[inline]
     fn check_digit(&mut self) -> bool {
         if self.idx < self.buf.len() {
             let v = self.buf.get(self.idx).unwrap();
@@ -169,10 +170,8 @@ impl<'a> Parser<'a> {
         false
     }
 
-    fn step_digits(&mut self) -> Result<usize> {
-        //if self.idx == self.buf.len() {
-        //    return Err(self.error(ParseErrorCode::InvalidEOF));
-        //}
+    #[inline]
+    fn step_digits(&mut self) -> usize {
         let mut len = 0;
         while self.idx < self.buf.len() {
             let c = self.buf.get(self.idx).unwrap();
@@ -182,7 +181,7 @@ impl<'a> Parser<'a> {
             len += 1;
             self.step();
         }
-        Ok(len)
+        len
     }
 
     #[inline]
@@ -202,40 +201,40 @@ impl<'a> Parser<'a> {
 
     #[inline]
     fn skip_unused(&mut self) {
-    while self.idx < self.buf.len() {
-        let c = self.buf[self.idx];
-        
-        // 快速路径：处理常见的空白字符
-        if c.is_ascii_whitespace() {
-            self.idx += 1;
-            continue;
-        }
-        
-        // 慢路径：处理转义序列
-        if c == b'\\' && self.idx + 1 < self.buf.len() {
-            let next_c = self.buf[self.idx + 1];
-            
-            // 处理简单转义 \n, \r, \t
-            let simple_escape = matches!(next_c, b'n' | b'r' | b't');
-            if simple_escape {
-                self.idx += 2;
+        while self.idx < self.buf.len() {
+            let c = self.buf[self.idx];
+
+            // Fast path: handle common whitespace characters
+            if c.is_ascii_whitespace() {
+                self.idx += 1;
                 continue;
             }
-            
-            // 处理 \x0C 转义
-            let hex_escape = self.idx + 3 < self.buf.len() && 
-                             next_c == b'x' && 
-                             self.buf[self.idx + 2] == b'0' && 
-                             self.buf[self.idx + 3] == b'C';
-            if hex_escape {
-                self.idx += 4;
-                continue;
+
+            // Slow path: handle escape sequences
+            if c == b'\\' && self.idx + 1 < self.buf.len() {
+                let next_c = self.buf[self.idx + 1];
+
+                // Handle simple escapes \n, \r, \t
+                let simple_escape = matches!(next_c, b'n' | b'r' | b't');
+                if simple_escape {
+                    self.idx += 2;
+                    continue;
+                }
+
+                // Handle \x0C escape
+                let hex_escape = self.idx + 3 < self.buf.len()
+                    && next_c == b'x'
+                    && self.buf[self.idx + 2] == b'0'
+                    && self.buf[self.idx + 3] == b'C';
+                if hex_escape {
+                    self.idx += 4;
+                    continue;
+                }
             }
+
+            // No more whitespace, exit loop
+            break;
         }
-        
-        // 没有更多空白字符，退出循环
-        break;
-    }
     }
 
     fn parse_json_null(&mut self) -> Result<Value<'a>> {
@@ -274,11 +273,21 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse a JSON number using a single-pass approach with multiple fallback strategies.
+    /// 
+    /// This function implements a high-performance JSON number parsing algorithm that:
+    /// 1. First attempts to parse the number as an i128 (for Decimal128/Int64/UInt64)
+    /// 2. Falls back to i256 (for Decimal256) if precision exceeds i128 capacity
+    /// 3. Finally falls back to Float64 if all other methods fail
+    /// 
+    /// The algorithm handles signs, leading zeros, decimal points, and exponents in a single pass,
+    /// avoiding multiple traversals of the input for better performance. It uses unsafe operations
+    /// for arithmetic to maximize speed, with appropriate overflow checks through precision limits.
     fn parse_json_number(&mut self) -> Result<Value<'a>> {
         let start_idx = self.idx;
         let mut negative = false;
 
-        // 处理符号
+        // Handle sign
         let c = self.next()?;
         if *c == b'-' {
             negative = true;
@@ -306,7 +315,7 @@ impl<'a> Parser<'a> {
         let mut exponent_offset = None;
 
         let mut precision = 0;
-        // 首先尝试解析 i256 的数字，避免重复遍历
+        // First try to parse as i128, avoiding multiple traversals
         while precision < MAX_DECIMAL128_PRECISION {
             if self.check_digit() {
                 let digit = (self.buf[self.idx] - b'0') as i128;
@@ -331,10 +340,10 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // 如果 precision 已经超过 i128 的最大值，继续遍历，收集 fraction_offset 和 exponent_offset
+        // If precision exceeds i128 max value, continue parsing to collect fraction_offset and exponent_offset
         if fraction_offset.is_none() {
-            // 处理整数部分
-            let len = self.step_digits()?;
+            // Process integer part
+            let len = self.step_digits();
             precision += len;
             if self.check_next(b'.') {
                 fraction_offset = Some(self.idx);
@@ -342,21 +351,19 @@ impl<'a> Parser<'a> {
             }
         }
         if fraction_offset.is_some() {
-            let len = self.step_digits()?;
+            let len = self.step_digits();
             precision += len;
             scale += len as i32;
-            if scale == 0 {
-                return Err(self.error(ParseErrorCode::InvalidNumberValue));
-            }
         }
 
+        // Process exponent data
         if self.check_next_either(b'E', b'e') {
             exponent_offset = Some(self.idx);
             self.step();
-            let mut negative = false;
+            let mut exp_negative = false;
             let c = self.next()?;
             if *c == b'-' {
-                negative = true;
+                exp_negative = true;
                 self.step();
             } else if *c == b'+' {
                 self.step();
@@ -377,7 +384,7 @@ impl<'a> Parser<'a> {
             if i == 0 {
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
             } else if i < MAX_EXPONENT_PRECISION {
-                if negative {
+                if exp_negative {
                     exp = exp.checked_neg().unwrap();
                 }
             } else {
@@ -392,6 +399,7 @@ impl<'a> Parser<'a> {
             }
         }
 
+        // Calculate correct scale and exponent values
         let (new_scale, exp) = if scale >= exp {
             ((scale - exp), 0)
         } else {
@@ -400,7 +408,7 @@ impl<'a> Parser<'a> {
         precision += exp as usize;
         scale = new_scale;
 
-        // 首先尝试解析为 i128 (Decimal128)
+        // First try to parse as i128 (Decimal128)
         if !exp_overflow && precision <= MAX_DECIMAL128_PRECISION {
             if exp > 0 {
                 value = unsafe { value.unchecked_mul(10_i128.pow(exp)) };
@@ -408,6 +416,7 @@ impl<'a> Parser<'a> {
             if negative {
                 value = value.checked_neg().unwrap();
             }
+            // Prioritize integer types when possible
             if scale == 0 && value >= 0 && value <= i128::from(u64::MAX) {
                 return Ok(Value::Number(Number::UInt64(u64::try_from(value).unwrap())));
             } else if scale == 0 && value >= i128::from(i64::MIN) && value <= i128::from(i64::MAX) {
@@ -421,20 +430,24 @@ impl<'a> Parser<'a> {
             }
         }
 
-
-        // 如果需要更高精度，尝试解析为 i256 (Decimal256)
+        // If higher precision is needed, try to parse as i256 (Decimal256)
         if !exp_overflow && precision <= MAX_DECIMAL256_PRECISION {
             let exp_idx = exponent_offset.unwrap_or(self.idx);
 
-            // 对于 i256，我们仍然需要通过字符串解析，因为没有直接的字节到 i256 的转换
+            // For i256, we still need to parse through string, as there's no direct byte-to-i256 conversion
             let digit_str = if let Some(frac_idx) = fraction_offset {
                 let digit_len = exp_idx - num_start_idx - 1;
                 let mut s = String::with_capacity(digit_len);
-                s.push_str(unsafe { std::str::from_utf8_unchecked(&self.buf[num_start_idx..frac_idx]) });
-                s.push_str(unsafe { std::str::from_utf8_unchecked(&self.buf[frac_idx+1..exp_idx]) });
+                s.push_str(unsafe {
+                    std::str::from_utf8_unchecked(&self.buf[num_start_idx..frac_idx])
+                });
+                s.push_str(unsafe {
+                    std::str::from_utf8_unchecked(&self.buf[frac_idx + 1..exp_idx])
+                });
                 s
             } else {
-                unsafe { std::str::from_utf8_unchecked(&self.buf[num_start_idx..exp_idx]) }.to_string()
+                unsafe { std::str::from_utf8_unchecked(&self.buf[num_start_idx..exp_idx]) }
+                    .to_string()
             };
 
             if let Ok(value) = i256::from_str(&digit_str) {
@@ -451,14 +464,13 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // 最后尝试解析为浮点数
+        // Finally try to parse as floating point
         let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
         match fast_float2::parse(s) {
             Ok(v) => Ok(Value::Number(Number::Float64(v))),
             Err(_) => Err(self.error(ParseErrorCode::InvalidNumberValue)),
         }
     }
-
 
     fn parse_json_string(&mut self) -> Result<Value<'a>> {
         self.must_is(b'"')?;
@@ -578,4 +590,3 @@ impl<'a> Parser<'a> {
         Ok(Value::Object(obj))
     }
 }
-
