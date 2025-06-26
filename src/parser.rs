@@ -288,6 +288,7 @@ impl<'a> Parser<'a> {
         // Store the starting position for potential fallback parsing
         let start_idx = self.idx;
         let mut negative = false;
+        let mut leading_zeros = false;
 
         // Handle sign prefix (+ or -), extending JSON to support leading plus sign
         let c = self.next()?;
@@ -302,6 +303,7 @@ impl<'a> Parser<'a> {
         // Extended syntax: Support for multiple leading zeros (e.g., 000123)
         loop {
             if self.check_next(b'0') {
+                leading_zeros = true;
                 self.step();
             } else {
                 break;
@@ -312,11 +314,11 @@ impl<'a> Parser<'a> {
         let num_start_idx = self.idx;
 
         // Initialize parsing state
-        let mut value = 0_i128;            // Accumulates the numeric value
-        let mut scale = 0_u32;             // Tracks decimal places
-        let mut fraction_offset = None;    // Position of decimal point, if any
-        let mut has_exponent = false;      // Whether the number has an exponent part
-        let mut precision = 0;             // Count of significant digits
+        let mut value = 0_i128; // Accumulates the numeric value
+        let mut scale = 0_u32; // Tracks decimal places
+        let mut fraction_offset = None; // Position of decimal point, if any
+        let mut has_exponent = false; // Whether the number has an exponent part
+        let mut precision = 0; // Count of significant digits
 
         // First parsing strategy: Try to parse as i128 with precision limit
         while precision < MAX_DECIMAL128_PRECISION {
@@ -363,10 +365,14 @@ impl<'a> Parser<'a> {
             if fraction_offset.is_some() {
                 let len = self.step_digits();
                 precision += len;
-                scale += len as i32;
+                scale += len as u32;
             }
         }
 
+        // Handle empty precision
+        if !leading_zeros && precision == 0 {
+            return Err(self.error(ParseErrorCode::ExpectedSomeValue));
+        }
         // Handle exponent notation (e.g., 1e10, 1.5E-7)
         if self.check_next_either(b'E', b'e') {
             has_exponent = true;
@@ -390,19 +396,18 @@ impl<'a> Parser<'a> {
             }
 
             // Try to fit the value into the most appropriate numeric type
-            if scale == 0 && value >= UINT64_MIN && value <= UINT64_MAX {
+            if scale == 0 && (UINT64_MIN..=UINT64_MAX).contains(&value) {
                 return Ok(Value::Number(Number::UInt64(u64::try_from(value).unwrap())));
-            } else if scale == 0 && value >= INT64_MIN && value <= INT64_MAX {
+            } else if scale == 0 && (INT64_MIN..=INT64_MAX).contains(&value) {
                 return Ok(Value::Number(Number::Int64(i64::try_from(value).unwrap())));
-            } else if value >= DECIMAL64_MIN
-                && value <= DECIMAL64_MAX
+            } else if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&value)
                 && precision <= MAX_DECIMAL64_PRECISION
             {
                 return Ok(Value::Number(Number::Decimal64(Decimal64 {
                     scale: scale as u8,
                     value: i64::try_from(value).unwrap(),
                 })));
-            } else if value >= DECIMAL128_MIN && value <= DECIMAL128_MAX {
+            } else if (DECIMAL128_MIN..=DECIMAL128_MAX).contains(&value) {
                 return Ok(Value::Number(Number::Decimal128(Decimal128 {
                     scale: scale as u8,
                     value,
@@ -644,12 +649,11 @@ impl<'a> Parser<'a> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
     use ethnum::i256;
+    use proptest::prelude::*;
 
     fn string_strategy() -> impl Strategy<Value = String> {
         let ascii = '!'..='~';
@@ -657,7 +661,8 @@ mod tests {
         let cjk = '\u{4E00}'..='\u{9FFF}';
 
         let chars: Vec<char> = ascii.chain(cjk).collect();
-        prop::collection::vec(prop::sample::select(chars), 1..30).prop_map(|v| v.into_iter().collect())
+        prop::collection::vec(prop::sample::select(chars), 1..30)
+            .prop_map(|v| v.into_iter().collect())
     }
 
     fn json_strategy() -> impl Strategy<Value = Value<'static>> {
@@ -679,17 +684,13 @@ mod tests {
             string_strategy().prop_map(|v| Value::String(Cow::Owned(v))),
         ];
 
-        leaf.prop_recursive(
-            8,
-            256,
-            30,
-            |inner| {
-                prop_oneof![
-                    prop::collection::vec(inner.clone(), 0..10).prop_map(Value::Array),
-                    prop::collection::btree_map(string_strategy(), inner, 0..20).prop_map(Value::Object),
-                ]
-            },
-        )
+        leaf.prop_recursive(8, 256, 30, |inner| {
+            prop_oneof![
+                prop::collection::vec(inner.clone(), 0..10).prop_map(Value::Array),
+                prop::collection::btree_map(string_strategy(), inner, 0..20)
+                    .prop_map(Value::Object),
+            ]
+        })
     }
 
     proptest! {

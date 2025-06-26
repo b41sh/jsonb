@@ -24,12 +24,15 @@ use rand::distr::SampleString;
 use rand::rng;
 use rand::Rng;
 
-use super::extension::Date;
-use super::extension::Interval;
-use super::extension::Timestamp;
-use super::extension::TimestampTz;
-use super::number::Number;
 use crate::core::Encoder;
+use crate::Date;
+use crate::Decimal128;
+use crate::Decimal256;
+use crate::Decimal64;
+use crate::Interval;
+use crate::Number;
+use crate::Timestamp;
+use crate::TimestampTz;
 
 pub type Object<'a> = BTreeMap<String, Value<'a>>;
 
@@ -406,19 +409,26 @@ impl<'a> Value<'a> {
                 3 => {
                     let scale: u8 = rng.random_range(0..=18);
                     let value: i64 = rng.random_range(-999999999999999999..=999999999999999999);
-                    Value::Number(Number::Decimal64(Decimal64 { scale, value })))
+                    Value::Number(Number::Decimal64(Decimal64 { scale, value }))
                 }
                 4 => {
                     let scale: u8 = rng.random_range(0..=38);
-                    let value: i128 = rng.random_range(-99999999999999999999999999999999999999i128..=99999999999999999999999999999999999999i128);
-                    Value::Number(Number::Decimal128(Decimal128 { scale, value })))
+                    let value: i128 = rng.random_range(
+                        -99999999999999999999999999999999999999i128
+                            ..=99999999999999999999999999999999999999i128,
+                    );
+                    Value::Number(Number::Decimal128(Decimal128 { scale, value }))
                 }
                 _ => {
                     let scale: u8 = rng.random_range(0..=76);
-                    let lo: i128 = rng.random_range(0i128..=99999999999999999999999999999999999999i128);
-                    let hi: i128 = rng.random_range(-99999999999999999999999999999999999999i128..=99999999999999999999999999999999999999i128);
+                    let lo: i128 =
+                        rng.random_range(0i128..=99999999999999999999999999999999999999i128);
+                    let hi: i128 = rng.random_range(
+                        -99999999999999999999999999999999999999i128
+                            ..=99999999999999999999999999999999999999i128,
+                    );
                     let value = ethnum::i256::from_words(hi, lo);
-                    Value::Number(Number::Decimal256(Decimal256 { scale, value })))
+                    Value::Number(Number::Decimal256(Decimal256 { scale, value }))
                 }
             },
             _ => Value::Null,

@@ -34,7 +34,7 @@ use serde::ser::Serializer;
 const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
 /// Represents a decimal number with 64-bit precision.
-/// 
+///
 /// This structure stores a decimal value as an integer with a scale factor,
 /// allowing for precise representation of decimal numbers without floating-point errors.
 /// The scale indicates how many decimal places the value has (e.g., scale=2 means 2 decimal places).
