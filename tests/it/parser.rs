@@ -371,10 +371,7 @@ fn test_parse_array() {
         // Extended JSON array syntax
         (
             "[1, ]",
-            Value::Array(vec![
-                Value::Number(Number::UInt64(1)),
-                Value::Null,
-            ]),
+            Value::Array(vec![Value::Number(Number::UInt64(1)), Value::Null]),
         ),
         (
             "[ , 2, 3]",
@@ -384,13 +381,7 @@ fn test_parse_array() {
                 Value::Number(Number::UInt64(3)),
             ]),
         ),
-        (
-            "[ , ]",
-            Value::Array(vec![
-                Value::Null,
-                Value::Null,
-            ]),
-        ),
+        ("[ , ]", Value::Array(vec![Value::Null, Value::Null])),
     ]);
 }
 

@@ -590,32 +590,215 @@ impl PartialOrd<Number> for &Number {
 impl Ord for Number {
     /// Returns the ordering of the number compared to another number.
     ///
-    /// This method compares the numbers using their internal representations.
+    /// This method implements precise comparison between different number types:
+    /// - When comparing decimal types with other types, it converts the non-decimal type
+    ///   to a decimal representation to preserve precision
+    /// - When comparing between decimal types of different precision, it upgrades the lower
+    ///   precision decimal to match the higher precision one
+    /// - Only falls back to floating-point comparison as a last resort
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
+            // Same type comparisons - use native comparison
             (Number::Int64(l), Number::Int64(r)) => l.cmp(r),
             (Number::UInt64(l), Number::UInt64(r)) => l.cmp(r),
+            (Number::Float64(l), Number::Float64(r)) => OrderedFloat(*l).cmp(&OrderedFloat(*r)),
+            (Number::Decimal64(l), Number::Decimal64(r)) => {
+                // Compare decimal values with the same scale
+                if l.scale == r.scale {
+                    l.value.cmp(&r.value)
+                } else {
+                    // Adjust scales to match for proper comparison
+                    let (l_val, r_val) = adjust_decimal_scales(l.value as i128, l.scale, r.value as i128, r.scale);
+                    l_val.cmp(&r_val)
+                }
+            },
+            (Number::Decimal128(l), Number::Decimal128(r)) => {
+                // Compare decimal values with the same scale
+                if l.scale == r.scale {
+                    l.value.cmp(&r.value)
+                } else {
+                    // Adjust scales to match for proper comparison
+                    let (l_val, r_val) = adjust_decimal_scales(l.value, l.scale, r.value, r.scale);
+                    l_val.cmp(&r_val)
+                }
+            },
+            (Number::Decimal256(l), Number::Decimal256(r)) => {
+                // Compare decimal values with the same scale
+                if l.scale == r.scale {
+                    l.value.cmp(&r.value)
+                } else {
+                    // For i256 comparison with different scales, we need to adjust manually
+                    let scale_diff = l.scale as i32 - r.scale as i32;
+                    if scale_diff > 0 {
+                        // l has more decimal places, scale up r
+                        let scale_factor = i256::from(10).pow(scale_diff as u32);
+                        let scaled_r = r.value * scale_factor;
+                        l.value.cmp(&scaled_r)
+                    } else {
+                        // r has more decimal places, scale up l
+                        let scale_factor = i256::from(10).pow((-scale_diff) as u32);
+                        let scaled_l = l.value * scale_factor;
+                        scaled_l.cmp(&r.value)
+                    }
+                }
+            },
+            
+            // Integer to integer comparisons
             (Number::Int64(l), Number::UInt64(r)) => {
                 if *l < 0 {
                     Ordering::Less
                 } else {
                     (*l as u64).cmp(r)
                 }
-            }
+            },
             (Number::UInt64(l), Number::Int64(r)) => {
                 if *r < 0 {
                     Ordering::Greater
                 } else {
                     l.cmp(&(*r as u64))
                 }
-            }
+            },
+            
+            // Decimal64 comparisons with other types
+            (Number::Decimal64(l), Number::Int64(r)) => {
+                // Convert Int64 to Decimal64 with scale 0
+                let r_decimal = Decimal64 { scale: 0, value: *r };
+                self.cmp(&Number::Decimal64(r_decimal))
+            },
+            (Number::Int64(l), Number::Decimal64(r)) => {
+                // Convert Int64 to Decimal64 with scale 0
+                let l_decimal = Decimal64 { scale: 0, value: *l };
+                Number::Decimal64(l_decimal).cmp(other)
+            },
+            (Number::Decimal64(l), Number::UInt64(r)) => {
+                // Check if the value fits in i64
+                if r <= i64::MAX as u64 {
+                    // Convert UInt64 to Decimal64 with scale 0
+                    let r_decimal = Decimal64 { scale: 0, value: r as i64 }
+                    self.cmp(&Number::Decimal64(r_decimal))
+                } else {
+                    // If it doesn't fit, Convert UInt64 to Decimal128 with scale 0
+                    let r_decimal = Decimal128 { scale: 0, value: r as i128 }
+                    self.cmp(&Number::Decimal128(r_decimal))
+                }
+            },
+            (Number::UInt64(l), Number::Decimal64(r)) => {
+                // Check if the value fits in i64
+                if l <= i64::MAX as u64 {
+                    // Convert UInt64 to Decimal64 with scale 0
+                    let l_decimal = Decimal64 { scale: 0, value: l as i64 }
+                    Number::Decimal64(l_decimal).cmp(other)
+                } else {
+                    // If it doesn't fit, Convert UInt64 to Decimal128 with scale 0
+                    let l_decimal = Decimal128 { scale: 0, value: l as i128 }
+                    Number::Decimal128(l_decimal).cmp(other)
+                }
+            },
+            
+            // Decimal128 comparisons with other types
+            (Number::Decimal128(l), Number::Int64(r)) => {
+                // Convert Int64 to Decimal128 with scale 0
+                let r_decimal = Decimal128 { scale: 0, value: *r as i128 };
+                self.cmp(&Number::Decimal128(r_decimal))
+            },
+            (Number::Int64(l), Number::Decimal128(r)) => {
+                // Convert Int64 to Decimal128 with scale 0
+                let l_decimal = Decimal128 { scale: 0, value: *l as i128 };
+                Number::Decimal128(l_decimal).cmp(other)
+            },
+            (Number::Decimal128(l), Number::UInt64(r)) => {
+                // Convert UInt64 to Decimal128 with scale 0
+                let r_decimal = Decimal128 { scale: 0, value: *r as i128 };
+                self.cmp(&Number::Decimal128(r_decimal))
+            },
+            (Number::UInt64(l), Number::Decimal128(r)) => {
+                // Convert UInt64 to Decimal128 with scale 0
+                let l_decimal = Decimal128 { scale: 0, value: *l as i128 };
+                Number::Decimal128(l_decimal).cmp(other)
+            },
+            
+            // Decimal256 comparisons with other types
+            (Number::Decimal256(l), Number::Int64(r)) => {
+                // Convert Int64 to Decimal256 with scale 0
+                let r_decimal = Decimal256 { scale: 0, value: i256::from(*r) };
+                self.cmp(&Number::Decimal256(r_decimal))
+            },
+            (Number::Int64(l), Number::Decimal256(r)) => {
+                // Convert Int64 to Decimal256 with scale 0
+                let l_decimal = Decimal256 { scale: 0, value: i256::from(*l) };
+                Number::Decimal256(l_decimal).cmp(other)
+            },
+            (Number::Decimal256(l), Number::UInt64(r)) => {
+                // Convert UInt64 to Decimal256 with scale 0
+                let r_decimal = Decimal256 { scale: 0, value: i256::from(*r) };
+                self.cmp(&Number::Decimal256(r_decimal))
+            },
+            (Number::UInt64(l), Number::Decimal256(r)) => {
+                // Convert UInt64 to Decimal256 with scale 0
+                let l_decimal = Decimal256 { scale: 0, value: i256::from(*l) };
+                Number::Decimal256(l_decimal).cmp(other)
+            },
+            
+            // Cross-decimal comparisons - upgrade to the higher precision
+            (Number::Decimal64(l), Number::Decimal128(r)) => {
+                // Upgrade Decimal64 to Decimal128
+                let l_decimal = Decimal128 { scale: l.scale, value: l.value as i128 };
+                Number::Decimal128(l_decimal).cmp(other)
+            },
+            (Number::Decimal128(l), Number::Decimal64(r)) => {
+                // Upgrade Decimal64 to Decimal128
+                let r_decimal = Decimal128 { scale: r.scale, value: r.value as i128 };
+                self.cmp(&Number::Decimal128(r_decimal))
+            },
+            (Number::Decimal64(l), Number::Decimal256(r)) => {
+                // Upgrade Decimal64 to Decimal256
+                let l_decimal = Decimal256 { scale: l.scale, value: i256::from(l.value) };
+                Number::Decimal256(l_decimal).cmp(other)
+            },
+            (Number::Decimal256(l), Number::Decimal64(r)) => {
+                // Upgrade Decimal64 to Decimal256
+                let r_decimal = Decimal256 { scale: r.scale, value: i256::from(r.value) };
+                self.cmp(&Number::Decimal256(r_decimal))
+            },
+            (Number::Decimal128(l), Number::Decimal256(r)) => {
+                // Upgrade Decimal128 to Decimal256
+                let l_decimal = Decimal256 { scale: l.scale, value: i256::from(l.value) };
+                Number::Decimal256(l_decimal).cmp(other)
+            },
+            (Number::Decimal256(l), Number::Decimal128(r)) => {
+                // Upgrade Decimal128 to Decimal256
+                let r_decimal = Decimal256 { scale: r.scale, value: i256::from(r.value) };
+                self.cmp(&Number::Decimal256(r_decimal))
+            },
+            
+            // Fall back to float comparison for any other combinations
             (_, _) => {
                 let l = OrderedFloat(self.as_f64().unwrap());
                 let r = OrderedFloat(other.as_f64().unwrap());
                 l.cmp(&r)
             }
         }
+    }
+}
+
+/// Helper function to adjust decimal scales for comparison
+/// 
+/// Given two decimal values with potentially different scales,
+/// this function adjusts them to have the same scale for accurate comparison.
+fn adjust_decimal_scales(l_val: i128, l_scale: u8, r_val: i128, r_scale: u8) -> (i128, i128) {
+    let scale_diff = l_scale as i32 - r_scale as i32;
+    if scale_diff > 0 {
+        // l has more decimal places, scale up r
+        let scale_factor = 10_i128.pow(scale_diff as u32);
+        (l_val, r_val * scale_factor)
+    } else if scale_diff < 0 {
+        // r has more decimal places, scale up l
+        let scale_factor = 10_i128.pow((-scale_diff) as u32);
+        (l_val * scale_factor, r_val)
+    } else {
+        // Same scale, no adjustment needed
+        (l_val, r_val)
     }
 }
 
@@ -714,5 +897,126 @@ impl Display for Number {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn test_number_comparison() {
+        // Test same type comparisons
+        assert_eq!(Number::Int64(10).cmp(&Number::Int64(5)), Ordering::Greater);
+        assert_eq!(Number::Int64(5).cmp(&Number::Int64(10)), Ordering::Less);
+        assert_eq!(Number::Int64(5).cmp(&Number::Int64(5)), Ordering::Equal);
+        
+        assert_eq!(Number::UInt64(10).cmp(&Number::UInt64(5)), Ordering::Greater);
+        assert_eq!(Number::UInt64(5).cmp(&Number::UInt64(10)), Ordering::Less);
+        assert_eq!(Number::UInt64(5).cmp(&Number::UInt64(5)), Ordering::Equal);
+        
+        assert_eq!(Number::Float64(10.0).cmp(&Number::Float64(5.0)), Ordering::Greater);
+        assert_eq!(Number::Float64(5.0).cmp(&Number::Float64(10.0)), Ordering::Less);
+        assert_eq!(Number::Float64(5.0).cmp(&Number::Float64(5.0)), Ordering::Equal);
+        
+        // Test int64 and uint64 comparisons
+        assert_eq!(Number::Int64(10).cmp(&Number::UInt64(5)), Ordering::Greater);
+        assert_eq!(Number::Int64(5).cmp(&Number::UInt64(10)), Ordering::Less);
+        assert_eq!(Number::Int64(5).cmp(&Number::UInt64(5)), Ordering::Equal);
+        assert_eq!(Number::Int64(-5).cmp(&Number::UInt64(5)), Ordering::Less);
+        
+        assert_eq!(Number::UInt64(10).cmp(&Number::Int64(5)), Ordering::Greater);
+        assert_eq!(Number::UInt64(5).cmp(&Number::Int64(10)), Ordering::Less);
+        assert_eq!(Number::UInt64(5).cmp(&Number::Int64(5)), Ordering::Equal);
+        assert_eq!(Number::UInt64(5).cmp(&Number::Int64(-5)), Ordering::Greater);
+        
+        // Test decimal64 comparisons with same scale
+        let d1 = Decimal64 { scale: 2, value: 1234 }; // 12.34
+        let d2 = Decimal64 { scale: 2, value: 5678 }; // 56.78
+        assert_eq!(Number::Decimal64(d1.clone()).cmp(&Number::Decimal64(d2.clone())), Ordering::Less);
+        assert_eq!(Number::Decimal64(d2.clone()).cmp(&Number::Decimal64(d1.clone())), Ordering::Greater);
+        assert_eq!(Number::Decimal64(d1.clone()).cmp(&Number::Decimal64(d1.clone())), Ordering::Equal);
+        
+        // Test decimal64 comparisons with different scales
+        let d3 = Decimal64 { scale: 3, value: 12340 }; // 12.340
+        assert_eq!(Number::Decimal64(d1.clone()).cmp(&Number::Decimal64(d3.clone())), Ordering::Equal);
+        
+        let d4 = Decimal64 { scale: 1, value: 123 }; // 12.3
+        assert_eq!(Number::Decimal64(d1.clone()).cmp(&Number::Decimal64(d4.clone())), Ordering::Greater);
+        
+        // Test decimal128 comparisons
+        let d5 = Decimal128 { scale: 2, value: 1234 }; // 12.34
+        let d6 = Decimal128 { scale: 2, value: 5678 }; // 56.78
+        assert_eq!(Number::Decimal128(d5.clone()).cmp(&Number::Decimal128(d6.clone())), Ordering::Less);
+        
+        // Test decimal256 comparisons
+        let d7 = Decimal256 { scale: 2, value: i256::from(1234) }; // 12.34
+        let d8 = Decimal256 { scale: 2, value: i256::from(5678) }; // 56.78
+        assert_eq!(Number::Decimal256(d7.clone()).cmp(&Number::Decimal256(d8.clone())), Ordering::Less);
+        
+        // Test int64 to decimal64 comparisons
+        assert_eq!(Number::Int64(12).cmp(&Number::Decimal64(Decimal64 { scale: 0, value: 12 })), Ordering::Equal);
+        assert_eq!(Number::Int64(12).cmp(&Number::Decimal64(Decimal64 { scale: 1, value: 120 })), Ordering::Equal);
+        assert_eq!(Number::Int64(12).cmp(&Number::Decimal64(Decimal64 { scale: 1, value: 121 })), Ordering::Less);
+        assert_eq!(Number::Int64(12).cmp(&Number::Decimal64(Decimal64 { scale: 1, value: 119 })), Ordering::Greater);
+        
+        // Test uint64 to decimal64 comparisons
+        assert_eq!(Number::UInt64(12).cmp(&Number::Decimal64(Decimal64 { scale: 0, value: 12 })), Ordering::Equal);
+        assert_eq!(Number::UInt64(12).cmp(&Number::Decimal64(Decimal64 { scale: 1, value: 120 })), Ordering::Equal);
+        
+        // Test float64 to decimal64 comparisons
+        assert_eq!(Number::Float64(12.34).cmp(&Number::Decimal64(Decimal64 { scale: 2, value: 1234 })), Ordering::Equal);
+        assert_eq!(Number::Float64(12.34).cmp(&Number::Decimal64(Decimal64 { scale: 2, value: 1235 })), Ordering::Less);
+        
+        // Test cross-decimal comparisons
+        // Decimal64 vs Decimal128
+        assert_eq!(
+            Number::Decimal64(Decimal64 { scale: 2, value: 1234 }).cmp(&Number::Decimal128(Decimal128 { scale: 2, value: 1234 })),
+            Ordering::Equal
+        );
+        assert_eq!(
+            Number::Decimal64(Decimal64 { scale: 2, value: 1234 }).cmp(&Number::Decimal128(Decimal128 { scale: 2, value: 5678 })),
+            Ordering::Less
+        );
+        
+        // Decimal64 vs Decimal256
+        assert_eq!(
+            Number::Decimal64(Decimal64 { scale: 2, value: 1234 }).cmp(&Number::Decimal256(Decimal256 { scale: 2, value: i256::from(1234) })),
+            Ordering::Equal
+        );
+        
+        // Decimal128 vs Decimal256
+        assert_eq!(
+            Number::Decimal128(Decimal128 { scale: 2, value: 1234 }).cmp(&Number::Decimal256(Decimal256 { scale: 2, value: i256::from(1234) })),
+            Ordering::Equal
+        );
+        
+        // Test with different scales across decimal types
+        assert_eq!(
+            Number::Decimal64(Decimal64 { scale: 2, value: 1234 }).cmp(&Number::Decimal128(Decimal128 { scale: 3, value: 12340 })),
+            Ordering::Equal
+        );
+        
+        // Test edge cases
+        // Very large numbers
+        let large_int = i64::MAX;
+        let large_uint = u64::MAX;
+        let large_decimal = Decimal128 { scale: 0, value: i128::from(large_int) };
+        
+        assert_eq!(Number::Int64(large_int).cmp(&Number::Decimal128(large_decimal.clone())), Ordering::Equal);
+        assert_eq!(Number::Decimal128(large_decimal).cmp(&Number::Int64(large_int)), Ordering::Equal);
+        
+        // Negative numbers
+        let neg_int = -100;
+        let neg_decimal = Decimal64 { scale: 0, value: -100 };
+        
+        assert_eq!(Number::Int64(neg_int).cmp(&Number::Decimal64(neg_decimal.clone())), Ordering::Equal);
+        assert_eq!(Number::Decimal64(neg_decimal).cmp(&Number::UInt64(100)), Ordering::Less);
+        
+        // Zero values
+        assert_eq!(Number::Int64(0).cmp(&Number::UInt64(0)), Ordering::Equal);
+        assert_eq!(Number::Int64(0).cmp(&Number::Decimal64(Decimal64 { scale: 0, value: 0 })), Ordering::Equal);
+        assert_eq!(Number::Int64(0).cmp(&Number::Decimal64(Decimal64 { scale: 5, value: 0 })), Ordering::Equal);
     }
 }

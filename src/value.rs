@@ -36,20 +36,42 @@ use crate::TimestampTz;
 
 pub type Object<'a> = BTreeMap<String, Value<'a>>;
 
-// JSONB value
+/// Represents a JSON or extended JSON value.
+///
+/// This enum supports both standard JSON types (Null, Bool, String, Number, Array, Object)
+/// and extended types for specialized data representation (Binary, Date, Timestamp, etc.).
+/// The extended types provide additional functionality beyond the JSON specification,
+/// making this implementation more suitable for database applications and other
+/// systems requiring richer data type support.
 #[derive(Clone, PartialEq, Default, Eq)]
 pub enum Value<'a> {
+    /// Represents a JSON null value
     #[default]
     Null,
+    /// Represents a JSON boolean value (true or false)
     Bool(bool),
+    /// Represents a JSON string value
     String(Cow<'a, str>),
+    /// Represents a JSON number value with various internal representations
     Number(Number),
+    /// Extended type: Represents binary data not supported in standard JSON
+    /// Useful for storing raw bytes, images, or other binary content
     Binary(&'a [u8]),
+    /// Extended type: Represents a calendar date (year, month, day)
+    /// Stored as days since epoch for efficient comparison and manipulation
     Date(Date),
+    /// Extended type: Represents a timestamp without timezone information
+    /// Stored as microseconds since epoch
     Timestamp(Timestamp),
+    /// Extended type: Represents a timestamp with timezone information
+    /// Includes both timestamp and timezone offset
     TimestampTz(TimestampTz),
+    /// Extended type: Represents a time interval or duration
+    /// Useful for time difference calculations and scheduling
     Interval(Interval),
+    /// Represents a JSON array of values
     Array(Vec<Value<'a>>),
+    /// Represents a JSON object as key-value pairs
     Object(Object<'a>),
 }
 
