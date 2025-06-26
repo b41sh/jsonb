@@ -31,7 +31,6 @@ use crate::Decimal256;
 use crate::Decimal64;
 use ethnum::i256;
 
-const MAX_EXPONENT_PRECISION: usize = 9;
 const MAX_DECIMAL64_PRECISION: usize = 18;
 const MAX_DECIMAL128_PRECISION: usize = 38;
 const MAX_DECIMAL256_PRECISION: usize = 76;
@@ -287,7 +286,6 @@ impl<'a> Parser<'a> {
         let start_idx = self.idx;
         let mut negative = false;
 
-        // Handle sign
         let c = self.next()?;
         if *c == b'-' {
             negative = true;
@@ -296,7 +294,6 @@ impl<'a> Parser<'a> {
             self.step();
         }
 
-        // ignore leading zeros
         loop {
             if self.check_next(b'0') {
                 self.step();
@@ -309,13 +306,9 @@ impl<'a> Parser<'a> {
 
         let mut value = 0_i128;
         let mut scale = 0_i32;
-        let mut exp = 0_i32;
-        let mut exp_overflow = false;
         let mut fraction_offset = None;
-        let mut exponent_offset = None;
-
+        let mut has_exponent = false;
         let mut precision = 0;
-        // First try to parse as i128, avoiding multiple traversals
         while precision < MAX_DECIMAL128_PRECISION {
             if self.check_digit() {
                 let digit = (self.buf[self.idx] - b'0') as i128;
@@ -324,7 +317,6 @@ impl<'a> Parser<'a> {
                 value = unsafe { value.unchecked_add(digit) };
                 self.step();
             } else if self.check_next(b'.') {
-                // duplicate dot
                 if fraction_offset.is_some() {
                     return Err(self.error(ParseErrorCode::InvalidNumberValue));
                 }
@@ -340,84 +332,39 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // If precision exceeds i128 max value, continue parsing to collect fraction_offset and exponent_offset
-        if fraction_offset.is_none() {
-            // Process integer part
-            let len = self.step_digits();
-            precision += len;
-            if self.check_next(b'.') {
-                fraction_offset = Some(self.idx);
-                self.step();
-            }
-        }
-        if fraction_offset.is_some() {
-            let len = self.step_digits();
-            precision += len;
-            scale += len as i32;
-        }
-
-        // Process exponent data
-        if self.check_next_either(b'E', b'e') {
-            exponent_offset = Some(self.idx);
-            self.step();
-            let mut exp_negative = false;
-            let c = self.next()?;
-            if *c == b'-' {
-                exp_negative = true;
-                self.step();
-            } else if *c == b'+' {
-                self.step();
-            }
-            let mut i = 0;
-            while i < MAX_EXPONENT_PRECISION {
-                if self.check_digit() {
-                    let digit = (self.buf[self.idx] - b'0') as i32;
-
-                    exp = unsafe { exp.unchecked_mul(10_i32) };
-                    exp = unsafe { exp.unchecked_add(digit) };
+        if precision == MAX_DECIMAL128_PRECISION {
+            if fraction_offset.is_none() {
+                let len = self.step_digits();
+                precision += len;
+                if self.check_next(b'.') {
+                    fraction_offset = Some(self.idx);
                     self.step();
-                } else {
-                    break;
                 }
-                i += 1;
             }
-            if i == 0 {
-                return Err(self.error(ParseErrorCode::InvalidNumberValue));
-            } else if i < MAX_EXPONENT_PRECISION {
-                if exp_negative {
-                    exp = exp.checked_neg().unwrap();
-                }
-            } else {
-                exp_overflow = true;
-                loop {
-                    if self.check_digit() {
-                        self.step();
-                    } else {
-                        break;
-                    }
-                }
+                if fraction_offset.is_some() {
+                let len = self.step_digits();
+                precision += len;
+                scale += len as i32;
             }
         }
 
-        // Calculate correct scale and exponent values
-        let (new_scale, exp) = if scale >= exp {
-            ((scale - exp), 0)
-        } else {
-            (0, (exp - scale) as u32)
-        };
-        precision += exp as usize;
-        scale = new_scale;
-
-        // First try to parse as i128 (Decimal128)
-        if !exp_overflow && precision <= MAX_DECIMAL128_PRECISION {
-            if exp > 0 {
-                value = unsafe { value.unchecked_mul(10_i128.pow(exp)) };
+        if self.check_next_either(b'E', b'e') {
+            has_exponent = true;
+            self.step();
+            if self.check_next_either(b'+', b'-') {
+                self.step();
             }
+            let len = self.step_digits();
+            if len == 0 {
+                return Err(self.error(ParseErrorCode::InvalidNumberValue));
+            }
+        }
+
+        if !has_exponent && precision <= MAX_DECIMAL128_PRECISION {
             if negative {
                 value = value.checked_neg().unwrap();
             }
 
-            // Prioritize integer types when possible
             if scale == 0 && value >= UINT64_MIN && value <= UINT64_MAX {
                 return Ok(Value::Number(Number::UInt64(u64::try_from(value).unwrap())));
             } else if scale == 0 && value >= INT64_MIN && value <= INT64_MAX {
@@ -438,40 +385,35 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // If higher precision is needed, try to parse as i256 (Decimal256)
-        if !exp_overflow && precision <= MAX_DECIMAL256_PRECISION {
-            let exp_idx = exponent_offset.unwrap_or(self.idx);
+        if !has_exponent && precision <= MAX_DECIMAL256_PRECISION {
+            let end_idx = self.idx;
 
-            // For i256, we still need to parse through string, as there's no direct byte-to-i256 conversion
             let digit_str = if let Some(frac_idx) = fraction_offset {
-                let digit_len = exp_idx - num_start_idx - 1;
+                let digit_len = end_idx - num_start_idx - 1;
                 let mut s = String::with_capacity(digit_len);
                 s.push_str(unsafe {
                     std::str::from_utf8_unchecked(&self.buf[num_start_idx..frac_idx])
                 });
                 s.push_str(unsafe {
-                    std::str::from_utf8_unchecked(&self.buf[frac_idx + 1..exp_idx])
+                    std::str::from_utf8_unchecked(&self.buf[frac_idx + 1..end_idx])
                 });
                 s
             } else {
-                unsafe { std::str::from_utf8_unchecked(&self.buf[num_start_idx..exp_idx]) }
+                unsafe { std::str::from_utf8_unchecked(&self.buf[num_start_idx..end_idx]) }
                     .to_string()
             };
 
-            if let Ok(value) = i256::from_str(&digit_str) {
-                if let Some(mut value) = value.checked_mul(i256::from(10).pow(exp)) {
-                    if negative {
-                        value = value.checked_neg().unwrap();
-                    }
-                    return Ok(Value::Number(Number::Decimal256(Decimal256 {
-                        scale: scale as u8,
-                        value,
-                    })));
+            if let Ok(mut value) = i256::from_str(&digit_str) {
+                if negative {
+                    value = value.checked_neg().unwrap();
                 }
+                return Ok(Value::Number(Number::Decimal256(Decimal256 {
+                    scale: scale as u8,
+                    value,
+                })));
             }
         }
 
-        // Finally try to parse as floating point
         let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
         match fast_float2::parse(s) {
             Ok(v) => Ok(Value::Number(Number::Float64(v))),
@@ -597,3 +539,72 @@ impl<'a> Parser<'a> {
         Ok(Value::Object(obj))
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use ethnum::i256;
+
+    fn string_strategy() -> impl Strategy<Value = String> {
+        let ascii = '!'..='~';
+        // CJK Unified Ideographs
+        let cjk = '\u{4E00}'..='\u{9FFF}';
+
+        let chars: Vec<char> = ascii.chain(cjk).collect();
+        prop::collection::vec(prop::sample::select(chars), 1..30).prop_map(|v| v.into_iter().collect())
+    }
+
+    fn json_strategy() -> impl Strategy<Value = Value<'static>> {
+        let leaf = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::Bool),
+            any::<u64>().prop_map(|v| Value::Number(Number::UInt64(v))),
+            any::<i64>().prop_map(|v| Value::Number(Number::Int64(v))),
+            any::<f64>().prop_filter("Exclude -0.0", |x| *x != -0.0).prop_map(|v| Value::Number(Number::Float64(v))),
+            (0u8..19u8, any::<i64>()).prop_map(|(scale, value)| Value::Number(Number::Decimal64(Decimal64 { scale, value }))),
+            (0u8..39u8, any::<i128>()).prop_map(|(scale, value)| Value::Number(Number::Decimal128(Decimal128 { scale, value }))),
+            (0u8..77u8, any::<i128>(), any::<i128>()).prop_filter("Exclude big i256", 
+                |(_, hi, lo)| {
+                    let val = i256::from_words(*hi, *lo);
+                    val >= ethnum::int!("-9999999999999999999999999999999999999999999999999999999999999999999999999999") &&
+                    val <= ethnum::int!("9999999999999999999999999999999999999999999999999999999999999999999999999999")
+                })
+            .prop_map(|(scale, hi, lo)| Value::Number(Number::Decimal256(Decimal256 { scale, value: i256::from_words(hi, lo) }))),
+            string_strategy().prop_map(|v| Value::String(Cow::Owned(v))),
+        ];
+
+        leaf.prop_recursive(
+            8,
+            256,
+            30,
+            |inner| {
+                prop_oneof![
+                    prop::collection::vec(inner.clone(), 0..10).prop_map(Value::Array),
+                    prop::collection::btree_map(string_strategy(), inner, 0..20).prop_map(Value::Object),
+                ]
+            },
+        )
+    }
+
+    proptest! {
+        #[test]
+        fn test_json_parser(json in json_strategy()) {
+            let source = format!("{}", json);
+            println!("source={}", source);
+
+            let res1 = serde_json::from_slice::<serde_json::Value>(source.as_bytes());
+            let res2 = parse_value(source.as_bytes());
+            assert_eq!(res1.is_ok(), res2.is_ok());
+            if res2.is_ok() {
+                let new_json = res2.unwrap();
+                let result = format!("{}", new_json);
+                println!("result={}", result);
+                assert_eq!(source, result);
+            }
+        }
+    }
+}
+
+

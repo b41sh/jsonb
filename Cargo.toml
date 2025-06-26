@@ -46,6 +46,7 @@ json-deserializer = "0.4.4"
 simd-json = "0.15.0"
 mockalloc = "0.1.2"
 criterion = "0.5.1"
+proptest = "1.7"
 
 [features]
 default = ["databend", "serde_json/preserve_order"]
