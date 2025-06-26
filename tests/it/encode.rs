@@ -16,7 +16,8 @@ use std::borrow::Cow;
 
 use ethnum::I256;
 use jsonb::{
-    Date, Decimal64, Decimal128, Decimal256, Interval, Number, Object, Timestamp, TimestampTz, Value,
+    Date, Decimal128, Decimal256, Decimal64, Interval, Number, Object, Timestamp, TimestampTz,
+    Value,
 };
 
 #[test]

@@ -16,8 +16,8 @@ use std::borrow::Cow;
 
 use ethnum::I256;
 use jsonb::{
-    from_slice, Date, Decimal64, Decimal128, Decimal256, Interval, Number, Object, Timestamp, TimestampTz,
-    Value,
+    from_slice, Date, Decimal128, Decimal256, Decimal64, Interval, Number, Object, Timestamp,
+    TimestampTz, Value,
 };
 
 #[test]
@@ -143,7 +143,6 @@ fn test_decode_float64() {
         assert_eq!(value.as_f64().unwrap(), v);
     }
 }
-
 
 #[test]
 fn test_decode_deprected_decimal() {
@@ -277,4 +276,3 @@ fn test_decode_corrupted() {
     let value = from_slice(corrupted.as_slice());
     assert!(value.is_err());
 }
-
