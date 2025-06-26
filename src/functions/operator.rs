@@ -99,8 +99,9 @@ impl RawJsonb<'_> {
                     JsonbItem::Number(data) => {
                         let val = Number::decode(data)?;
                         match val {
-                            Number::Decimal128(_v) => Ok(TYPE_DECIMAL),
-                            Number::Decimal256(_v) => Ok(TYPE_DECIMAL),
+                            Number::Decimal64(_)
+                            | Number::Decimal128(_)
+                            | Number::Decimal256(_) => Ok(TYPE_DECIMAL),
                             _ => Ok(TYPE_NUMBER),
                         }
                     }

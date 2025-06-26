@@ -371,7 +371,7 @@ impl Number {
                     Number::Decimal128(dec)
                 }
                 18 => {
-                    // Compatible with deprecated Decimal256 formats, including precision
+                    // Compatible with deprecated Decimal128 formats, including precision
                     let value = i128::from_be_bytes(bytes[1..17].try_into().unwrap());
                     let scale = u8::from_be_bytes(bytes[18..19].try_into().unwrap());
                     let dec = Decimal128 { scale, value };
