@@ -33,56 +33,110 @@ use serde::ser::Serializer;
 
 const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
+/// Represents a decimal number with 64-bit precision.
+/// 
+/// This structure stores a decimal value as an integer with a scale factor,
+/// allowing for precise representation of decimal numbers without floating-point errors.
+/// The scale indicates how many decimal places the value has (e.g., scale=2 means 2 decimal places).
 #[derive(Debug, Clone)]
 pub struct Decimal64 {
+    /// Number of decimal places (e.g., 2 for values like 123.45)
     pub scale: u8,
+    /// The actual value, scaled by 10^scale (e.g., 12345 for 123.45 with scale=2)
     pub value: i64,
 }
 
 impl Decimal64 {
+    /// Converts the decimal value to a floating-point representation.
+    ///
+    /// This is useful when you need to perform floating-point operations,
+    /// but note that it may introduce precision loss inherent to floating-point arithmetic.
     pub fn to_float64(&self) -> f64 {
         let div = 10_f64.powi(self.scale as i32);
         self.value as f64 / div
     }
 }
 
+/// Represents a decimal number with 128-bit precision.
+///
+/// Similar to Decimal64 but with a larger range, this structure can represent
+/// very large decimal numbers with high precision, suitable for financial calculations
+/// and other domains requiring exact decimal arithmetic beyond 64-bit limits.
 #[derive(Debug, Clone)]
 pub struct Decimal128 {
+    /// Number of decimal places
     pub scale: u8,
+    /// The actual value, scaled by 10^scale
     pub value: i128,
 }
 
 impl Decimal128 {
+    /// Converts the decimal value to a floating-point representation.
+    ///
+    /// Note that for very large values, this conversion may lose precision
+    /// as f64 has limited precision compared to i128.
     pub fn to_float64(&self) -> f64 {
         let div = 10_f64.powi(self.scale as i32);
         self.value as f64 / div
     }
 }
 
+/// Represents a decimal number with 256-bit precision.
+///
+/// This structure provides the highest level of precision for decimal numbers,
+/// capable of representing extremely large values with exact decimal precision.
+/// Useful for cryptographic applications, high-precision scientific calculations,
+/// or any domain requiring arithmetic beyond 128-bit precision.
 #[derive(Debug, Clone)]
 pub struct Decimal256 {
+    /// Number of decimal places
     pub scale: u8,
+    /// The actual value, scaled by 10^scale
     pub value: i256,
 }
 
 impl Decimal256 {
+    /// Converts the decimal value to a floating-point representation.
+    ///
+    /// For extremely large values, significant precision loss may occur
+    /// as f64 has much lower precision than i256.
     pub fn to_float64(&self) -> f64 {
         let div = 10_f64.powi(self.scale as i32);
         self.value.as_f64() / div
     }
 }
 
+/// Represents a JSON number with multiple possible internal representations.
+///
+/// This enum provides a unified type for JSON numbers while supporting various
+/// internal representations to optimize for different use cases:
+/// - Integer types (signed/unsigned) for whole numbers
+/// - Floating-point for scientific notation or fractional values
+/// - Decimal types for exact decimal representation with different precision levels
+///
+/// The parser automatically selects the most appropriate representation based on
+/// the input value's characteristics, allowing for both performance and precision.
 #[derive(Debug, Clone)]
 pub enum Number {
+    /// 64-bit signed integer, suitable for most whole numbers
     Int64(i64),
+    /// 64-bit unsigned integer, for large positive whole numbers
     UInt64(u64),
+    /// 64-bit floating-point, for scientific notation and approximate decimals
     Float64(f64),
+    /// 64-bit decimal with exact precision, for financial calculations
     Decimal64(Decimal64),
+    /// 128-bit decimal with extended precision, for larger exact decimals
     Decimal128(Decimal128),
+    /// 256-bit decimal with maximum precision, for extremely large exact decimals
     Decimal256(Decimal256),
 }
 
 impl<'de> Deserialize<'de> for Number {
+    /// Deserializes a JSON number into the Number enum.
+    ///
+    /// This implementation supports deserialization from JSON integers and floats.
+    /// It automatically selects the most suitable internal representation based on the input value.
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -92,10 +146,12 @@ impl<'de> Deserialize<'de> for Number {
         impl Visitor<'_> for NumberVisitor {
             type Value = Number;
 
+            /// Returns a string describing the expected input format.
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a number (int64, uint64, or float64)")
             }
 
+            /// Visits an i64 value and returns a Number::Int64 variant.
             fn visit_i64<E>(self, v: i64) -> std::result::Result<Self::Value, E>
             where
                 E: de::Error,
@@ -103,6 +159,7 @@ impl<'de> Deserialize<'de> for Number {
                 Ok(Number::Int64(v))
             }
 
+            /// Visits a u64 value and returns a Number::UInt64 variant.
             fn visit_u64<E>(self, v: u64) -> std::result::Result<Self::Value, E>
             where
                 E: de::Error,
@@ -110,6 +167,7 @@ impl<'de> Deserialize<'de> for Number {
                 Ok(Number::UInt64(v))
             }
 
+            /// Visits an f64 value and returns a Number::Float64 variant.
             fn visit_f64<E>(self, v: f64) -> std::result::Result<Self::Value, E>
             where
                 E: de::Error,
@@ -122,6 +180,10 @@ impl<'de> Deserialize<'de> for Number {
 }
 
 impl Serialize for Number {
+    /// Serializes the Number enum into a JSON number.
+    ///
+    /// This implementation supports serialization to JSON integers and floats.
+    /// It automatically selects the most suitable output format based on the internal representation.
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -141,6 +203,9 @@ impl Serialize for Number {
 }
 
 impl Number {
+    /// Returns the i64 representation of the number, if possible.
+    ///
+    /// This method returns None if the number cannot be represented as an i64.
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             Number::Int64(v) => Some(*v),
@@ -158,6 +223,9 @@ impl Number {
         }
     }
 
+    /// Returns the u64 representation of the number, if possible.
+    ///
+    /// This method returns None if the number cannot be represented as a u64.
     pub fn as_u64(&self) -> Option<u64> {
         match self {
             Number::Int64(v) => {
@@ -175,6 +243,9 @@ impl Number {
         }
     }
 
+    /// Returns the f64 representation of the number.
+    ///
+    /// This method always returns a value, but may lose precision for very large numbers.
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Number::Int64(v) => Some(*v as f64),
@@ -195,6 +266,9 @@ impl Number {
         }
     }
 
+    /// Returns the negation of the number.
+    ///
+    /// This method returns an error if the negation would overflow.
     pub fn neg(&self) -> Result<Number> {
         match self {
             Number::Int64(v) => v
@@ -238,6 +312,9 @@ impl Number {
         }
     }
 
+    /// Returns the sum of the number and another number.
+    ///
+    /// This method returns an error if the sum would overflow.
     pub fn add(&self, other: Number) -> Result<Number> {
         match (self, other) {
             (Number::Int64(a), Number::Int64(b)) => a
@@ -281,6 +358,9 @@ impl Number {
         }
     }
 
+    /// Returns the difference of the number and another number.
+    ///
+    /// This method returns an error if the difference would overflow.
     pub fn sub(&self, other: Number) -> Result<Number> {
         match (self, other) {
             (Number::Int64(a), Number::Int64(b)) => a
@@ -308,6 +388,9 @@ impl Number {
         }
     }
 
+    /// Returns the product of the number and another number.
+    ///
+    /// This method returns an error if the product would overflow.
     pub fn mul(&self, other: Number) -> Result<Number> {
         match (self, other) {
             (Number::Int64(a), Number::Int64(b)) => a
@@ -351,6 +434,9 @@ impl Number {
         }
     }
 
+    /// Returns the quotient of the number and another number.
+    ///
+    /// This method returns an error if the divisor is zero.
     pub fn div(&self, other: Number) -> Result<Number> {
         let a_float = self.as_f64().unwrap();
         let b_float = other.as_f64().unwrap();
@@ -360,6 +446,9 @@ impl Number {
         Ok(Number::Float64(a_float / b_float))
     }
 
+    /// Returns the remainder of the number divided by another number.
+    ///
+    /// This method returns an error if the divisor is zero.
     pub fn rem(&self, other: Number) -> Result<Number> {
         match (self, other) {
             (Number::Int64(a), Number::Int64(b)) => {
@@ -427,6 +516,9 @@ impl Number {
 }
 
 impl Default for Number {
+    /// Returns the default value for the Number enum.
+    ///
+    /// The default value is Number::UInt64(0).
     #[inline]
     fn default() -> Self {
         Number::UInt64(0)
@@ -434,6 +526,9 @@ impl Default for Number {
 }
 
 impl PartialEq for Number {
+    /// Returns true if the number is equal to another number.
+    ///
+    /// This method compares the numbers using their internal representations.
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
@@ -441,6 +536,9 @@ impl PartialEq for Number {
 }
 
 impl PartialEq<&Number> for Number {
+    /// Returns true if the number is equal to another number.
+    ///
+    /// This method compares the numbers using their internal representations.
     #[inline]
     fn eq(&self, other: &&Number) -> bool {
         self.eq(*other)
@@ -448,6 +546,9 @@ impl PartialEq<&Number> for Number {
 }
 
 impl PartialEq<Number> for &Number {
+    /// Returns true if the number is equal to another number.
+    ///
+    /// This method compares the numbers using their internal representations.
     #[inline]
     fn eq(&self, other: &Number) -> bool {
         (*self).eq(other)
@@ -457,6 +558,9 @@ impl PartialEq<Number> for &Number {
 impl Eq for Number {}
 
 impl PartialOrd for Number {
+    /// Returns the ordering of the number compared to another number.
+    ///
+    /// This method compares the numbers using their internal representations.
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -464,6 +568,9 @@ impl PartialOrd for Number {
 }
 
 impl PartialOrd<&Number> for Number {
+    /// Returns the ordering of the number compared to another number.
+    ///
+    /// This method compares the numbers using their internal representations.
     #[inline]
     fn partial_cmp(&self, other: &&Number) -> Option<Ordering> {
         self.partial_cmp(*other)
@@ -471,6 +578,9 @@ impl PartialOrd<&Number> for Number {
 }
 
 impl PartialOrd<Number> for &Number {
+    /// Returns the ordering of the number compared to another number.
+    ///
+    /// This method compares the numbers using their internal representations.
     #[inline]
     fn partial_cmp(&self, other: &Number) -> Option<Ordering> {
         (*self).partial_cmp(other)
@@ -478,6 +588,9 @@ impl PartialOrd<Number> for &Number {
 }
 
 impl Ord for Number {
+    /// Returns the ordering of the number compared to another number.
+    ///
+    /// This method compares the numbers using their internal representations.
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
@@ -507,6 +620,9 @@ impl Ord for Number {
 }
 
 impl Display for Number {
+    /// Formats the number as a string.
+    ///
+    /// This method returns a string representation of the number in its internal format.
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
             Number::Int64(v) => {

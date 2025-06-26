@@ -390,18 +390,35 @@ impl<'a> Value<'a> {
                 let s = Alphanumeric.sample_string(&mut rng, 5);
                 Value::String(Cow::from(s))
             }
-            2 => match rng.random_range(0..=2) {
+            2 => match rng.random_range(0..=5) {
                 0 => {
-                    let n: u64 = rng.random_range(0..=100000);
+                    let n: u64 = rng.random_range(u64::MIN..=u64::MAX);
                     Value::Number(Number::UInt64(n))
                 }
                 1 => {
-                    let n: i64 = rng.random_range(-100000..=100000);
+                    let n: i64 = rng.random_range(i64::MIN..=i64::MAX);
                     Value::Number(Number::Int64(n))
                 }
-                _ => {
-                    let n: f64 = rng.random_range(-4000.0..1.3e5);
+                2 => {
+                    let n: f64 = rng.random_range(f64::MIN..=f64::MAX);
                     Value::Number(Number::Float64(n))
+                }
+                3 => {
+                    let scale: u8 = rng.random_range(0..=18);
+                    let value: i64 = rng.random_range(-999999999999999999..=999999999999999999);
+                    Value::Number(Number::Decimal64(Decimal64 { scale, value })))
+                }
+                4 => {
+                    let scale: u8 = rng.random_range(0..=38);
+                    let value: i128 = rng.random_range(-99999999999999999999999999999999999999i128..=99999999999999999999999999999999999999i128);
+                    Value::Number(Number::Decimal128(Decimal128 { scale, value })))
+                }
+                _ => {
+                    let scale: u8 = rng.random_range(0..=76);
+                    let lo: i128 = rng.random_range(0i128..=99999999999999999999999999999999999999i128);
+                    let hi: i128 = rng.random_range(-99999999999999999999999999999999999999i128..=99999999999999999999999999999999999999i128);
+                    let value = ethnum::i256::from_words(hi, lo);
+                    Value::Number(Number::Decimal256(Decimal256 { scale, value })))
                 }
             },
             _ => Value::Null,
