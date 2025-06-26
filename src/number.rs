@@ -609,9 +609,15 @@ impl Ord for Number {
                     l.value.cmp(&r.value)
                 } else {
                     // Adjust scales to match for proper comparison
-                    let (l_val, r_val) =
-                        adjust_decimal_scales(l.value as i128, l.scale, r.value as i128, r.scale);
-                    l_val.cmp(&r_val)
+                    if let Some((l_val, r_val)) =
+                        adjust_decimal_scales(l.value as i128, l.scale, r.value as i128, r.scale)
+                    {
+                        l_val.cmp(&r_val)
+                    } else {
+                        let l = OrderedFloat(self.as_f64().unwrap());
+                        let r = OrderedFloat(other.as_f64().unwrap());
+                        l.cmp(&r)
+                    }
                 }
             }
             (Number::Decimal128(l), Number::Decimal128(r)) => {
@@ -620,8 +626,15 @@ impl Ord for Number {
                     l.value.cmp(&r.value)
                 } else {
                     // Adjust scales to match for proper comparison
-                    let (l_val, r_val) = adjust_decimal_scales(l.value, l.scale, r.value, r.scale);
-                    l_val.cmp(&r_val)
+                    if let Some((l_val, r_val)) =
+                        adjust_decimal_scales(l.value, l.scale, r.value, r.scale)
+                    {
+                        l_val.cmp(&r_val)
+                    } else {
+                        let l = OrderedFloat(self.as_f64().unwrap());
+                        let r = OrderedFloat(other.as_f64().unwrap());
+                        l.cmp(&r)
+                    }
                 }
             }
             (Number::Decimal256(l), Number::Decimal256(r)) => {
@@ -634,14 +647,20 @@ impl Ord for Number {
                     if scale_diff > 0 {
                         // l has more decimal places, scale up r
                         let scale_factor = i256::from(10).pow(scale_diff as u32);
-                        let scaled_r = r.value * scale_factor;
-                        l.value.cmp(&scaled_r)
+                        if let Some(r_val) = r.value.checked_mul(scale_factor) {
+                            return l.value.cmp(&r_val);
+                        }
                     } else {
                         // r has more decimal places, scale up l
                         let scale_factor = i256::from(10).pow((-scale_diff) as u32);
-                        let scaled_l = l.value * scale_factor;
-                        scaled_l.cmp(&r.value)
+                        if let Some(l_val) = l.value.checked_mul(scale_factor) {
+                            return l_val.cmp(&r.value);
+                        }
                     }
+                    // multiply overflow, fallback to used float compare
+                    let l = OrderedFloat(self.as_f64().unwrap());
+                    let r = OrderedFloat(other.as_f64().unwrap());
+                    l.cmp(&r)
                 }
             }
 
@@ -847,23 +866,30 @@ impl Ord for Number {
 ///
 /// Given two decimal values with potentially different scales,
 /// this function adjusts them to have the same scale for accurate comparison.
-fn adjust_decimal_scales(l_val: i128, l_scale: u8, r_val: i128, r_scale: u8) -> (i128, i128) {
+fn adjust_decimal_scales(
+    l_val: i128,
+    l_scale: u8,
+    r_val: i128,
+    r_scale: u8,
+) -> Option<(i128, i128)> {
     let scale_diff = l_scale as i32 - r_scale as i32;
 
     match scale_diff.cmp(&0) {
         Ordering::Greater => {
             // l has more decimal places, scale up r
             let scale_factor = 10_i128.pow(scale_diff as u32);
-            (l_val, r_val * scale_factor)
+            let r_val = r_val.checked_mul(scale_factor)?;
+            Some((l_val, r_val))
         }
         Ordering::Less => {
             // r has more decimal places, scale up l
             let scale_factor = 10_i128.pow((-scale_diff) as u32);
-            (l_val * scale_factor, r_val)
+            let l_val = l_val.checked_mul(scale_factor)?;
+            Some((l_val, r_val))
         }
         Ordering::Equal => {
             // Same scale, no adjustment needed
-            (l_val, r_val)
+            Some((l_val, r_val))
         }
     }
 }
