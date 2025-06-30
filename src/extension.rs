@@ -17,15 +17,9 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-//use jiff::civil::date;
-//use jiff::fmt::strtime;
-//use jiff::tz::Offset;
-//use jiff::SignedDuration;
-
-use chrono::NaiveDate;
-use chrono_tz::Tz;
 use chrono::Duration;
 use chrono::TimeZone;
+use chrono_tz::Tz;
 
 const MICROS_PER_SEC: i64 = 1_000_000;
 const MICROS_PER_MINUTE: i64 = 60 * MICROS_PER_SEC;
@@ -107,8 +101,6 @@ pub struct Interval {
     pub micros: i64,
 }
 
-const DATE_FORMAT: &str = "%Y-%m-%d";
-
 impl Display for Date {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         let value = self.value as i64;
@@ -135,10 +127,10 @@ impl Display for Timestamp {
             secs = -377705023201;
             nanos = 0;
         }
-        //let ts = jiff::Timestamp::new(secs, nanos as i32).unwrap();
 
-        //write!(f, "{}", strtime::format(TIMESTAMP_FORMAT, ts).unwrap())
-        todo!()
+        let tz = Tz::default();
+        let ts = tz.timestamp_opt(secs, nanos as u32).unwrap();
+        write!(f, "{}", ts.format(TIMESTAMP_FORMAT))
     }
 }
 
@@ -158,12 +150,10 @@ impl Display for TimestampTz {
             secs = -377705023201;
             nanos = 0;
         }
-        //let ts = jiff::Timestamp::new(secs, nanos as i32).unwrap();
-        //let tz = Offset::constant(self.offset).to_time_zone();
-        //let zoned = ts.to_zoned(tz);
-
-        //write!(f, "{}", strtime::format(TIMESTAMP_FORMAT, &zoned).unwrap())
-        todo!()
+        // ignore Tz
+        let tz = Tz::default();
+        let ts = tz.timestamp_opt(secs, nanos as u32).unwrap();
+        write!(f, "{}", ts.format(TIMESTAMP_FORMAT))
     }
 }
 
