@@ -445,46 +445,45 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Handle numbers that exceed MAX_DECIMAL128_PRECISION
         if precision == MAX_DECIMAL128_PRECISION {
-            let hi_value = unsafe { value.unchecked_mul(MAX_DECIMAL128_PRECISION as i128) };
             let mut lo_value = 0_i128;
             while precision < MAX_DECIMAL256_PRECISION {
                 if self.check_digit() {
-                    // Parse digit and accumulate value
                     let digit = (self.buf[self.idx] - b'0') as i128;
 
-                    // Use unchecked operations for performance (we control precision limits)
-                    //(i256_value, _) = i256_value.overflowing_mul(i256::from(10));
-                    //(i256_value, _) = i256_value.overflowing_add(i256::from(digit));
                     lo_value = unsafe { lo_value.unchecked_mul(10_i128) };
                     lo_value = unsafe { lo_value.unchecked_add(digit) };
                     self.step();
                 } else if self.check_next(b'.') {
-                    // Handle decimal point - can only appear once
                     if fraction_offset.is_some() {
                         return Err(self.error(ParseErrorCode::InvalidNumberValue));
                     }
                     fraction_offset = Some(self.idx);
                     self.step();
-                    // Continue to next iteration without incrementing precision
                     continue;
                 } else {
-                    // Not a digit or decimal point, exit the parsing loop
                     break;
                 }
                 precision += 1;
-                // Track scale (number of digits after decimal point)
                 if fraction_offset.is_some() {
                     scale += 1;
                 }
             }
-            let hi_value = i256::from(hi_value);
-            let lo_value = i256::from(lo_value);
-            (i256_value, _) = hi_value.overflowing_add(lo_value);
+            if precision > MAX_DECIMAL128_PRECISION {
+                println!("\n--precision={:?}", precision);
+                let (multiplier, _) = i256::from(10).overflowing_pow((precision - MAX_DECIMAL128_PRECISION) as u32);
+                println!("multiplier={:?}", multiplier);
+                println!("value={:?}", value);
+                let (hi_value, _) = i256::from(value).overflowing_mul(multiplier);
+                println!("hi_value={:?}", hi_value);
+                let lo_value = i256::from(lo_value);
+                println!("low_value={:?}", lo_value);
+                (i256_value, _) = hi_value.overflowing_add(lo_value);
+                println!("i256_value={:?}", i256_value);
+            }
         }
 
-        // Handle numbers that exceed MAX_DECIMAL128_PRECISION
+        // Handle numbers that exceed MAX_DECIMAL256_PRECISION
         if precision == MAX_DECIMAL256_PRECISION {
             // If we haven't seen a decimal point yet, continue parsing integer part
             if fraction_offset.is_none() {
@@ -781,22 +780,53 @@ mod tests {
             .prop_map(|v| v.into_iter().collect())
     }
 
-    fn json_strategy() -> impl Strategy<Value = Value<'static>> {
-        let leaf = prop_oneof![
-            Just(Value::Null),
-            any::<bool>().prop_map(Value::Bool),
-            any::<u64>().prop_map(|v| Value::Number(Number::UInt64(v))),
-            any::<i64>().prop_map(|v| Value::Number(Number::Int64(v))),
-            any::<f64>().prop_filter("Exclude -0.0", |x| *x != -0.0).prop_map(|v| Value::Number(Number::Float64(v))),
-            (0u8..19u8, any::<i64>()).prop_map(|(scale, value)| Value::Number(Number::Decimal64(Decimal64 { scale, value }))),
-            (0u8..39u8, any::<i128>()).prop_map(|(scale, value)| Value::Number(Number::Decimal128(Decimal128 { scale, value }))),
-            (0u8..77u8, any::<i128>(), any::<i128>()).prop_filter("Exclude big i256",
+    fn standard_number_strategy() -> impl Strategy<Value = Number> {
+        prop_oneof![
+            any::<u64>().prop_map(|v| Number::UInt64(v)),
+            any::<i64>().prop_map(|v| Number::Int64(v)),
+            any::<f64>().prop_filter("Exclude -0.0", |x| *x != -0.0).prop_map(|v| Number::Float64(v)),
+        ]
+    }
+
+    fn number_strategy() -> impl Strategy<Value = Number> {
+        prop_oneof![
+            any::<u64>().prop_map(|v| Number::UInt64(v)),
+            any::<i64>().prop_map(|v| Number::Int64(v)),
+            any::<f64>().prop_filter("Exclude -0.0", |x| *x != -0.0).prop_map(|v| Number::Float64(v)),
+            (0u8..=18u8, any::<i64>()).prop_map(|(scale, value)| Number::Decimal64(Decimal64 { scale, value })),
+            (0u8..=38u8, any::<i128>()).prop_map(|(scale, value)| Number::Decimal128(Decimal128 { scale, value })),
+            (0u8..=76u8, any::<i128>(), any::<i128>()).prop_filter("Exclude big i256",
                 |(_, hi, lo)| {
                     let val = i256::from_words(*hi, *lo);
                     val >= ethnum::int!("-9999999999999999999999999999999999999999999999999999999999999999999999999999") &&
                     val <= ethnum::int!("9999999999999999999999999999999999999999999999999999999999999999999999999999")
                 })
-            .prop_map(|(scale, hi, lo)| Value::Number(Number::Decimal256(Decimal256 { scale, value: i256::from_words(hi, lo) }))),
+            .prop_map(|(scale, hi, lo)| Number::Decimal256(Decimal256 { scale, value: i256::from_words(hi, lo) })),
+        ]
+    }
+
+    fn json_strategy() -> impl Strategy<Value = Value<'static>> {
+        let leaf = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::Bool),
+            number_strategy().prop_map(|v| Value::Number(v)),
+            string_strategy().prop_map(|v| Value::String(Cow::Owned(v))),
+        ];
+
+        leaf.prop_recursive(8, 256, 30, |inner| {
+            prop_oneof![
+                prop::collection::vec(inner.clone(), 0..10).prop_map(Value::Array),
+                prop::collection::btree_map(string_strategy(), inner, 0..20)
+                    .prop_map(Value::Object),
+            ]
+        })
+    }
+
+    fn standard_json_strategy() -> impl Strategy<Value = Value<'static>> {
+        let leaf = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::Bool),
+            standard_number_strategy().prop_map(|v| Value::Number(v)),
             string_strategy().prop_map(|v| Value::String(Cow::Owned(v))),
         ];
 
@@ -818,9 +848,25 @@ mod tests {
             let res1 = serde_json::from_slice::<serde_json::Value>(source.as_bytes());
             let res2 = parse_value(source.as_bytes());
             assert_eq!(res1.is_ok(), res2.is_ok());
-            if res2.is_ok() {
-                let new_json = res2.unwrap();
-                let result = format!("{}", new_json);
+            if let Ok(res2) = res2 {
+                let result = format!("{}", res2);
+                println!("result={}", result);
+                assert_eq!(source, result);
+            }
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn test_standard_json_parser(json in standard_json_strategy()) {
+            let source = format!("{}", json);
+            println!("source={}", source);
+
+            let res1 = serde_json::from_slice::<serde_json::Value>(source.as_bytes());
+            let res2 = parse_value_with_options(source.as_bytes(), true);
+            assert_eq!(res1.is_ok(), res2.is_ok());
+            if let Ok(res2) = res2 {
+                let result = format!("{}", res2);
                 println!("result={}", result);
                 assert_eq!(source, result);
             }
