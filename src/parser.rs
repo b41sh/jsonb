@@ -447,15 +447,18 @@ impl<'a> Parser<'a> {
 
         // Handle numbers that exceed MAX_DECIMAL128_PRECISION
         if precision == MAX_DECIMAL128_PRECISION {
-            i256_value = i256::from(value);
+            let hi_value = unsafe { value.unchecked_mul(MAX_DECIMAL128_PRECISION as i128) };
+            let mut lo_value = 0_i128;
             while precision < MAX_DECIMAL256_PRECISION {
                 if self.check_digit() {
                     // Parse digit and accumulate value
-                    let digit = (self.buf[self.idx] - b'0') as u8;
+                    let digit = (self.buf[self.idx] - b'0') as i128;
 
                     // Use unchecked operations for performance (we control precision limits)
-                    (i256_value, _) = i256_value.overflowing_mul(i256::from(10));
-                    (i256_value, _) = i256_value.overflowing_add(i256::from(digit));
+                    //(i256_value, _) = i256_value.overflowing_mul(i256::from(10));
+                    //(i256_value, _) = i256_value.overflowing_add(i256::from(digit));
+                    lo_value = unsafe { lo_value.unchecked_mul(10_i128) };
+                    lo_value = unsafe { lo_value.unchecked_add(digit) };
                     self.step();
                 } else if self.check_next(b'.') {
                     // Handle decimal point - can only appear once
@@ -476,6 +479,9 @@ impl<'a> Parser<'a> {
                     scale += 1;
                 }
             }
+            let hi_value = i256::from(hi_value);
+            let lo_value = i256::from(lo_value);
+            (i256_value, _) = hi_value.overflowing_add(lo_value);
         }
 
         // Handle numbers that exceed MAX_DECIMAL128_PRECISION
