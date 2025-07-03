@@ -401,194 +401,6 @@ impl<'a> Parser<'a> {
 
         // Initialize parsing state
         let mut value = 0_i128; // Accumulates the numeric value
-        let mut scale = 0_u32; // Tracks decimal places
-        let mut fraction_offset = None; // Position of decimal point, if any
-        let mut has_exponent = false; // Whether the number has an exponent part
-        let mut precision = 0; // Count of significant digits
-
-        // First parsing strategy: Try to parse as i128 with precision limit
-        while precision < MAX_DECIMAL128_PRECISION {
-            if self.check_digit() {
-                // Parse digit and accumulate value
-                let digit = (self.buf[self.idx] - b'0') as i128;
-
-                // Use unchecked operations for performance (we control precision limits)
-                value = unsafe { value.unchecked_mul(10_i128) };
-                value = unsafe { value.unchecked_add(digit) };
-                self.step();
-            } else if self.check_next(b'.') {
-                // Handle decimal point - can only appear once
-                if fraction_offset.is_some() {
-                    return Err(self.error(ParseErrorCode::InvalidNumberValue));
-                }
-                fraction_offset = Some(self.idx);
-                self.step();
-                // Continue to next iteration without incrementing precision
-                continue;
-            } else {
-                // Not a digit or decimal point, exit the parsing loop
-                break;
-            }
-            precision += 1;
-            // Track scale (number of digits after decimal point)
-            if fraction_offset.is_some() {
-                scale += 1;
-            }
-        }
-
-        // Handle numbers that exceed MAX_DECIMAL128_PRECISION
-        if precision == MAX_DECIMAL128_PRECISION {
-            // If we haven't seen a decimal point yet, continue parsing integer part
-            if fraction_offset.is_none() {
-                let len = self.step_digits();
-                precision += len;
-                if self.check_next(b'.') {
-                    fraction_offset = Some(self.idx);
-                    self.step();
-                }
-            }
-            // Parse fractional part if decimal point exists
-            if fraction_offset.is_some() {
-                let len = self.step_digits();
-                precision += len;
-                scale += len as u32;
-            }
-        }
-
-        // Handle empty precision
-        if !leading_zeros && precision == 0 {
-            return Err(self.error(ParseErrorCode::ExpectedSomeValue));
-        }
-        // Handle exponent notation (e.g., 1e10, 1.5E-7)
-        if self.check_next_either(b'E', b'e') {
-            has_exponent = true;
-            self.step();
-            // Handle exponent sign
-            if self.check_next_either(b'+', b'-') {
-                self.step();
-            }
-            // Parse exponent digits
-            let len = self.step_digits();
-            if len == 0 {
-                return Err(self.error(ParseErrorCode::InvalidNumberValue));
-            }
-        }
-
-        // If no exponent and precision is within limits, try to return the most appropriate numeric type
-        if !has_exponent && precision <= MAX_DECIMAL128_PRECISION {
-            // Apply sign
-            if negative {
-                value = value.checked_neg().unwrap();
-            }
-
-            // Try to fit the value into the most appropriate numeric type
-            if scale == 0 && (UINT64_MIN..=UINT64_MAX).contains(&value) {
-                return Ok(Value::Number(Number::UInt64(u64::try_from(value).unwrap())));
-            } else if scale == 0 && (INT64_MIN..=INT64_MAX).contains(&value) {
-                return Ok(Value::Number(Number::Int64(i64::try_from(value).unwrap())));
-            } else if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&value)
-                && precision <= MAX_DECIMAL64_PRECISION
-            {
-                return Ok(Value::Number(Number::Decimal64(Decimal64 {
-                    scale: scale as u8,
-                    value: i64::try_from(value).unwrap(),
-                })));
-            } else if (DECIMAL128_MIN..=DECIMAL128_MAX).contains(&value) {
-                return Ok(Value::Number(Number::Decimal128(Decimal128 {
-                    scale: scale as u8,
-                    value,
-                })));
-            }
-        }
-
-        // Second parsing strategy: Try to parse as i256 for very large numbers
-        if !has_exponent && precision <= MAX_DECIMAL256_PRECISION {
-            let end_idx = self.idx;
-
-            // Reconstruct the string representation without the decimal point
-            let digit_str = if let Some(frac_idx) = fraction_offset {
-                let digit_len = end_idx - num_start_idx - 1;
-                let mut s = String::with_capacity(digit_len);
-                s.push_str(unsafe {
-                    std::str::from_utf8_unchecked(&self.buf[num_start_idx..frac_idx])
-                });
-                s.push_str(unsafe {
-                    std::str::from_utf8_unchecked(&self.buf[frac_idx + 1..end_idx])
-                });
-                s
-            } else {
-                unsafe { std::str::from_utf8_unchecked(&self.buf[num_start_idx..end_idx]) }
-                    .to_string()
-            };
-
-            // Try to parse as i256
-            if let Ok(mut value) = i256::from_str(&digit_str) {
-                if negative {
-                    value = value.checked_neg().unwrap();
-                }
-                return Ok(Value::Number(Number::Decimal256(Decimal256 {
-                    scale: scale as u8,
-                    value,
-                })));
-            }
-        }
-
-        // Final fallback strategy: Parse as Float64 using fast_float2 library
-        // This handles cases like scientific notation and very large/small numbers
-        let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
-        match fast_float2::parse(s) {
-            Ok(v) => Ok(Value::Number(Number::Float64(v))),
-            Err(_) => Err(self.error(ParseErrorCode::InvalidNumberValue)),
-        }
-    }
-
-    /// Parse a JSON number using a single-pass approach with multiple fallback strategies.
-    ///
-    /// This function implements a high-performance JSON number parsing algorithm that:
-    /// 1. First attempts to parse the number as an i128 (for Decimal128/Int64/UInt64)
-    /// 2. Falls back to i256 (for Decimal256) if precision exceeds i128 capacity
-    /// 3. Finally falls back to Float64 if all other methods fail
-    ///
-    /// Extended JSON number syntax support:
-    /// - Leading plus sign (e.g., +123) which standard JSON doesn't allow
-    /// - Multiple leading zeros (e.g., 000123) which standard JSON doesn't allow
-    /// - Decimal point without preceding digits (e.g., .123) which standard JSON requires at least one digit before decimal
-    /// - Decimal point without any digits (e.g., 123.) which standard JSON requires at least one digit after decimal
-    fn parse_json_number(&mut self) -> Result<Value<'a>> {
-        // Store the starting position for potential fallback parsing
-        let start_idx = self.idx;
-        let mut negative = false;
-
-        // Handle sign prefix (+ or -), extending JSON to support leading plus sign
-        let c = self.next()?;
-        if *c == b'-' {
-            negative = true;
-            self.step();
-        } else if *c == b'+' {
-            self.step();
-        }
-
-        // Extended syntax: Support for multiple leading zeros (e.g., 000123)
-        let mut leading_zero_count = 0;
-        loop {
-            if self.check_next(b'0') {
-                leading_zero_count += 1;
-                self.step();
-            } else {
-                break;
-            }
-        }
-        
-        // In strict mode, only one leading zero is allowed before a decimal point or another digit
-        if self.strict_mode && leading_zero_count > 1 && self.check_digit() {
-            return Err(self.error(ParseErrorCode::InvalidNumberValue));
-        }
-
-        // Mark the position where actual digits start (after sign and leading zeros)
-        let num_start_idx = self.idx;
-
-        // Initialize parsing state
-        let mut value = 0_i128; // Accumulates the numeric value
         let mut i256_value = i256::ZERO;
         let mut scale = 0_u32; // Tracks decimal places
         let mut fraction_offset = None; // Position of decimal point, if any
@@ -658,7 +470,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Handle numbers that exceed MAX_DECIMAL256_PRECISION
+        // Handle numbers that exceed MAX_DECIMAL128_PRECISION
         if precision == MAX_DECIMAL256_PRECISION {
             // If we haven't seen a decimal point yet, continue parsing integer part
             if fraction_offset.is_none() {
@@ -678,11 +490,7 @@ impl<'a> Parser<'a> {
         }
 
         // Handle empty precision
-        if leading_zero_count == 0 && precision == 0 {
-            // In strict mode, a decimal point must have digits on both sides
-            if self.strict_mode && fraction_offset.is_some() {
-                return Err(self.error(ParseErrorCode::InvalidNumberValue));
-            }
+        if !leading_zeros && precision == 0 {
             return Err(self.error(ParseErrorCode::ExpectedSomeValue));
         }
         // Handle exponent notation (e.g., 1e10, 1.5E-7)
