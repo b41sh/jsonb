@@ -24,8 +24,6 @@ use super::value::Object;
 use super::value::Value;
 use crate::core::Decoder;
 
-use std::str::FromStr;
-
 use crate::Decimal128;
 use crate::Decimal256;
 use crate::Decimal64;
@@ -106,11 +104,19 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(buf: &'a [u8]) -> Parser<'a> {
-        Self { buf, idx: 0, strict_mode: false }
+        Self {
+            buf,
+            idx: 0,
+            strict_mode: false,
+        }
     }
 
     fn new_with_options(buf: &'a [u8], strict_mode: bool) -> Parser<'a> {
-        Self { buf, idx: 0, strict_mode }
+        Self {
+            buf,
+            idx: 0,
+            strict_mode,
+        }
     }
 
     fn parse(&mut self) -> Result<Value<'a>> {
@@ -130,11 +136,13 @@ impl<'a> Parser<'a> {
             b'n' => self.parse_json_null(),
             b't' => self.parse_json_true(),
             b'f' => self.parse_json_false(),
-            b'0'..=b'9' | b'-' | b'+' | b'.' => if self.strict_mode {
-                self.parse_strict_json_number()
-            } else {
-                self.parse_json_number()
-            },
+            b'0'..=b'9' | b'-' | b'+' | b'.' => {
+                if self.strict_mode {
+                    self.parse_strict_json_number()
+                } else {
+                    self.parse_json_number()
+                }
+            }
             b'"' => self.parse_json_string(),
             b'[' => self.parse_json_array(),
             b'{' => self.parse_json_object(),
@@ -302,7 +310,7 @@ impl<'a> Parser<'a> {
         if *c == b'-' {
             negative = true;
             self.step();
-        } else if *c == b'+' || *c == '.' {
+        } else if *c == b'+' || *c == b'.' {
             self.step();
             return Err(self.error(ParseErrorCode::InvalidNumberValue));
         }
@@ -313,7 +321,7 @@ impl<'a> Parser<'a> {
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
             }
         } else {
-            let len = self.step_digits()?;
+            let len = self.step_digits();
             if len == 0 {
                 self.step();
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
@@ -322,7 +330,7 @@ impl<'a> Parser<'a> {
         if self.check_next(b'.') {
             has_fraction = true;
             self.step();
-            let len = self.step_digits()?;
+            let len = self.step_digits();
             if len == 0 {
                 self.step();
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
@@ -334,7 +342,7 @@ impl<'a> Parser<'a> {
             if self.check_next_either(b'+', b'-') {
                 self.step();
             }
-            let len = self.step_digits()?;
+            let len = self.step_digits();
             if len == 0 {
                 self.step();
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
@@ -446,8 +454,8 @@ impl<'a> Parser<'a> {
                     let digit = (self.buf[self.idx] - b'0') as u8;
 
                     // Use unchecked operations for performance (we control precision limits)
-                    i256_value = unsafe { i256_value.unchecked_mul(i256::from(10)) };
-                    i256_value = unsafe { i256_value.unchecked_add(i256::from(digit)) };
+                    (i256_value, _) = i256_value.overflowing_mul(i256::from(10));
+                    (i256_value, _) = i256_value.overflowing_add(i256::from(digit));
                     self.step();
                 } else if self.check_next(b'.') {
                     // Handle decimal point - can only appear once
@@ -538,7 +546,7 @@ impl<'a> Parser<'a> {
         // Second parsing strategy: Try to parse as i256 for very large numbers
         if !has_exponent && precision <= MAX_DECIMAL256_PRECISION {
             if negative {
-                i256_value = i256_value.checked_neg().unwrap();
+                (i256_value, _) = i256_value.overflowing_neg();
             }
             return Ok(Value::Number(Number::Decimal256(Decimal256 {
                 scale: scale as u8,
