@@ -80,22 +80,37 @@ pub fn from_slice(buf: &[u8]) -> Result<Value<'_>> {
     }
 }
 
-// Parse JSON text to JSONB Value.
-// Inspired by `https://github.com/jorgecarleitao/json-deserializer`
-// Thanks Jorge Leitao.
+/// Parse JSON text to JSONB Value.
+/// Inspired by `https://github.com/jorgecarleitao/json-deserializer`
+/// Thanks Jorge Leitao.
 pub fn parse_value(buf: &[u8]) -> Result<Value<'_>> {
     let mut parser = Parser::new(buf);
+    parser.parse()
+}
+
+/// Parse JSON text to JSONB Value with strict mode option.
+/// When strict_mode is true, the parser will follow standard JSON syntax rules
+/// and reject extended syntax features like leading plus signs, multiple leading zeros,
+/// decimal points without digits, and empty array elements.
+pub fn parse_value_with_options(buf: &[u8], strict_mode: bool) -> Result<Value<'_>> {
+    let mut parser = Parser::new_with_options(buf, strict_mode);
     parser.parse()
 }
 
 struct Parser<'a> {
     buf: &'a [u8],
     idx: usize,
+    /// When true, the parser follows standard JSON syntax rules and rejects extended syntax
+    strict_mode: bool,
 }
 
 impl<'a> Parser<'a> {
     fn new(buf: &'a [u8]) -> Parser<'a> {
-        Self { buf, idx: 0 }
+        Self { buf, idx: 0, strict_mode: false }
+    }
+
+    fn new_with_options(buf: &'a [u8], strict_mode: bool) -> Parser<'a> {
+        Self { buf, idx: 0, strict_mode }
     }
 
     fn parse(&mut self) -> Result<Value<'a>> {
@@ -288,7 +303,6 @@ impl<'a> Parser<'a> {
         // Store the starting position for potential fallback parsing
         let start_idx = self.idx;
         let mut negative = false;
-        let mut leading_zeros = false;
 
         // Handle sign prefix (+ or -), extending JSON to support leading plus sign
         let c = self.next()?;
@@ -297,17 +311,26 @@ impl<'a> Parser<'a> {
             self.step();
         } else if *c == b'+' {
             // Extended syntax: Support for leading plus sign
+            if self.strict_mode {
+                return Err(self.error(ParseErrorCode::InvalidNumberValue));
+            }
             self.step();
         }
 
         // Extended syntax: Support for multiple leading zeros (e.g., 000123)
+        let mut leading_zero_count = 0;
         loop {
             if self.check_next(b'0') {
-                leading_zeros = true;
+                leading_zero_count += 1;
                 self.step();
             } else {
                 break;
             }
+        }
+        
+        // In strict mode, only one leading zero is allowed before a decimal point or another digit
+        if self.strict_mode && leading_zero_count > 1 && self.check_digit() {
+            return Err(self.error(ParseErrorCode::InvalidNumberValue));
         }
 
         // Mark the position where actual digits start (after sign and leading zeros)
@@ -370,7 +393,11 @@ impl<'a> Parser<'a> {
         }
 
         // Handle empty precision
-        if !leading_zeros && precision == 0 {
+        if leading_zero_count == 0 && precision == 0 {
+            // In strict mode, a decimal point must have digits on both sides
+            if self.strict_mode && fraction_offset.is_some() {
+                return Err(self.error(ParseErrorCode::InvalidNumberValue));
+            }
             return Err(self.error(ParseErrorCode::ExpectedSomeValue));
         }
         // Handle exponent notation (e.g., 1e10, 1.5E-7)
@@ -571,6 +598,9 @@ impl<'a> Parser<'a> {
             // Extended syntax: Check for empty elements (consecutive commas or comma before closing bracket)
             // This is where the parser extends standard JSON by allowing empty elements
             if self.check_next_either(b',', b']') {
+                if self.strict_mode {
+                    return Err(self.error(ParseErrorCode::ExpectedSomeValue));
+                }
                 // Insert null for empty element
                 values.push(Value::Null);
                 continue;
