@@ -323,7 +323,9 @@ impl<'a> Parser<'a> {
         } else {
             let len = self.step_digits();
             if len == 0 {
-                self.step();
+                if !negative {
+                    self.step();
+                }
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
             }
         }
@@ -344,7 +346,6 @@ impl<'a> Parser<'a> {
             }
             let len = self.step_digits();
             if len == 0 {
-                self.step();
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
             }
         }
@@ -404,26 +405,26 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Mark the position where actual digits start (after sign and leading zeros)
-        let num_start_idx = self.idx;
-
         // Initialize parsing state
-        let mut value = 0_i128; // Accumulates the numeric value
-        let mut i256_value = i256::ZERO;
+        let mut hi_value = 0_i128;
+        let mut lo_value = 0_i128;
         let mut scale = 0_u32; // Tracks decimal places
         let mut fraction_offset = None; // Position of decimal point, if any
         let mut has_exponent = false; // Whether the number has an exponent part
         let mut precision = 0; // Count of significant digits
 
-        // First parsing strategy: Try to parse as i128 with precision limit
-        while precision < MAX_DECIMAL128_PRECISION {
+        while precision < MAX_DECIMAL256_PRECISION {
             if self.check_digit() {
                 // Parse digit and accumulate value
                 let digit = (self.buf[self.idx] - b'0') as i128;
 
-                // Use unchecked operations for performance (we control precision limits)
-                value = unsafe { value.unchecked_mul(10_i128) };
-                value = unsafe { value.unchecked_add(digit) };
+                if precision < MAX_DECIMAL128_PRECISION {
+                    hi_value = unsafe { hi_value.unchecked_mul(10_i128) };
+                    hi_value = unsafe { hi_value.unchecked_add(digit) };
+                } else {
+                    lo_value = unsafe { lo_value.unchecked_mul(10_i128) };
+                    lo_value = unsafe { lo_value.unchecked_add(digit) };
+                }
                 self.step();
             } else if self.check_next(b'.') {
                 // Handle decimal point - can only appear once
@@ -442,44 +443,6 @@ impl<'a> Parser<'a> {
             // Track scale (number of digits after decimal point)
             if fraction_offset.is_some() {
                 scale += 1;
-            }
-        }
-
-        if precision == MAX_DECIMAL128_PRECISION {
-            let mut lo_value = 0_i128;
-            while precision < MAX_DECIMAL256_PRECISION {
-                if self.check_digit() {
-                    let digit = (self.buf[self.idx] - b'0') as i128;
-
-                    lo_value = unsafe { lo_value.unchecked_mul(10_i128) };
-                    lo_value = unsafe { lo_value.unchecked_add(digit) };
-                    self.step();
-                } else if self.check_next(b'.') {
-                    if fraction_offset.is_some() {
-                        return Err(self.error(ParseErrorCode::InvalidNumberValue));
-                    }
-                    fraction_offset = Some(self.idx);
-                    self.step();
-                    continue;
-                } else {
-                    break;
-                }
-                precision += 1;
-                if fraction_offset.is_some() {
-                    scale += 1;
-                }
-            }
-            if precision > MAX_DECIMAL128_PRECISION {
-                println!("\n--precision={:?}", precision);
-                let (multiplier, _) = i256::from(10).overflowing_pow((precision - MAX_DECIMAL128_PRECISION) as u32);
-                println!("multiplier={:?}", multiplier);
-                println!("value={:?}", value);
-                let (hi_value, _) = i256::from(value).overflowing_mul(multiplier);
-                println!("hi_value={:?}", hi_value);
-                let lo_value = i256::from(lo_value);
-                println!("low_value={:?}", lo_value);
-                (i256_value, _) = hi_value.overflowing_add(lo_value);
-                println!("i256_value={:?}", i256_value);
             }
         }
 
@@ -504,7 +467,7 @@ impl<'a> Parser<'a> {
 
         // Handle empty precision
         if !leading_zeros && precision == 0 {
-            return Err(self.error(ParseErrorCode::ExpectedSomeValue));
+            return Err(self.error(ParseErrorCode::InvalidNumberValue));
         }
         // Handle exponent notation (e.g., 1e10, 1.5E-7)
         if self.check_next_either(b'E', b'e') {
@@ -523,10 +486,7 @@ impl<'a> Parser<'a> {
 
         // If no exponent and precision is within limits, try to return the most appropriate numeric type
         if !has_exponent && precision <= MAX_DECIMAL128_PRECISION {
-            // Apply sign
-            if negative {
-                value = value.checked_neg().unwrap();
-            }
+            let value = if negative { -hi_value } else { hi_value };
 
             // Try to fit the value into the most appropriate numeric type
             if scale == 0 && (UINT64_MIN..=UINT64_MAX).contains(&value) {
@@ -550,9 +510,22 @@ impl<'a> Parser<'a> {
 
         // Second parsing strategy: Try to parse as i256 for very large numbers
         if !has_exponent && precision <= MAX_DECIMAL256_PRECISION {
+            println!("\n--precision={:?}", precision);
+            let (multiplier, _) =
+                i256::from(10).overflowing_pow((precision - MAX_DECIMAL128_PRECISION) as u32);
+            println!("multiplier={:?}", multiplier);
+            println!("hi_value={:?}", hi_value);
+            let (hi_value, _) = i256::from(hi_value).overflowing_mul(multiplier);
+            println!("hi_value={:?}", hi_value);
+            let lo_value = i256::from(lo_value);
+            println!("low_value={:?}", lo_value);
+            let (mut i256_value, _) = hi_value.overflowing_add(lo_value);
+            println!("i256_value={:?}", i256_value);
+
             if negative {
                 (i256_value, _) = i256_value.overflowing_neg();
             }
+
             return Ok(Value::Number(Number::Decimal256(Decimal256 {
                 scale: scale as u8,
                 value: i256_value,
@@ -782,17 +755,19 @@ mod tests {
 
     fn standard_number_strategy() -> impl Strategy<Value = Number> {
         prop_oneof![
-            any::<u64>().prop_map(|v| Number::UInt64(v)),
-            any::<i64>().prop_map(|v| Number::Int64(v)),
-            any::<f64>().prop_filter("Exclude -0.0", |x| *x != -0.0).prop_map(|v| Number::Float64(v)),
+            any::<u64>().prop_map(Number::UInt64),
+            any::<i64>().prop_map(Number::Int64),
+            any::<f64>()
+                .prop_filter("Exclude -0.0", |x| *x != -0.0)
+                .prop_map(Number::Float64),
         ]
     }
 
     fn number_strategy() -> impl Strategy<Value = Number> {
         prop_oneof![
-            any::<u64>().prop_map(|v| Number::UInt64(v)),
-            any::<i64>().prop_map(|v| Number::Int64(v)),
-            any::<f64>().prop_filter("Exclude -0.0", |x| *x != -0.0).prop_map(|v| Number::Float64(v)),
+            any::<u64>().prop_map(Number::UInt64),
+            any::<i64>().prop_map(Number::Int64),
+            any::<f64>().prop_filter("Exclude -0.0", |x| *x != -0.0).prop_map(Number::Float64),
             (0u8..=18u8, any::<i64>()).prop_map(|(scale, value)| Number::Decimal64(Decimal64 { scale, value })),
             (0u8..=38u8, any::<i128>()).prop_map(|(scale, value)| Number::Decimal128(Decimal128 { scale, value })),
             (0u8..=76u8, any::<i128>(), any::<i128>()).prop_filter("Exclude big i256",
@@ -809,7 +784,7 @@ mod tests {
         let leaf = prop_oneof![
             Just(Value::Null),
             any::<bool>().prop_map(Value::Bool),
-            number_strategy().prop_map(|v| Value::Number(v)),
+            number_strategy().prop_map(Value::Number),
             string_strategy().prop_map(|v| Value::String(Cow::Owned(v))),
         ];
 
@@ -826,7 +801,7 @@ mod tests {
         let leaf = prop_oneof![
             Just(Value::Null),
             any::<bool>().prop_map(Value::Bool),
-            standard_number_strategy().prop_map(|v| Value::Number(v)),
+            standard_number_strategy().prop_map(Value::Number),
             string_strategy().prop_map(|v| Value::String(Cow::Owned(v))),
         ];
 
