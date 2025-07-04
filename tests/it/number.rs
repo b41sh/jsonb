@@ -37,7 +37,7 @@
 use core::cmp::Ordering::*;
 
 use jsonb::RawJsonb;
-use jsonb::{parse_value, parse_value_with_options, Number, Value};
+use jsonb::{parse_value, parse_value_standard_mode, Number, Value};
 use ordered_float::OrderedFloat;
 
 #[test]
@@ -2241,7 +2241,7 @@ fn test_parse_decimal() {
     }
     // standard json
     for test in tests {
-        let v = parse_value_with_options(test.as_bytes(), true).unwrap();
+        let v = parse_value_standard_mode(test.as_bytes()).unwrap();
         let s = OrderedFloat(v.as_f64().unwrap());
         let buf = v.to_vec();
         let r = RawJsonb::new(&buf);
@@ -2286,7 +2286,7 @@ fn test_parse_float() {
 
     // standard json
     for (expected, test) in tests {
-        let v = parse_value_with_options(test.as_bytes(), true).unwrap();
+        let v = parse_value_standard_mode(test.as_bytes()).unwrap();
         let s = format!("{}", v);
         let buf = v.to_vec();
         let r = RawJsonb::new(&buf);

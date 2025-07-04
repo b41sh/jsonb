@@ -78,7 +78,11 @@ pub fn from_slice(buf: &[u8]) -> Result<Value<'_>> {
     }
 }
 
-/// Parse JSON text to JSONB Value.
+/// Parse JSON text to JSONB Value with extended mode.
+/// The parser will follow extended JSON syntax rules like leading plus signs,
+/// multiple leading zeros, decimal points without digits, and empty array elements.
+/// Numeric values are preferentially parsed as decimal values to ensure that precision is not lost.
+///
 /// Inspired by `https://github.com/jorgecarleitao/json-deserializer`
 /// Thanks Jorge Leitao.
 pub fn parse_value(buf: &[u8]) -> Result<Value<'_>> {
@@ -86,20 +90,18 @@ pub fn parse_value(buf: &[u8]) -> Result<Value<'_>> {
     parser.parse()
 }
 
-/// Parse JSON text to JSONB Value with strict mode option.
-/// When strict_mode is true, the parser will follow standard JSON syntax rules
-/// and reject extended syntax features like leading plus signs, multiple leading zeros,
-/// decimal points without digits, and empty array elements.
-pub fn parse_value_with_options(buf: &[u8], strict_mode: bool) -> Result<Value<'_>> {
-    let mut parser = Parser::new_with_options(buf, strict_mode);
+/// Parse JSON text to JSONB Value with standard mode.
+/// The parser will follow standard JSON syntax rules.
+pub fn parse_value_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
+    let mut parser = Parser::new_standard_mode(buf);
     parser.parse()
 }
 
 struct Parser<'a> {
     buf: &'a [u8],
     idx: usize,
-    /// When true, the parser follows standard JSON syntax rules and rejects extended syntax
-    strict_mode: bool,
+    /// When true, the parser follows standard JSON syntax rules.
+    standard_mode: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -107,15 +109,15 @@ impl<'a> Parser<'a> {
         Self {
             buf,
             idx: 0,
-            strict_mode: false,
+    	    standard_mode: false,
         }
     }
 
-    fn new_with_options(buf: &'a [u8], strict_mode: bool) -> Parser<'a> {
+    fn new_standard_mode(buf: &'a [u8]) -> Parser<'a> {
         Self {
             buf,
             idx: 0,
-            strict_mode,
+    	    standard_mode,
         }
     }
 
@@ -137,8 +139,8 @@ impl<'a> Parser<'a> {
             b't' => self.parse_json_true(),
             b'f' => self.parse_json_false(),
             b'0'..=b'9' | b'-' | b'+' | b'.' => {
-                if self.strict_mode {
-                    self.parse_strict_json_number()
+                if self.standard_mode {
+                    self.parse_standard_json_number()
                 } else {
                     self.parse_json_number()
                 }
@@ -299,7 +301,7 @@ impl<'a> Parser<'a> {
         Ok(Value::Bool(false))
     }
 
-    /// Parse JSON numbers in strict mode
+    /// Parse JSON numbers in standard mode
     ///
     /// This function implements strict parsing according to the standard JSON specification:
     /// 1. No leading plus sign (e.g., `+123`)
@@ -310,7 +312,7 @@ impl<'a> Parser<'a> {
     /// Parsing strategy:
     /// 1. First try to parse as integer (i64/u64)
     /// 2. If it contains decimal point or exponent, parse as floating point (f64)
-    fn parse_strict_json_number(&mut self) -> Result<Value<'a>> {
+    fn parse_standard_json_number(&mut self) -> Result<Value<'a>> {
         let start_idx = self.idx;
 
         let mut negative = false;
@@ -665,7 +667,7 @@ impl<'a> Parser<'a> {
             // Extended syntax: Check for empty elements (consecutive commas or comma before closing bracket)
             // This is where the parser extends standard JSON by allowing empty elements
             if self.check_next_either(b',', b']') {
-                if self.strict_mode {
+                if self.standard_mode {
                     return Err(self.error(ParseErrorCode::ExpectedSomeValue));
                 }
                 // Insert null for empty element
@@ -842,7 +844,7 @@ mod tests {
         fn test_standard_json_parser(json in standard_json_strategy()) {
             let source = format!("{}", json);
             let res1 = serde_json::from_slice::<serde_json::Value>(source.as_bytes());
-            let res2 = parse_value_with_options(source.as_bytes(), true);
+            let res2 = parse_value_standard_mode(source.as_bytes());
             assert_eq!(res1.is_ok(), res2.is_ok());
             if let Ok(res2) = res2 {
                 let result = format!("{}", res2);

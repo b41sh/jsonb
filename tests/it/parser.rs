@@ -14,7 +14,7 @@
 
 use std::borrow::Cow;
 
-use jsonb::{parse_value, parse_value_with_options, Number, Object, Value};
+use jsonb::{parse_value, parse_value_standard_mode, Number, Object, Value};
 
 fn test_parse_err(errors: &[(&str, &'static str)]) {
     for &(s, err) in errors {
@@ -32,7 +32,7 @@ fn test_parse_ok(tests: Vec<(&str, Value<'_>)>) {
 
 fn test_parse_standard_err(errors: &[(&str, &'static str)]) {
     for &(s, err) in errors {
-        let res = parse_value_with_options(s.as_bytes(), true);
+        let res = parse_value_standard_mode(s.as_bytes());
         assert!(res.is_err());
         assert_eq!(res.err().unwrap().to_string(), err);
     }
@@ -40,7 +40,7 @@ fn test_parse_standard_err(errors: &[(&str, &'static str)]) {
 
 fn test_parse_standard_ok(tests: Vec<(&str, Value<'_>)>) {
     for (s, val) in tests {
-        assert_eq!(parse_value_with_options(s.as_bytes(), true).unwrap(), val);
+        assert_eq!(parse_value_standard_mode(s.as_bytes()).unwrap(), val);
     }
 }
 
