@@ -357,6 +357,19 @@ fn test_parse_array() {
         ("[]a", "trailing characters, pos 3"),
     ]);
 
+    test_parse_standard_err(&[
+        ("[", "EOF while parsing a value, pos 1"),
+        ("[ ", "EOF while parsing a value, pos 2"),
+        ("[1", "EOF while parsing a value, pos 2"),
+        ("[1,", "EOF while parsing a value, pos 3"),
+        ("[1 2]", "expected `,` or `]`, pos 3"),
+        ("[]a", "trailing characters, pos 3"),
+        // Extended JSON array syntax return error in standard mode
+        ("[1, ]", "expected value, pos 4"),
+        ("[ , 2, 3]", "expected value, pos 2"),
+        ("[ , ]", "expected value, pos 2"),
+    ]);
+
     let tests = vec![
         ("[]", Value::Array(vec![])),
         ("[ ]", Value::Array(vec![])),

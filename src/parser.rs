@@ -299,12 +299,23 @@ impl<'a> Parser<'a> {
         Ok(Value::Bool(false))
     }
 
+    /// Parse JSON numbers in strict mode
+    ///
+    /// This function implements strict parsing according to the standard JSON specification:
+    /// 1. No leading plus sign (e.g., `+123`)
+    /// 2. No multiple leading zeros (e.g., `000123`)
+    /// 3. Decimal point must have digits on both sides (no `.123` or `123.`)
+    /// 4. Exponent part must have digits
+    ///
+    /// Parsing strategy:
+    /// 1. First try to parse as integer (i64/u64)
+    /// 2. If it contains decimal point or exponent, parse as floating point (f64)
     fn parse_strict_json_number(&mut self) -> Result<Value<'a>> {
         let start_idx = self.idx;
 
+        let mut negative = false;
         let mut has_fraction = false;
         let mut has_exponent = false;
-        let mut negative: bool = false;
 
         let c = self.next()?;
         if *c == b'-' {
@@ -367,18 +378,19 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a JSON number using a single-pass approach with multiple fallback strategies.
+    /// Parse extended JSON numbers (supporting non-standard syntax)
     ///
-    /// This function implements a high-performance JSON number parsing algorithm that:
-    /// 1. First attempts to parse the number as an i128 (for Decimal128/Int64/UInt64)
-    /// 2. Falls back to i256 (for Decimal256) if precision exceeds i128 capacity
-    /// 3. Finally falls back to Float64 if all other methods fail
+    /// This function implements a high-performance JSON number parsing algorithm with extended syntax:
+    /// 1. Support for leading plus sign (e.g., `+123`)
+    /// 2. Support for multiple leading zeros (e.g., `000123`)
+    /// 3. Support for decimal point without digits on either side (e.g., `.123` or `123.`)
     ///
-    /// Extended JSON number syntax support:
-    /// - Leading plus sign (e.g., +123) which standard JSON doesn't allow
-    /// - Multiple leading zeros (e.g., 000123) which standard JSON doesn't allow
-    /// - Decimal point without preceding digits (e.g., .123) which standard JSON requires at least one digit before decimal
-    /// - Decimal point without any digits (e.g., 123.) which standard JSON requires at least one digit after decimal
+    /// Multi-level parsing strategy:
+    /// 1. First try to parse as i128 (for Decimal128/Int64/UInt64)
+    /// 2. If precision exceeds i128 capacity, try to parse as i256 (for Decimal256)
+    /// 3. Finally fall back to Float64 parsing
+    ///
+    /// This implementation uses a single-pass approach, avoiding intermediate string conversions for better performance
     fn parse_json_number(&mut self) -> Result<Value<'a>> {
         // Store the starting position for potential fallback parsing
         let start_idx = self.idx;
@@ -406,18 +418,20 @@ impl<'a> Parser<'a> {
         }
 
         // Initialize parsing state
-        let mut hi_value = 0_i128;
-        let mut lo_value = 0_i128;
+        let mut hi_value = 0_i128; // Stores high digits (for large values)
+        let mut lo_value = 0_i128; // Stores low digits (for very large values)
         let mut scale = 0_u32; // Tracks decimal places
-        let mut fraction_offset = None; // Position of decimal point, if any
-        let mut has_exponent = false; // Whether the number has an exponent part
         let mut precision = 0; // Count of significant digits
+        let mut has_fraction = false; // Whether the number has an fraction part
+        let mut has_exponent = false; // Whether the number has an exponent part
 
+        // Parse digits, supporting up to MAX_DECIMAL256_PRECISION digits
         while precision < MAX_DECIMAL256_PRECISION {
             if self.check_digit() {
                 // Parse digit and accumulate value
                 let digit = (self.buf[self.idx] - b'0') as i128;
 
+                // Store in hi_value or lo_value based on precision
                 if precision < MAX_DECIMAL128_PRECISION {
                     hi_value = unsafe { hi_value.unchecked_mul(10_i128) };
                     hi_value = unsafe { hi_value.unchecked_add(digit) };
@@ -428,10 +442,10 @@ impl<'a> Parser<'a> {
                 self.step();
             } else if self.check_next(b'.') {
                 // Handle decimal point - can only appear once
-                if fraction_offset.is_some() {
+                if has_fraction {
                     return Err(self.error(ParseErrorCode::InvalidNumberValue));
                 }
-                fraction_offset = Some(self.idx);
+                has_fraction = true;
                 self.step();
                 // Continue to next iteration without incrementing precision
                 continue;
@@ -441,7 +455,7 @@ impl<'a> Parser<'a> {
             }
             precision += 1;
             // Track scale (number of digits after decimal point)
-            if fraction_offset.is_some() {
+            if has_fraction {
                 scale += 1;
             }
         }
@@ -449,16 +463,16 @@ impl<'a> Parser<'a> {
         // Handle numbers that exceed MAX_DECIMAL256_PRECISION
         if precision == MAX_DECIMAL256_PRECISION {
             // If we haven't seen a decimal point yet, continue parsing integer part
-            if fraction_offset.is_none() {
+            if !has_fraction {
                 let len = self.step_digits();
                 precision += len;
                 if self.check_next(b'.') {
-                    fraction_offset = Some(self.idx);
+                    has_fraction = true;
                     self.step();
                 }
             }
             // Parse fractional part if decimal point exists
-            if fraction_offset.is_some() {
+            if has_fraction {
                 let len = self.step_digits();
                 precision += len;
                 scale += len as u32;
@@ -510,17 +524,12 @@ impl<'a> Parser<'a> {
 
         // Second parsing strategy: Try to parse as i256 for very large numbers
         if !has_exponent && precision <= MAX_DECIMAL256_PRECISION {
-            println!("\n--precision={:?}", precision);
+            // Combine high value and low value to i256 value
             let (multiplier, _) =
                 i256::from(10).overflowing_pow((precision - MAX_DECIMAL128_PRECISION) as u32);
-            println!("multiplier={:?}", multiplier);
-            println!("hi_value={:?}", hi_value);
             let (hi_value, _) = i256::from(hi_value).overflowing_mul(multiplier);
-            println!("hi_value={:?}", hi_value);
             let lo_value = i256::from(lo_value);
-            println!("low_value={:?}", lo_value);
             let (mut i256_value, _) = hi_value.overflowing_add(lo_value);
-            println!("i256_value={:?}", i256_value);
 
             if negative {
                 (i256_value, _) = i256_value.overflowing_neg();
@@ -533,7 +542,7 @@ impl<'a> Parser<'a> {
         }
 
         // Final fallback strategy: Parse as Float64 using fast_float2 library
-        // This handles cases like scientific notation and very large/small numbers
+        // This handles scientific notation and very large/small numbers
         let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
         match fast_float2::parse(s) {
             Ok(v) => Ok(Value::Number(Number::Float64(v))),
@@ -818,14 +827,11 @@ mod tests {
         #[test]
         fn test_json_parser(json in json_strategy()) {
             let source = format!("{}", json);
-            println!("source={}", source);
-
             let res1 = serde_json::from_slice::<serde_json::Value>(source.as_bytes());
             let res2 = parse_value(source.as_bytes());
             assert_eq!(res1.is_ok(), res2.is_ok());
             if let Ok(res2) = res2 {
                 let result = format!("{}", res2);
-                println!("result={}", result);
                 assert_eq!(source, result);
             }
         }
@@ -835,14 +841,11 @@ mod tests {
         #[test]
         fn test_standard_json_parser(json in standard_json_strategy()) {
             let source = format!("{}", json);
-            println!("source={}", source);
-
             let res1 = serde_json::from_slice::<serde_json::Value>(source.as_bytes());
             let res2 = parse_value_with_options(source.as_bytes(), true);
             assert_eq!(res1.is_ok(), res2.is_ok());
             if let Ok(res2) = res2 {
                 let result = format!("{}", res2);
-                println!("result={}", result);
                 assert_eq!(source, result);
             }
         }
