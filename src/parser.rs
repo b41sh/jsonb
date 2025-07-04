@@ -109,7 +109,7 @@ impl<'a> Parser<'a> {
         Self {
             buf,
             idx: 0,
-    	    standard_mode: false,
+            standard_mode: false,
         }
     }
 
@@ -117,7 +117,7 @@ impl<'a> Parser<'a> {
         Self {
             buf,
             idx: 0,
-    	    standard_mode,
+            standard_mode: true,
         }
     }
 
