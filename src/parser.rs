@@ -42,6 +42,50 @@ const DECIMAL64_MAX: i128 = 999999999999999999i128;
 const DECIMAL128_MIN: i128 = -99999999999999999999999999999999999999i128;
 const DECIMAL128_MAX: i128 = 99999999999999999999999999999999999999i128;
 
+static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|| {
+    [
+        i256::from(1_i128),
+        i256::from(10_i128),
+        i256::from(100_i128),
+        i256::from(1000_i128),
+        i256::from(10000_i128),
+        i256::from(100000_i128),
+        i256::from(1000000_i128),
+        i256::from(10000000_i128),
+        i256::from(100000000_i128),
+        i256::from(1000000000_i128),
+        i256::from(10000000000_i128),
+        i256::from(100000000000_i128),
+        i256::from(1000000000000_i128),
+        i256::from(10000000000000_i128),
+        i256::from(100000000000000_i128),
+        i256::from(1000000000000000_i128),
+        i256::from(10000000000000000_i128),
+        i256::from(100000000000000000_i128),
+        i256::from(1000000000000000000_i128),
+        i256::from(10000000000000000000_i128),
+        i256::from(100000000000000000000_i128),
+        i256::from(1000000000000000000000_i128),
+        i256::from(10000000000000000000000_i128),
+        i256::from(100000000000000000000000_i128),
+        i256::from(1000000000000000000000000_i128),
+        i256::from(10000000000000000000000000_i128),
+        i256::from(100000000000000000000000000_i128),
+        i256::from(1000000000000000000000000000_i128),
+        i256::from(10000000000000000000000000000_i128),
+        i256::from(100000000000000000000000000000_i128),
+        i256::from(1000000000000000000000000000000_i128),
+        i256::from(10000000000000000000000000000000_i128),
+        i256::from(100000000000000000000000000000000_i128),
+        i256::from(1000000000000000000000000000000000_i128),
+        i256::from(10000000000000000000000000000000000_i128),
+        i256::from(100000000000000000000000000000000000_i128),
+        i256::from(1000000000000000000000000000000000000_i128),
+        i256::from(10000000000000000000000000000000000000_i128),
+        i256::from(100000000000000000000000000000000000000_i128),
+    ]
+});
+
 /// The binary `JSONB` contains three parts, `Header`, `JEntry` and `RawData`.
 /// This structure can be nested. Each group of structures starts with a `Header`.
 /// The upper-level `Value` will store the `Header` length or offset of
@@ -527,11 +571,11 @@ impl<'a> Parser<'a> {
         // Second parsing strategy: Try to parse as i256 for very large numbers
         if !has_exponent && precision <= MAX_DECIMAL256_PRECISION {
             // Combine high value and low value to i256 value
-            let (multiplier, _) =
-                i256::from(10).overflowing_pow((precision - MAX_DECIMAL128_PRECISION) as u32);
-            let (hi_value, _) = i256::from(hi_value).overflowing_mul(multiplier);
-            let lo_value = i256::from(lo_value);
-            let (mut i256_value, _) = hi_value.overflowing_add(lo_value);
+            let multiplier = POWER_TABLE[precision - MAX_DECIMAL128_PRECISION as usize];
+            //let (hi_value, _) = i256::from(hi_value).overflowing_mul(multiplier);
+            //let lo_value = i256::from(lo_value);
+            //let (mut i256_value, _) = hi_value.overflowing_add(lo_value);
+            let mut i256_value = i256::from(hi_value) * multiplier + i256::from(lo_value);
 
             if negative {
                 (i256_value, _) = i256_value.overflowing_neg();

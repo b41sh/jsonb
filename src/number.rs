@@ -947,6 +947,7 @@ impl Display for Number {
                     let s = buffer.format(v.value);
                     f.write_str(s)
                 } else {
+                    /**
                     // Handle negative numbers
                     if v.value < 0 {
                         f.write_char('-')?;
@@ -956,12 +957,32 @@ impl Display for Number {
                     } else {
                         format_decimal_u128(f, v.value as u128, v.scale)
                     }
+                    */
+                    let pow_scale = 10_i128.pow(v.scale as u32);
+                    if v.value >= 0 {
+                        write!(
+                            f,
+                            "{}.{:0>width$}",
+                            v.value / pow_scale,
+                            (v.value % pow_scale).abs(),
+                            width = v.scale as usize
+                        )
+                    } else {
+                        write!(
+                            f,
+                            "-{}.{:0>width$}",
+                            -v.value / pow_scale,
+                            (v.value % pow_scale).abs(),
+                            width = v.scale as usize
+                        )
+                    }
                 }
             }
             Number::Decimal256(v) => {
                 if v.scale == 0 {
                     write!(f, "{}", v.value)
                 } else {
+                    /**
                     // Handle negative numbers
                     if v.value < i256::from(0) {
                         f.write_char('-')?;
@@ -970,6 +991,26 @@ impl Display for Number {
                         format_decimal_i256(f, abs_value, v.scale)
                     } else {
                         format_decimal_i256(f, v.value, v.scale)
+                    }
+                    */
+                    let pow_scale = i256::from(10).pow(v.scale as u32);
+                    // -1/10 = 0
+                    if v.value >= i256::from(0) {
+                        write!(
+                            f,
+                            "{}.{:0>width$}",
+                            v.value / pow_scale,
+                            (v.value % pow_scale).abs(),
+                            width = v.scale as usize
+                        )
+                    } else {
+                        write!(
+                            f,
+                            "-{}.{:0>width$}",
+                            -v.value / pow_scale,
+                            (v.value % pow_scale).abs(),
+                            width = v.scale as usize
+                        )
                     }
                 }
             }
@@ -981,18 +1022,47 @@ impl Display for Number {
 fn format_decimal_u128(f: &mut Formatter, mut value: u128, scale: u8) -> std::fmt::Result {
     // Pre-calculate powers of 10 for common scales to avoid repeated computation
     const POWERS_OF_10: [u128; 39] = [
-        1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000,
-        10000000000, 100000000000, 1000000000000, 10000000000000, 100000000000000,
-        1000000000000000, 10000000000000000, 100000000000000000, 1000000000000000000,
-        10000000000000000000, 100000000000000000000, 1000000000000000000000,
-        10000000000000000000000, 100000000000000000000000, 1000000000000000000000000,
-        10000000000000000000000000, 100000000000000000000000000, 1000000000000000000000000000,
-        10000000000000000000000000000, 100000000000000000000000000000, 1000000000000000000000000000000,
-        10000000000000000000000000000000, 100000000000000000000000000000000, 1000000000000000000000000000000000,
-        10000000000000000000000000000000000, 100000000000000000000000000000000000, 1000000000000000000000000000000000000,
-        10000000000000000000000000000000000000, 100000000000000000000000000000000000000,
+        1,
+        10,
+        100,
+        1000,
+        10000,
+        100000,
+        1000000,
+        10000000,
+        100000000,
+        1000000000,
+        10000000000,
+        100000000000,
+        1000000000000,
+        10000000000000,
+        100000000000000,
+        1000000000000000,
+        10000000000000000,
+        100000000000000000,
+        1000000000000000000,
+        10000000000000000000,
+        100000000000000000000,
+        1000000000000000000000,
+        10000000000000000000000,
+        100000000000000000000000,
+        1000000000000000000000000,
+        10000000000000000000000000,
+        100000000000000000000000000,
+        1000000000000000000000000000,
+        10000000000000000000000000000,
+        100000000000000000000000000000,
+        1000000000000000000000000000000,
+        10000000000000000000000000000000,
+        100000000000000000000000000000000,
+        1000000000000000000000000000000000,
+        10000000000000000000000000000000000,
+        100000000000000000000000000000000000,
+        1000000000000000000000000000000000000,
+        10000000000000000000000000000000000000,
+        100000000000000000000000000000000000000,
     ];
-    
+
     let divisor = if scale < POWERS_OF_10.len() as u8 {
         POWERS_OF_10[scale as usize]
     } else {
@@ -1003,30 +1073,30 @@ fn format_decimal_u128(f: &mut Formatter, mut value: u128, scale: u8) -> std::fm
         }
         div
     };
-    
+
     // Write the integer part directly using itoa for efficiency
     let int_part = value / divisor;
     let mut int_buffer = itoa::Buffer::new();
     f.write_str(int_buffer.format(int_part))?;
-    
+
     // Write the decimal point
     f.write_char('.')?;
-    
+
     // Calculate the fractional part
     value %= divisor;
-    
+
     // Handle the case where we need leading zeros
     let mut remaining_zeros = 0;
     let mut temp_divisor = divisor / 10;
     //let mut temp_divisor = divisor;
-    
+
     while value < temp_divisor && temp_divisor > 0 {
         remaining_zeros += 1;
         temp_divisor /= 10;
     }
     //println!("\n\n---remaining_zeros={:?}", remaining_zeros);
     //println!("value={:?}", value);
-    
+
     // Write leading zeros
     for _ in 0..remaining_zeros {
         f.write_char('0')?;
@@ -1038,7 +1108,7 @@ fn format_decimal_u128(f: &mut Formatter, mut value: u128, scale: u8) -> std::fm
         while value % 10 == 0 && value > 0 {
             value /= 10;
         }
-        
+
         // Write the remaining significant digits
         let mut frac_buffer = itoa::Buffer::new();
         f.write_str(frac_buffer.format(value))
@@ -1052,38 +1122,38 @@ fn format_decimal_u128(f: &mut Formatter, mut value: u128, scale: u8) -> std::fm
 fn format_decimal_i256(f: &mut Formatter, value: i256, scale: u8) -> std::fmt::Result {
     // Calculate divisor (10^scale)
     let divisor = i256::from(10).pow(scale as u32);
-    
+
     // Write the integer part
     let int_part = value / divisor;
     write!(f, "{}", int_part)?;
-    
+
     // Write the decimal point
     f.write_char('.')?;
-    
+
     // Calculate the fractional part
     let mut frac_part = value % divisor;
-    
+
     // Handle the case where we need leading zeros
     let mut leading_zeros = 0;
     let mut temp_divisor = divisor / i256::from(10);
-    
+
     while frac_part < temp_divisor && temp_divisor != i256::ZERO {
         leading_zeros += 1;
         temp_divisor = temp_divisor / i256::from(10);
     }
-    
+
     // Write leading zeros
     for _ in 0..leading_zeros {
         f.write_char('0')?;
     }
-    
+
     // If there are significant digits in the fractional part, write them
     if frac_part != i256::ZERO {
         // Remove trailing zeros from fractional part
         while frac_part % i256::from(10) == i256::from(0) && frac_part != i256::ZERO {
             frac_part = frac_part / i256::from(10);
         }
-        
+
         // Write the remaining significant digits
         write!(f, "{}", frac_part)
     } else {
@@ -1385,4 +1455,3 @@ mod tests {
         );
     }
 }
-
