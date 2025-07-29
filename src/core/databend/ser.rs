@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::parser::JsonAst;
+use compact_str::CompactString;
 use std::collections::VecDeque;
 
 use byteorder::BigEndian;
@@ -818,8 +820,8 @@ impl<'a> JsonAstEncoder<'a> {
     }
 
     // Encode `JSONB` Value to a sequence of bytes
-    pub(crate) fn encode(&mut self, json: &JsonAst<'a>) {
-        match json {
+    pub(crate) fn encode(&mut self, value: &JsonAst<'a>) {
+        match value {
             JsonAst::Array(array) => self.encode_array(array),
             JsonAst::Object(obj) => self.encode_object(obj),
             _ => self.encode_scalar(value),

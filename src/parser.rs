@@ -30,6 +30,9 @@ use crate::Decimal64;
 use ethnum::i256;
 use enum_as_inner::EnumAsInner;
 use compact_str::CompactString;
+use crate::OwnedJsonb;
+use crate::core::JsonAstEncoder;
+
 
 const MAX_DECIMAL64_PRECISION: usize = 18;
 const MAX_DECIMAL128_PRECISION: usize = 38;
@@ -90,7 +93,7 @@ static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|
 
 
 #[derive(Clone, PartialEq, Default, Eq, EnumAsInner)]
-enum JsonAst<'a> {
+pub(crate) enum JsonAst<'a> {
     #[default]
     Null,
     Bool(bool),
@@ -120,7 +123,7 @@ impl<'a> JsonAst<'a> {
                 for (key, val, pos) in kvs.into_iter() {
                     let key_str = key.into_string();
                     if object.contains_key(&key_str) {
-                        let code = ParseErrorCode::ObjectDuplicateKey;
+                        let code = ParseErrorCode::ObjectDuplicateKey(key_str);
                         return Err(Error::Syntax(code, pos));
                     }
                     let value = val.to_value()?;
@@ -148,8 +151,8 @@ impl<'a> JsonAst<'a> {
             }
             JsonAst::Object(kvs) => {
                 let mut size = 4;
-                size += 8 * vals.len();
-                for (key, val) in kvs.iter() {
+                size += 8 * kvs.len();
+                for (key, val, _) in kvs.iter() {
                     size += key.len();
                     size += val.memory_size(false);
                 }
@@ -174,15 +177,15 @@ impl<'a> JsonAst<'a> {
                 // Then check for duplicates by comparing adjacent keys
                 for i in 1..fields.len() {
                     if fields[i-1].0 == fields[i].0 {
-                        return Err(Error::Syntax(
-                            ParseErrorCode::DuplicateObjectKey,
-                            fields[i].2
-                        ));
+                        let key_str = fields[i].0.clone().into_string();
+                        let pos = fields[i].2;
+                        let code = ParseErrorCode::ObjectDuplicateKey(key_str);
+                        return Err(Error::Syntax(code, pos));
                     }
                 }
             
                 // Recursively sort and check nested objects
-                for (_, value) in fields.iter_mut() {
+                for (_, value, _) in fields.iter_mut() {
                     value.sort_and_check_object_keys()?;
                 }
             }
@@ -192,6 +195,7 @@ impl<'a> JsonAst<'a> {
                     item.sort_and_check_object_keys()?;
                 }
             }
+            _ => {}
         }
         
         Ok(())
@@ -200,8 +204,8 @@ impl<'a> JsonAst<'a> {
     fn to_owned_jsonb(self) -> OwnedJsonb {
         let size = self.memory_size(true);
         let mut buf = Vec::with_capacity(size);
-        let mut encoder = JsonAstEncoder::new(buf)
-        encoder.encode(self);
+        let mut encoder = JsonAstEncoder::new(&mut buf);
+        encoder.encode(&self);
         OwnedJsonb::new(buf)
     }
 }
@@ -264,18 +268,18 @@ pub fn parse_value_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
 }
 
 
-pub fn parse_to_owend_jsonb(buf: &[u8]) -> Result<OwnedJsonb> {
+pub fn parse_owned_jsonb(buf: &[u8]) -> Result<OwnedJsonb> {
     let mut parser = Parser::new(buf);
     let mut json_ast = parser.parse()?;
     json_ast.sort_and_check_object_keys()?;
-    json_ast.to_owned_jsonb()
+    Ok(json_ast.to_owned_jsonb())
 }
 
-pub fn parse_to_owend_jsonb_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
+pub fn parse_owned_jsonb_standard_mode(buf: &[u8]) -> Result<OwnedJsonb> {
     let mut parser = Parser::new_standard_mode(buf);
     let mut json_ast = parser.parse()?;
     json_ast.sort_and_check_object_keys()?;
-    json_ast.to_owned_jsonb()
+    Ok(json_ast.to_owned_jsonb())
 }
 
 struct Parser<'a> {
@@ -1018,6 +1022,13 @@ mod tests {
                 let result = format!("{}", res2);
                 assert_eq!(source, result);
             }
+            let res3 = parse_owned_jsonb(source.as_bytes());
+            assert_eq!(res1.is_ok(), res3.is_ok());
+            if let Ok(res3) = res3 {
+                let raw_jsonb = res3.as_raw();
+                let result = raw_jsonb.to_string();
+                assert_eq!(source, result);
+            }
         }
     }
 
@@ -1030,6 +1041,13 @@ mod tests {
             assert_eq!(res1.is_ok(), res2.is_ok());
             if let Ok(res2) = res2 {
                 let result = format!("{}", res2);
+                assert_eq!(source, result);
+            }
+            let res3 = parse_owned_jsonb_standard_mode(source.as_bytes());
+            assert_eq!(res1.is_ok(), res3.is_ok());
+            if let Ok(res3) = res3 {
+                let raw_jsonb = res3.as_raw();
+                let result = raw_jsonb.to_string();
                 assert_eq!(source, result);
             }
         }
