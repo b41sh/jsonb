@@ -97,7 +97,7 @@ enum JsonAst<'a> {
     String(Cow<'a, str>),
     Number(Number),
     Array(Vec<JsonAst<'a>>),
-    Object(Vec<(CompactString, JsonAst<'a>)>),
+    Object(Vec<(CompactString, JsonAst<'a>, usize)>),
 }
 
 impl<'a> JsonAst<'a> {
@@ -117,10 +117,11 @@ impl<'a> JsonAst<'a> {
             }
             JsonAst::Object(kvs) => {
                 let mut object = Object::new();
-                for (key, val) in kvs.into_iter() {
+                for (key, val, pos) in kvs.into_iter() {
                     let key_str = key.into_string();
                     if object.contains_key(&key_str) {
-                        return Err(Error::ObjectDuplicateKey);
+                        let code = ParseErrorCode::ObjectDuplicateKey;
+                        return Err(Error::Syntax(code, pos));
                     }
                     let value = val.to_value()?;
                     object.insert(key_str, value);
@@ -129,6 +130,79 @@ impl<'a> JsonAst<'a> {
             }
         };
         Ok(value)
+    }
+
+    fn memory_size(&self, is_root: bool) -> usize {
+        let size = match self {
+            JsonAst::Null | JsonAst::Bool(_) => 0,
+            JsonAst::String(v) => v.len(),
+            JsonAst::Number(v) => v.memory_size(),
+            JsonAst::Array(vals) => {
+                let mut size = 4;
+                size += 4;
+                size += 4 * vals.len();
+                for val in vals.iter() {
+                    size += val.memory_size(false);
+                }
+                return size;
+            }
+            JsonAst::Object(kvs) => {
+                let mut size = 4;
+                size += 8 * vals.len();
+                for (key, val) in kvs.iter() {
+                    size += key.len();
+                    size += val.memory_size(false);
+                }
+                return size;
+            }
+        };
+        if is_root {
+            size + 8
+        } else {
+            size
+        }
+    }
+
+    /// Sort the Object fields by key and check for duplicate keys.
+    /// Returns an error if duplicate keys are found.
+    fn sort_and_check_object_keys(&mut self) -> Result<()> {
+        match self {
+            JsonAst::Object(fields) => {
+                // First sort the fields by key
+                fields.sort_by(|a, b| a.0.cmp(&b.0));
+            
+                // Then check for duplicates by comparing adjacent keys
+                for i in 1..fields.len() {
+                    if fields[i-1].0 == fields[i].0 {
+                        return Err(Error::Syntax(
+                            ParseErrorCode::DuplicateObjectKey,
+                            fields[i].2
+                        ));
+                    }
+                }
+            
+                // Recursively sort and check nested objects
+                for (_, value) in fields.iter_mut() {
+                    value.sort_and_check_object_keys()?;
+                }
+            }
+            JsonAst::Array(items) => {
+                // Recursively sort and check objects in arrays
+                for item in items.iter_mut() {
+                    item.sort_and_check_object_keys()?;
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    fn to_owned_jsonb(self) -> OwnedJsonb {
+        let size = self.memory_size(true);
+        let mut buf = Vec::with_capacity(size);
+        let mut encoder = JsonAstEncoder::new(buf)
+        encoder.encode(self);
+        OwnedJsonb::new(buf)
     }
 }
 
@@ -187,6 +261,21 @@ pub fn parse_value_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
     let mut parser = Parser::new_standard_mode(buf);
     let json_ast = parser.parse()?;
     json_ast.to_value()
+}
+
+
+pub fn parse_to_owend_jsonb(buf: &[u8]) -> Result<OwnedJsonb> {
+    let mut parser = Parser::new(buf);
+    let mut json_ast = parser.parse()?;
+    json_ast.sort_and_check_object_keys()?;
+    json_ast.to_owned_jsonb()
+}
+
+pub fn parse_to_owend_jsonb_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
+    let mut parser = Parser::new_standard_mode(buf);
+    let mut json_ast = parser.parse()?;
+    json_ast.sort_and_check_object_keys()?;
+    json_ast.to_owned_jsonb()
 }
 
 struct Parser<'a> {
@@ -817,6 +906,7 @@ impl<'a> Parser<'a> {
             if !matches!(key, JsonAst::String(_)) {
                 return Err(self.error(ParseErrorCode::KeyMustBeAString));
             }
+            let pos = self.idx;
 
             self.skip_unused();
 
@@ -834,7 +924,7 @@ impl<'a> Parser<'a> {
             let key = key.as_string().unwrap();
             let k_str = CompactString::new(&key);
 
-            obj.push((k_str, value));
+            obj.push((k_str, value, pos));
         }
         Ok(JsonAst::Object(obj))
     }
