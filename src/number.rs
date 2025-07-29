@@ -194,75 +194,8 @@ impl Serialize for Number {
             Number::UInt64(v) => serializer.serialize_u64(*v),
             Number::Float64(v) => serializer.serialize_f64(*v),
             Number::Decimal64(_) | Number::Decimal128(_) | Number::Decimal256(_) => {
+
                 use std::io::Write;
-/**
-                // 使用栈上分配的缓冲区来存储格式化的数字字符串
-                // 128 字节应该足够存储大多数数字
-                let mut buffer = [0u8; 128];
-
-                // 创建一个作用域，在其中完成所有写入操作
-                let pos = {
-                    let mut cursor = std::io::Cursor::new(&mut buffer[..]);
-                    
-                    // 使用 std::fmt::Write 直接写入缓冲区，避免堆分配
-                    struct WriteAdapter<'a>(&'a mut std::io::Cursor<&'a mut [u8]>);
-                    
-                    impl<'a> std::fmt::Write for WriteAdapter<'a> {
-                        fn write_str(&mut self, s: &str) -> std::fmt::Result {
-                            self.0.write_all(s.as_bytes()).map_err(|_| std::fmt::Error)
-                        }
-                    }
-                    
-                    let mut adapter = WriteAdapter(&mut cursor);
-                    
-                    // 根据数字类型使用适当的格式化方法
-                    match self {
-                        Number::Decimal64(v) => {
-                            if v.scale == 0 {
-                                // 对于整数，使用 itoa 高效格式化
-                                let mut itoa_buf = itoa::Buffer::new();
-                                let s = itoa_buf.format(v.value);
-                                adapter.write_str(s).unwrap();
-                            } else {
-                                // 对于小数，使用我们的格式化逻辑
-                                format_decimal_i64(&mut adapter, v.value, v.scale).unwrap();
-                            }
-                        },
-                        Number::Decimal128(v) => {
-                            if v.scale == 0 {
-                                // 对于整数，使用 itoa 高效格式化
-                                let mut itoa_buf = itoa::Buffer::new();
-                                let s = itoa_buf.format(v.value);
-                                adapter.write_str(s).unwrap();
-                            } else {
-                                // 对于小数，使用我们的格式化逻辑
-                                format_decimal_i128(&mut adapter, v.value, v.scale).unwrap();
-                            }
-                        },
-                        Number::Decimal256(v) => {
-                            if v.scale == 0 {
-                                // 对于整数，直接使用 Display
-                                write!(adapter, "{}", v.value).unwrap();
-                            } else {
-                                // 对于小数，使用我们的格式化逻辑
-                                format_decimal_i256(&mut adapter, v.value, v.scale).unwrap();
-                            }
-                        },
-                        _ => unreachable!(),
-                    }
-                    
-                    // 获取写入的字节数并在作用域结束时返回
-                    cursor.position() as usize
-                }; // 作用域结束，cursor 被释放
-
-                // 将缓冲区转换为字符串
-                let num_str = unsafe { std::str::from_utf8_unchecked(&buffer[..pos]) };
-                
-                // 创建 serde_json 的 Number 对象并序列化
-                let mut serialize_struct = serializer.serialize_struct(NUMBER_TOKEN, 0)?;
-                serialize_struct.serialize_field(NUMBER_TOKEN, num_str)?;
-                serialize_struct.end()
-*/
                 // 使用栈上分配的缓冲区来存储格式化的数字字符串
                 // 128 字节应该足够存储大多数数字
                 let mut buffer = [0u8; 128];
@@ -310,6 +243,8 @@ impl Serialize for Number {
                     },
                     Number::Decimal256(v) => {
                         if v.scale == 0 {
+                            // 对于整数，使用高效的格式化函数而不是默认的 fmt
+                            //format_i256_to_string(&mut adapter, v.value).unwrap();
                             // 对于整数，直接使用 Display
                             write!(adapter, "{}", v.value).unwrap();
                         } else {
