@@ -28,6 +28,8 @@ use crate::Decimal128;
 use crate::Decimal256;
 use crate::Decimal64;
 use ethnum::i256;
+use enum_as_inner::EnumAsInner;
+use compact_str::CompactString;
 
 const MAX_DECIMAL64_PRECISION: usize = 18;
 const MAX_DECIMAL128_PRECISION: usize = 38;
@@ -86,6 +88,50 @@ static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|
     ]
 });
 
+
+#[derive(Clone, PartialEq, Default, Eq, EnumAsInner)]
+enum JsonAst<'a> {
+    #[default]
+    Null,
+    Bool(bool),
+    String(Cow<'a, str>),
+    Number(Number),
+    Array(Vec<JsonAst<'a>>),
+    Object(Vec<(CompactString, JsonAst<'a>)>),
+}
+
+impl<'a> JsonAst<'a> {
+    fn to_value(self) -> Result<Value<'a>> {
+        let value = match self {
+            JsonAst::Null => Value::Null,
+            JsonAst::Bool(v) => Value::Bool(v),
+            JsonAst::String(v) => Value::String(v),
+            JsonAst::Number(v) => Value::Number(v),
+            JsonAst::Array(vals) => {
+                let mut values = Vec::with_capacity(vals.len());
+                for val in vals.into_iter() {
+                    let value = val.to_value()?;
+                    values.push(value);
+                }
+                Value::Array(values)
+            }
+            JsonAst::Object(kvs) => {
+                let mut object = Object::new();
+                for (key, val) in kvs.into_iter() {
+                    let key_str = key.into_string();
+                    if object.contains_key(&key_str) {
+                        return Err(Error::ObjectDuplicateKey);
+                    }
+                    let value = val.to_value()?;
+                    object.insert(key_str, value);
+                }
+                Value::Object(object)
+            }
+        };
+        Ok(value)
+    }
+}
+
 /// The binary `JSONB` contains three parts, `Header`, `JEntry` and `RawData`.
 /// This structure can be nested. Each group of structures starts with a `Header`.
 /// The upper-level `Value` will store the `Header` length or offset of
@@ -131,14 +177,16 @@ pub fn from_slice(buf: &[u8]) -> Result<Value<'_>> {
 /// Thanks Jorge Leitao.
 pub fn parse_value(buf: &[u8]) -> Result<Value<'_>> {
     let mut parser = Parser::new(buf);
-    parser.parse()
+    let json_ast = parser.parse()?;
+    json_ast.to_value()
 }
 
 /// Parse JSON text to JSONB Value with standard mode.
 /// The parser will follow standard JSON syntax rules.
 pub fn parse_value_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
     let mut parser = Parser::new_standard_mode(buf);
-    parser.parse()
+    let json_ast = parser.parse()?;
+    json_ast.to_value()
 }
 
 struct Parser<'a> {
@@ -165,7 +213,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse(&mut self) -> Result<Value<'a>> {
+    fn parse(&mut self) -> Result<JsonAst<'a>> {
         let val = self.parse_json_value()?;
         self.skip_unused();
         if self.idx < self.buf.len() {
@@ -175,7 +223,7 @@ impl<'a> Parser<'a> {
         Ok(val)
     }
 
-    fn parse_json_value(&mut self) -> Result<Value<'a>> {
+    fn parse_json_value(&mut self) -> Result<JsonAst<'a>> {
         self.skip_unused();
         let c = self.next()?;
         match c {
@@ -321,28 +369,28 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_json_null(&mut self) -> Result<Value<'a>> {
+    fn parse_json_null(&mut self) -> Result<JsonAst<'a>> {
         let data = [b'n', b'u', b'l', b'l'];
         for v in data.into_iter() {
             self.must_is(v)?;
         }
-        Ok(Value::Null)
+        Ok(JsonAst::Null)
     }
 
-    fn parse_json_true(&mut self) -> Result<Value<'a>> {
+    fn parse_json_true(&mut self) -> Result<JsonAst<'a>> {
         let data = [b't', b'r', b'u', b'e'];
         for v in data.into_iter() {
             self.must_is(v)?;
         }
-        Ok(Value::Bool(true))
+        Ok(JsonAst::Bool(true))
     }
 
-    fn parse_json_false(&mut self) -> Result<Value<'a>> {
+    fn parse_json_false(&mut self) -> Result<JsonAst<'a>> {
         let data = [b'f', b'a', b'l', b's', b'e'];
         for v in data.into_iter() {
             self.must_is(v)?;
         }
-        Ok(Value::Bool(false))
+        Ok(JsonAst::Bool(false))
     }
 
     /// Parse JSON numbers in standard mode
@@ -356,7 +404,7 @@ impl<'a> Parser<'a> {
     /// Parsing strategy:
     /// 1. First try to parse as integer (i64/u64)
     /// 2. If it contains decimal point or exponent, parse as floating point (f64)
-    fn parse_standard_json_number(&mut self) -> Result<Value<'a>> {
+    fn parse_standard_json_number(&mut self) -> Result<JsonAst<'a>> {
         let start_idx = self.idx;
 
         let mut negative = false;
@@ -411,15 +459,15 @@ impl<'a> Parser<'a> {
         if !has_fraction && !has_exponent {
             if !negative {
                 if let Ok(v) = s.parse::<u64>() {
-                    return Ok(Value::Number(Number::UInt64(v)));
+                    return Ok(JsonAst::Number(Number::UInt64(v)));
                 }
             } else if let Ok(v) = s.parse::<i64>() {
-                return Ok(Value::Number(Number::Int64(v)));
+                return Ok(JsonAst::Number(Number::Int64(v)));
             }
         }
 
         match fast_float2::parse(s) {
-            Ok(v) => Ok(Value::Number(Number::Float64(v))),
+            Ok(v) => Ok(JsonAst::Number(Number::Float64(v))),
             Err(_) => Err(self.error(ParseErrorCode::InvalidNumberValue)),
         }
     }
@@ -437,7 +485,7 @@ impl<'a> Parser<'a> {
     /// 3. Finally fall back to Float64 parsing
     ///
     /// This implementation uses a single-pass approach, avoiding intermediate string conversions for better performance
-    fn parse_json_number(&mut self) -> Result<Value<'a>> {
+    fn parse_json_number(&mut self) -> Result<JsonAst<'a>> {
         // Store the starting position for potential fallback parsing
         let start_idx = self.idx;
         let mut negative = false;
@@ -550,18 +598,18 @@ impl<'a> Parser<'a> {
 
             // Try to fit the value into the most appropriate numeric type
             if scale == 0 && (UINT64_MIN..=UINT64_MAX).contains(&value) {
-                return Ok(Value::Number(Number::UInt64(u64::try_from(value).unwrap())));
+                return Ok(JsonAst::Number(Number::UInt64(u64::try_from(value).unwrap())));
             } else if scale == 0 && (INT64_MIN..=INT64_MAX).contains(&value) {
-                return Ok(Value::Number(Number::Int64(i64::try_from(value).unwrap())));
+                return Ok(JsonAst::Number(Number::Int64(i64::try_from(value).unwrap())));
             } else if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&value)
                 && precision <= MAX_DECIMAL64_PRECISION
             {
-                return Ok(Value::Number(Number::Decimal64(Decimal64 {
+                return Ok(JsonAst::Number(Number::Decimal64(Decimal64 {
                     scale: scale as u8,
                     value: i64::try_from(value).unwrap(),
                 })));
             } else if (DECIMAL128_MIN..=DECIMAL128_MAX).contains(&value) {
-                return Ok(Value::Number(Number::Decimal128(Decimal128 {
+                return Ok(JsonAst::Number(Number::Decimal128(Decimal128 {
                     scale: scale as u8,
                     value,
                 })));
@@ -581,7 +629,7 @@ impl<'a> Parser<'a> {
                 (i256_value, _) = i256_value.overflowing_neg();
             }
 
-            return Ok(Value::Number(Number::Decimal256(Decimal256 {
+            return Ok(JsonAst::Number(Number::Decimal256(Decimal256 {
                 scale: scale as u8,
                 value: i256_value,
             })));
@@ -591,7 +639,7 @@ impl<'a> Parser<'a> {
         // This handles scientific notation and very large/small numbers
         let s = unsafe { std::str::from_utf8_unchecked(&self.buf[start_idx..self.idx]) };
         match fast_float2::parse(s) {
-            Ok(v) => Ok(Value::Number(Number::Float64(v))),
+            Ok(v) => Ok(JsonAst::Number(Number::Float64(v))),
             Err(_) => Err(self.error(ParseErrorCode::InvalidNumberValue)),
         }
     }
@@ -606,7 +654,7 @@ impl<'a> Parser<'a> {
     /// The implementation uses a two-pass approach for strings with escapes:
     /// - First pass: Count escapes and determine string boundaries
     /// - Second pass: Process escape sequences only when necessary
-    fn parse_json_string(&mut self) -> Result<Value<'a>> {
+    fn parse_json_string(&mut self) -> Result<JsonAst<'a>> {
         // Ensure the string starts with a quote
         self.must_is(b'"')?;
 
@@ -666,7 +714,7 @@ impl<'a> Parser<'a> {
                 .map(Cow::Borrowed)
                 .map_err(|_| self.error(ParseErrorCode::InvalidStringValue))?
         };
-        Ok(Value::String(val))
+        Ok(JsonAst::String(val))
     }
 
     /// Parse a JSON array with extended syntax support.
@@ -679,12 +727,12 @@ impl<'a> Parser<'a> {
     /// Extended JSON array syntax support:
     /// - Empty elements between commas (e.g., [1,,3]) which standard JSON doesn't allow
     /// - Empty elements at the end of arrays (e.g., [1,2,]) which standard JSON doesn't allow
-    fn parse_json_array(&mut self) -> Result<Value<'a>> {
+    fn parse_json_array(&mut self) -> Result<JsonAst<'a>> {
         // Ensure the array starts with an opening bracket
         self.must_is(b'[')?;
 
         let mut first = true;
-        let mut values = Vec::new();
+        let mut values = Vec::with_capacity(5);
 
         // Parse array elements until closing bracket is found
         loop {
@@ -715,7 +763,7 @@ impl<'a> Parser<'a> {
                     return Err(self.error(ParseErrorCode::ExpectedSomeValue));
                 }
                 // Insert null for empty element
-                values.push(Value::Null);
+                values.push(JsonAst::Null);
                 continue;
             }
 
@@ -723,7 +771,7 @@ impl<'a> Parser<'a> {
             let value = self.parse_json_value()?;
             values.push(value);
         }
-        Ok(Value::Array(values))
+        Ok(JsonAst::Array(values))
     }
 
     /// Parse a JSON object with key-value pairs.
@@ -737,12 +785,12 @@ impl<'a> Parser<'a> {
     /// - Keys must be strings
     /// - Keys and values are separated by colons
     /// - Key-value pairs are separated by commas
-    fn parse_json_object(&mut self) -> Result<Value<'a>> {
+    fn parse_json_object(&mut self) -> Result<JsonAst<'a>> {
         // Ensure the object starts with an opening brace
         self.must_is(b'{')?;
 
         let mut first = true;
-        let mut obj = Object::new();
+        let mut obj = Vec::with_capacity(10);
 
         // Parse key-value pairs until closing brace is found
         loop {
@@ -766,7 +814,7 @@ impl<'a> Parser<'a> {
 
             // Parse the key (must be a string)
             let key = self.parse_json_value()?;
-            if !key.is_string() {
+            if !matches!(key, JsonAst::String(_)) {
                 return Err(self.error(ParseErrorCode::KeyMustBeAString));
             }
 
@@ -783,12 +831,12 @@ impl<'a> Parser<'a> {
             let value = self.parse_json_value()?;
 
             // Add the key-value pair to the object
-            // Note: This converts the key from a borrowed string to an owned string,
-            // which could be an optimization target for future improvements
-            let k = key.as_str().unwrap();
-            obj.insert(k.to_string(), value);
+            let key = key.as_string().unwrap();
+            let k_str = CompactString::new(&key);
+
+            obj.push((k_str, value));
         }
-        Ok(Value::Object(obj))
+        Ok(JsonAst::Object(obj))
     }
 }
 
@@ -897,3 +945,4 @@ mod tests {
         }
     }
 }
+
