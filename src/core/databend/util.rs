@@ -282,15 +282,9 @@ impl Number {
                     9
                 }
             }
-            Self::Decimal64(v) => {
-                10
-            }
-            Self::Decimal128(v) => {
-                18
-            }
-            Self::Decimal256(v) => {
-                34
-            }
+            Self::Decimal64(v) => 10,
+            Self::Decimal128(v) => 18,
+            Self::Decimal256(v) => 34,
         }
     }
 

@@ -69,7 +69,9 @@ impl Display for ParseErrorCode {
                 write!(f, "invalid surrogate in hex escape '{:X}'", n)
             }
             ParseErrorCode::UnexpectedEndOfHexEscape => f.write_str("unexpected end of hex escape"),
-            ParseErrorCode::ObjectDuplicateKey(key) => write!(f, "duplicate object attribute \"{}\"", key)
+            ParseErrorCode::ObjectDuplicateKey(key) => {
+                write!(f, "duplicate object attribute \"{}\"", key)
+            }
         }
     }
 }
@@ -147,4 +149,3 @@ impl From<nom::Err<nom::error::Error<&[u8]>>> for Error {
         Error::InvalidJsonb
     }
 }
-

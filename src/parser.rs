@@ -24,15 +24,14 @@ use super::value::Object;
 use super::value::Value;
 use crate::core::Decoder;
 
+use crate::core::JsonAstEncoder;
 use crate::Decimal128;
 use crate::Decimal256;
 use crate::Decimal64;
-use ethnum::i256;
-use enum_as_inner::EnumAsInner;
-use compact_str::CompactString;
 use crate::OwnedJsonb;
-use crate::core::JsonAstEncoder;
-
+use compact_str::CompactString;
+use enum_as_inner::EnumAsInner;
+use ethnum::i256;
 
 const MAX_DECIMAL64_PRECISION: usize = 18;
 const MAX_DECIMAL128_PRECISION: usize = 38;
@@ -90,7 +89,6 @@ static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|
         i256::from(100000000000000000000000000000000000000_i128),
     ]
 });
-
 
 #[derive(Clone, PartialEq, Default, Eq, EnumAsInner)]
 pub(crate) enum JsonAst<'a> {
@@ -173,17 +171,17 @@ impl<'a> JsonAst<'a> {
             JsonAst::Object(fields) => {
                 // First sort the fields by key
                 fields.sort_by(|a, b| a.0.cmp(&b.0));
-            
+
                 // Then check for duplicates by comparing adjacent keys
                 for i in 1..fields.len() {
-                    if fields[i-1].0 == fields[i].0 {
+                    if fields[i - 1].0 == fields[i].0 {
                         let key_str = fields[i].0.clone().into_string();
                         let pos = fields[i].2;
                         let code = ParseErrorCode::ObjectDuplicateKey(key_str);
                         return Err(Error::Syntax(code, pos));
                     }
                 }
-            
+
                 // Recursively sort and check nested objects
                 for (_, value, _) in fields.iter_mut() {
                     value.sort_and_check_object_keys()?;
@@ -197,7 +195,7 @@ impl<'a> JsonAst<'a> {
             }
             _ => {}
         }
-        
+
         Ok(())
     }
 
@@ -266,7 +264,6 @@ pub fn parse_value_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
     let json_ast = parser.parse()?;
     json_ast.to_value()
 }
-
 
 pub fn parse_owned_jsonb(buf: &[u8]) -> Result<OwnedJsonb> {
     let mut parser = Parser::new(buf);
@@ -691,9 +688,13 @@ impl<'a> Parser<'a> {
 
             // Try to fit the value into the most appropriate numeric type
             if scale == 0 && (UINT64_MIN..=UINT64_MAX).contains(&value) {
-                return Ok(JsonAst::Number(Number::UInt64(u64::try_from(value).unwrap())));
+                return Ok(JsonAst::Number(Number::UInt64(
+                    u64::try_from(value).unwrap(),
+                )));
             } else if scale == 0 && (INT64_MIN..=INT64_MAX).contains(&value) {
-                return Ok(JsonAst::Number(Number::Int64(i64::try_from(value).unwrap())));
+                return Ok(JsonAst::Number(Number::Int64(
+                    i64::try_from(value).unwrap(),
+                )));
             } else if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&value)
                 && precision <= MAX_DECIMAL64_PRECISION
             {
@@ -1053,4 +1054,3 @@ mod tests {
         }
     }
 }
-
