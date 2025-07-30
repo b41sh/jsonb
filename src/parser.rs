@@ -102,7 +102,7 @@ pub(crate) enum JsonAst<'a> {
 }
 
 impl<'a> JsonAst<'a> {
-    fn to_value(self) -> Result<Value<'a>> {
+    fn into_value(self) -> Result<Value<'a>> {
         let value = match self {
             JsonAst::Null => Value::Null,
             JsonAst::Bool(v) => Value::Bool(v),
@@ -111,7 +111,7 @@ impl<'a> JsonAst<'a> {
             JsonAst::Array(vals) => {
                 let mut values = Vec::with_capacity(vals.len());
                 for val in vals.into_iter() {
-                    let value = val.to_value()?;
+                    let value = val.into_value()?;
                     values.push(value);
                 }
                 Value::Array(values)
@@ -124,7 +124,7 @@ impl<'a> JsonAst<'a> {
                         let code = ParseErrorCode::ObjectDuplicateKey(key_str);
                         return Err(Error::Syntax(code, pos));
                     }
-                    let value = val.to_value()?;
+                    let value = val.into_value()?;
                     object.insert(key_str, value);
                 }
                 Value::Object(object)
@@ -199,7 +199,7 @@ impl<'a> JsonAst<'a> {
         Ok(())
     }
 
-    fn to_owned_jsonb(self) -> OwnedJsonb {
+    fn into_owned_jsonb(self) -> OwnedJsonb {
         let size = self.memory_size(true);
         let mut buf = Vec::with_capacity(size);
         let mut encoder = JsonAstEncoder::new(&mut buf);
@@ -254,7 +254,7 @@ pub fn from_slice(buf: &[u8]) -> Result<Value<'_>> {
 pub fn parse_value(buf: &[u8]) -> Result<Value<'_>> {
     let mut parser = Parser::new(buf);
     let json_ast = parser.parse()?;
-    json_ast.to_value()
+    json_ast.into_value()
 }
 
 /// Parse JSON text to JSONB Value with standard mode.
@@ -262,21 +262,21 @@ pub fn parse_value(buf: &[u8]) -> Result<Value<'_>> {
 pub fn parse_value_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
     let mut parser = Parser::new_standard_mode(buf);
     let json_ast = parser.parse()?;
-    json_ast.to_value()
+    json_ast.into_value()
 }
 
 pub fn parse_owned_jsonb(buf: &[u8]) -> Result<OwnedJsonb> {
     let mut parser = Parser::new(buf);
     let mut json_ast = parser.parse()?;
     json_ast.sort_and_check_object_keys()?;
-    Ok(json_ast.to_owned_jsonb())
+    Ok(json_ast.into_owned_jsonb())
 }
 
 pub fn parse_owned_jsonb_standard_mode(buf: &[u8]) -> Result<OwnedJsonb> {
     let mut parser = Parser::new_standard_mode(buf);
     let mut json_ast = parser.parse()?;
     json_ast.sort_and_check_object_keys()?;
-    Ok(json_ast.to_owned_jsonb())
+    Ok(json_ast.into_owned_jsonb())
 }
 
 struct Parser<'a> {
@@ -713,7 +713,7 @@ impl<'a> Parser<'a> {
         // Second parsing strategy: Try to parse as i256 for very large numbers
         if !has_exponent && precision <= MAX_DECIMAL256_PRECISION {
             // Combine high value and low value to i256 value
-            let multiplier = POWER_TABLE[precision - MAX_DECIMAL128_PRECISION as usize];
+            let multiplier = POWER_TABLE[precision - MAX_DECIMAL128_PRECISION];
             //let (hi_value, _) = i256::from(hi_value).overflowing_mul(multiplier);
             //let lo_value = i256::from(lo_value);
             //let (mut i256_value, _) = hi_value.overflowing_add(lo_value);
@@ -927,7 +927,7 @@ impl<'a> Parser<'a> {
 
             // Add the key-value pair to the object
             let key = key.as_string().unwrap();
-            let k_str = CompactString::new(&key);
+            let k_str = CompactString::new(key);
 
             obj.push((k_str, value, pos));
         }

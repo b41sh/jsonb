@@ -78,7 +78,7 @@ const I128_POWERS_OF_10: [i128; 39] = [
 ];
 
 // Pre-calculate leading zeros to avoid repeated computation
-const LEADING_ZEROS: [&str; 39] = [
+const LEADING_ZEROS: [&str; 38] = [
     "",
     "0",
     "00",
@@ -117,7 +117,6 @@ const LEADING_ZEROS: [&str; 39] = [
     "00000000000000000000000000000000000",
     "000000000000000000000000000000000000",
     "0000000000000000000000000000000000000",
-    "00000000000000000000000000000000000000",
 ];
 
 const I128_SCALE: usize = 38;
@@ -309,9 +308,7 @@ impl Serialize for Number {
                     _ => unreachable!(),
                 }
 
-                let pos = adapter.position() as usize;
-                drop(adapter);
-
+                let pos = adapter.position();
                 let num_str = std::str::from_utf8(&buffer[..pos])
                     .map_err(|_| serde::ser::Error::custom("Invalid decimal number"))?;
 
@@ -325,13 +322,13 @@ impl Serialize for Number {
 
 struct WriteAdapter<'a>(&'a mut std::io::Cursor<&'a mut [u8]>);
 
-impl<'a> std::fmt::Write for WriteAdapter<'a> {
+impl std::fmt::Write for WriteAdapter<'_> {
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
         self.0.write_all(s.as_bytes()).map_err(|_| std::fmt::Error)
     }
 }
 
-impl<'a> WriteAdapter<'a> {
+impl WriteAdapter<'_> {
     fn position(&self) -> usize {
         self.0.position() as usize
     }
@@ -1077,7 +1074,6 @@ fn format_decimal_i128(
 
         let int_part = value / pow_scale;
         f.write_str(itoa_buf.format(int_part))?;
-
         f.write_str(".")?;
 
         let frac_part = (value % pow_scale).abs();
@@ -1122,64 +1118,62 @@ fn format_decimal_i256(
         } else {
             f.write_str(itoa_buf.format(lo_value))
         }
-    } else {
-        if scale >= I128_SCALE {
-            let hi_scale = scale - I128_SCALE;
-            let pow_scale = I128_POWERS_OF_10[hi_scale];
+    } else if scale >= I128_SCALE {
+        let hi_scale = scale - I128_SCALE;
+        let pow_scale = I128_POWERS_OF_10[hi_scale];
 
-            let int_part = hi_value / pow_scale;
-            f.write_str(itoa_buf.format(int_part))?;
-            f.write_str(".")?;
+        let int_part = hi_value / pow_scale;
+        f.write_str(itoa_buf.format(int_part))?;
+        f.write_str(".")?;
 
-            if hi_scale > 0 {
-                let frac_part = hi_value % pow_scale;
-                let frac_str = itoa_buf.format(frac_part);
-                let zeros_idx = hi_scale - frac_str.len();
-                if zeros_idx > 0 {
-                    let zeros = LEADING_ZEROS[zeros_idx];
-                    f.write_str(zeros)?;
-                }
-                f.write_str(frac_str)?;
+        if hi_scale > 0 {
+            let frac_part = hi_value % pow_scale;
+            let frac_str = itoa_buf.format(frac_part);
+            let zeros_idx = hi_scale - frac_str.len();
+            if zeros_idx > 0 {
+                let zeros = LEADING_ZEROS[zeros_idx];
+                f.write_str(zeros)?;
             }
-
-            let mut frac_buf = itoa::Buffer::new();
-            let lo_frac_str = frac_buf.format(lo_value);
-            let lo_zeros_idx = I128_SCALE - lo_frac_str.len();
-            if lo_zeros_idx > 0 {
-                let lo_zeros = LEADING_ZEROS[lo_zeros_idx];
-                f.write_str(lo_zeros)?;
-            }
-            f.write_str(lo_frac_str)
-        } else {
-            if hi_value > 0 {
-                f.write_str(itoa_buf.format(hi_value))?;
-            }
-            let pow_scale = I128_POWERS_OF_10[scale];
-
-            let int_part = lo_value / pow_scale;
-            let int_str = itoa_buf.format(int_part);
-
-            if hi_value > 0 {
-                let int_zeros_idx = I128_SCALE - scale - int_str.len();
-                if int_zeros_idx > 0 {
-                    let int_zeros = LEADING_ZEROS[int_zeros_idx];
-                    f.write_str(int_zeros)?;
-                }
-            }
-            f.write_str(int_str)?;
-            f.write_str(".")?;
-
-            let frac_part = lo_value % pow_scale;
-            let mut frac_buf = itoa::Buffer::new();
-            let frac_str = frac_buf.format(frac_part);
-
-            let frac_zeros_idx = scale as usize - frac_str.len();
-            if frac_zeros_idx > 0 {
-                let frac_zeros = LEADING_ZEROS[frac_zeros_idx];
-                f.write_str(frac_zeros)?;
-            }
-            f.write_str(frac_str)
+            f.write_str(frac_str)?;
         }
+
+        let mut frac_buf = itoa::Buffer::new();
+        let lo_frac_str = frac_buf.format(lo_value);
+        let lo_zeros_idx = I128_SCALE - lo_frac_str.len();
+        if lo_zeros_idx > 0 {
+            let lo_zeros = LEADING_ZEROS[lo_zeros_idx];
+            f.write_str(lo_zeros)?;
+        }
+        f.write_str(lo_frac_str)
+    } else {
+        if hi_value > 0 {
+            f.write_str(itoa_buf.format(hi_value))?;
+        }
+        let pow_scale = I128_POWERS_OF_10[scale];
+
+        let int_part = lo_value / pow_scale;
+        let int_str = itoa_buf.format(int_part);
+
+        if hi_value > 0 {
+            let int_zeros_idx = I128_SCALE - scale - int_str.len();
+            if int_zeros_idx > 0 {
+                let int_zeros = LEADING_ZEROS[int_zeros_idx];
+                f.write_str(int_zeros)?;
+            }
+        }
+        f.write_str(int_str)?;
+        f.write_str(".")?;
+
+        let frac_part = lo_value % pow_scale;
+        let mut frac_buf = itoa::Buffer::new();
+        let frac_str = frac_buf.format(frac_part);
+
+        let frac_zeros_idx = scale - frac_str.len();
+        if frac_zeros_idx > 0 {
+            let frac_zeros = LEADING_ZEROS[frac_zeros_idx];
+            f.write_str(frac_zeros)?;
+        }
+        f.write_str(frac_str)
     }
 }
 
