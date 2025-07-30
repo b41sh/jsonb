@@ -339,8 +339,6 @@ fn format_decimal_i256(f: &mut impl std::fmt::Write, value: i256, scale: u8) -> 
     let lo_value = (value % divide_scale).as_i128();
     let mut itoa_buf = itoa::Buffer::new();
     if scale == 0 {
-        println!("hi_value={:?}", hi_value);
-        println!("lo_value={:?}", lo_value);
         if hi_value > 0 {
             f.write_str(itoa_buf.format(hi_value))?;
             let lo_str = itoa_buf.format(lo_value);
@@ -359,20 +357,11 @@ fn format_decimal_i256(f: &mut impl std::fmt::Write, value: i256, scale: u8) -> 
     
             let int_part = hi_value / pow_scale;
             f.write_str(itoa_buf.format(int_part))?;
-        
             f.write_str(".")?;
         
-        println!("value={:?}", value);
-        println!("hi_value={:?}", hi_value);
-        println!("hi_scale={:?}", hi_scale);
-        println!("lo_value={:?}", lo_value);
-        println!("int_part={:?}", int_part);
-
             if hi_scale > 0 {
                 let frac_part = hi_value % pow_scale;
                 let frac_str = itoa_buf.format(frac_part);
-        println!("frac_part={:?}", frac_part);
-       
                 let zeros = hi_scale - frac_str.len() as u8;
                 for _ in 0..zeros {
                     f.write_str("0")?;
