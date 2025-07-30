@@ -34,52 +34,141 @@ use serde::ser::Serializer;
 
 const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
-
-static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|| {
+/**
+static POWER_TABLE: std::sync::LazyLock<[i128; 39]> = std::sync::LazyLock::new(|| {
     [
-        i256::from(1_i128),
-        i256::from(10_i128),
-        i256::from(100_i128),
-        i256::from(1000_i128),
-        i256::from(10000_i128),
-        i256::from(100000_i128),
-        i256::from(1000000_i128),
-        i256::from(10000000_i128),
-        i256::from(100000000_i128),
-        i256::from(1000000000_i128),
-        i256::from(10000000000_i128),
-        i256::from(100000000000_i128),
-        i256::from(1000000000000_i128),
-        i256::from(10000000000000_i128),
-        i256::from(100000000000000_i128),
-        i256::from(1000000000000000_i128),
-        i256::from(10000000000000000_i128),
-        i256::from(100000000000000000_i128),
-        i256::from(1000000000000000000_i128),
-        i256::from(10000000000000000000_i128),
-        i256::from(100000000000000000000_i128),
-        i256::from(1000000000000000000000_i128),
-        i256::from(10000000000000000000000_i128),
-        i256::from(100000000000000000000000_i128),
-        i256::from(1000000000000000000000000_i128),
-        i256::from(10000000000000000000000000_i128),
-        i256::from(100000000000000000000000000_i128),
-        i256::from(1000000000000000000000000000_i128),
-        i256::from(10000000000000000000000000000_i128),
-        i256::from(100000000000000000000000000000_i128),
-        i256::from(1000000000000000000000000000000_i128),
-        i256::from(10000000000000000000000000000000_i128),
-        i256::from(100000000000000000000000000000000_i128),
-        i256::from(1000000000000000000000000000000000_i128),
-        i256::from(10000000000000000000000000000000000_i128),
-        i256::from(100000000000000000000000000000000000_i128),
-        i256::from(1000000000000000000000000000000000000_i128),
-        i256::from(10000000000000000000000000000000000000_i128),
-        i256::from(100000000000000000000000000000000000000_i128),
+        1_i128,
+        10_i128,
+        100_i128,
+        1000_i128,
+        10000_i128,
+        100000_i128,
+        1000000_i128,
+        10000000_i128,
+        100000000_i128,
+        1000000000_i128,
+        10000000000_i128,
+        100000000000_i128,
+        1000000000000_i128,
+        10000000000000_i128,
+        100000000000000_i128,
+        1000000000000000_i128,
+        10000000000000000_i128,
+        100000000000000000_i128,
+        1000000000000000000_i128,
+        10000000000000000000_i128,
+        i256::from(100000000000000000000_i128,
+        i256::from(1000000000000000000000_i128,
+        i256::from(10000000000000000000000_i128,
+        i256::from(100000000000000000000000_i128,
+        i256::from(1000000000000000000000000_i128,
+        i256::from(10000000000000000000000000_i128,
+        i256::from(100000000000000000000000000_i128,
+        i256::from(1000000000000000000000000000_i128,
+        i256::from(10000000000000000000000000000_i128,
+        i256::from(100000000000000000000000000000_i128,
+        i256::from(1000000000000000000000000000000_i128,
+        i256::from(10000000000000000000000000000000_i128,
+        i256::from(100000000000000000000000000000000_i128,
+        i256::from(1000000000000000000000000000000000_i128,
+        i256::from(10000000000000000000000000000000000_i128,
+        i256::from(100000000000000000000000000000000000_i128,
+        i256::from(1000000000000000000000000000000000000_i128,
+        i256::from(10000000000000000000000000000000000000_i128,
+        i256::from(100000000000000000000000000000000000000_i128,
     ]
 });
+*/
 
 
+static I256_DIVIDE_SCALE: std::sync::LazyLock<i256> = std::sync::LazyLock::new(|| {
+    i256::from(100000000000000000000000000000000000000_i128)
+});
+
+    // Pre-calculate powers of 10 for common scales to avoid repeated computation
+    const I128_POWERS_OF_10: [i128; 39] = [
+        1,
+        10,
+        100,
+        1000,
+        10000,
+        100000,
+        1000000,
+        10000000,
+        100000000,
+        1000000000,
+        10000000000,
+        100000000000,
+        1000000000000,
+        10000000000000,
+        100000000000000,
+        1000000000000000,
+        10000000000000000,
+        100000000000000000,
+        1000000000000000000,
+        10000000000000000000,
+        100000000000000000000,
+        1000000000000000000000,
+        10000000000000000000000,
+        100000000000000000000000,
+        1000000000000000000000000,
+        10000000000000000000000000,
+        100000000000000000000000000,
+        1000000000000000000000000000,
+        10000000000000000000000000000,
+        100000000000000000000000000000,
+        1000000000000000000000000000000,
+        10000000000000000000000000000000,
+        100000000000000000000000000000000,
+        1000000000000000000000000000000000,
+        10000000000000000000000000000000000,
+        100000000000000000000000000000000000,
+        1000000000000000000000000000000000000,
+        10000000000000000000000000000000000000,
+        100000000000000000000000000000000000000,
+    ];
+
+    const LEADING_ZEROS: [&str; 39] = [
+        "",
+        "0",
+        "00",
+        "000",
+        "0000",
+        "00000",
+        "000000",
+        "0000000",
+        "00000000",
+        "000000000",
+        "0000000000",
+        "00000000000",
+        "000000000000",
+        "0000000000000",
+        "00000000000000",
+        "000000000000000",
+        "0000000000000000",
+        "00000000000000000",
+        "000000000000000000",
+        "0000000000000000000",
+        "00000000000000000000",
+        "000000000000000000000",
+        "0000000000000000000000",
+        "00000000000000000000000",
+        "000000000000000000000000",
+        "0000000000000000000000000",
+        "00000000000000000000000000",
+        "000000000000000000000000000",
+        "0000000000000000000000000000",
+        "00000000000000000000000000000",
+        "000000000000000000000000000000",
+        "0000000000000000000000000000000",
+        "00000000000000000000000000000000",
+        "000000000000000000000000000000000",
+        "0000000000000000000000000000000000",
+        "00000000000000000000000000000000000",
+        "000000000000000000000000000000000000",
+        "0000000000000000000000000000000000000",
+        "00000000000000000000000000000000000000",
+    ];
 
 
 /// Represents a decimal number with 64-bit precision.
@@ -305,8 +394,8 @@ fn format_decimal_i128(f: &mut impl std::fmt::Write, value: i128, scale: u8) -> 
         } else {
             value
         };
-        let pow_scale = 10_i128.pow(scale as u32);
-    
+        let pow_scale = I128_POWERS_OF_10[scale as usize];
+
         let int_part = value / pow_scale;
         f.write_str(itoa_buf.format(int_part))?;
         
@@ -315,10 +404,10 @@ fn format_decimal_i128(f: &mut impl std::fmt::Write, value: i128, scale: u8) -> 
         let frac_part = (value % pow_scale).abs();
         let frac_str = itoa_buf.format(frac_part);
         
-        // 补前导零
-        let zeros = scale as usize - frac_str.len();
-        for _ in 0..zeros {
-            f.write_str("0")?;
+        let zeros_idx = scale as usize - frac_str.len();
+        if zeros_idx > 0 {
+            let zeros = LEADING_ZEROS[zeros_idx];
+            f.write_str(zeros)?;
         }
         
         f.write_str(frac_str)
@@ -334,17 +423,18 @@ fn format_decimal_i256(f: &mut impl std::fmt::Write, value: i256, scale: u8) -> 
         value
     };
 
-    let divide_scale = i256::from(10).pow(38);
-    let hi_value = (value / divide_scale).as_i128();
-    let lo_value = (value % divide_scale).as_i128();
+    //let divide_scale = i256::from(10).pow(38);
+    let hi_value = (value / *I256_DIVIDE_SCALE).as_i128();
+    let lo_value = (value % *I256_DIVIDE_SCALE).as_i128();
     let mut itoa_buf = itoa::Buffer::new();
     if scale == 0 {
         if hi_value > 0 {
             f.write_str(itoa_buf.format(hi_value))?;
             let lo_str = itoa_buf.format(lo_value);
-            let zeros = 38 - lo_str.len() as u8;
-            for _ in 0..zeros {
-                f.write_str("0")?;
+            let zeros_idx = 38 - lo_str.len();
+            if zeros_idx > 0 {
+                let zeros = LEADING_ZEROS[zeros_idx];
+                f.write_str(zeros)?;
             }
             f.write_str(lo_str)
         } else {
@@ -353,8 +443,8 @@ fn format_decimal_i256(f: &mut impl std::fmt::Write, value: i256, scale: u8) -> 
     } else {
         if scale >= 38 {
             let hi_scale = scale - 38;
-            let pow_scale = 10_i128.pow(hi_scale as u32);
-    
+            let pow_scale = I128_POWERS_OF_10[hi_scale as usize];
+ 
             let int_part = hi_value / pow_scale;
             f.write_str(itoa_buf.format(int_part))?;
             f.write_str(".")?;
@@ -362,34 +452,36 @@ fn format_decimal_i256(f: &mut impl std::fmt::Write, value: i256, scale: u8) -> 
             if hi_scale > 0 {
                 let frac_part = hi_value % pow_scale;
                 let frac_str = itoa_buf.format(frac_part);
-                let zeros = hi_scale - frac_str.len() as u8;
-                for _ in 0..zeros {
-                    f.write_str("0")?;
+                let zeros_idx = hi_scale as usize - frac_str.len();
+                if zeros_idx > 0 {
+                    let zeros = LEADING_ZEROS[zeros_idx];
+                    f.write_str(zeros)?;
                 }
                 f.write_str(frac_str);
             }
 
             let mut frac_buf = itoa::Buffer::new();
             let lo_frac_str = frac_buf.format(lo_value);
-            let lo_zeros = 38 - lo_frac_str.len() as u8;
-            for _ in 0..lo_zeros {
-                f.write_str("0")?;
+            let lo_zeros_idx = 38 - lo_frac_str.len();
+            if lo_zeros_idx > 0 {
+                let lo_zeros = LEADING_ZEROS[lo_zeros_idx];
+                f.write_str(lo_zeros)?;
             }
             f.write_str(lo_frac_str)
         } else {
             if hi_value > 0 {
                 f.write_str(itoa_buf.format(hi_value))?;
             }
-
-            let pow_scale = 10_i128.pow(scale as u32);
-    
+            let pow_scale = I128_POWERS_OF_10[scale as usize];
+ 
             let int_part = lo_value / pow_scale;
             let int_str = itoa_buf.format(int_part);
         
             if hi_value > 0 {
-                let zeros = 38 - scale - int_str.len() as u8;
-                for _ in 0..zeros {
-                    f.write_str("0")?;
+                let int_zeros_idx = 38 - scale as usize - int_str.len();
+                if int_zeros_idx > 0 {
+                    let int_zeros = LEADING_ZEROS[int_zeros_idx];
+                    f.write_str(int_zeros)?;
                 }
             }
             f.write_str(int_str)?;
@@ -399,11 +491,11 @@ fn format_decimal_i256(f: &mut impl std::fmt::Write, value: i256, scale: u8) -> 
             let mut frac_buf = itoa::Buffer::new();
             let frac_str = frac_buf.format(frac_part);
         
-            let zeros = scale as usize - frac_str.len();
-            for _ in 0..zeros {
-                f.write_str("0")?;
+            let frac_zeros_idx = scale as usize - frac_str.len();
+            if frac_zeros_idx > 0 {
+                let frac_zeros = LEADING_ZEROS[frac_zeros_idx];
+                f.write_str(frac_zeros)?;
             }
-        
             f.write_str(frac_str)
         }
     }
@@ -1772,5 +1864,4 @@ mod tests {
         );
     }
 }
-
 
