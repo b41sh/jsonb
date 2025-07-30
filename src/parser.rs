@@ -90,6 +90,28 @@ static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|
     ]
 });
 
+/// Intermediate Abstract Syntax Tree representation of JSON values optimized for parsing performance.
+///
+/// `JsonAst` serves as an efficient intermediate representation during the JSON parsing process,
+/// providing several performance optimizations:
+///
+/// 1. **Zero-copy string handling**: Uses `Cow<'a, str>` to avoid unnecessary string allocations
+///    when the input can be directly borrowed.
+///
+/// 2. **Compact object representation**: Stores object entries as a vector of tuples with
+///    `CompactString` keys to reduce memory overhead compared to a BTreeMap during parsing.
+///
+/// 3. **Deferred validation**: Allows postponing object key uniqueness validation until after
+///    parsing, enabling a more streamlined parsing process.
+///
+/// 4. **Lifetime preservation**: Maintains the lifetime of the original input buffer throughout
+///    the parsing process, minimizing unnecessary copying of data.
+///
+/// 5. **Direct conversion path**: Provides an optimized conversion to the final `OwnedJsonb` type
+///    through the `into_owned_jsonb` method.
+///
+/// This approach separates the parsing concerns from the final representation concerns,
+/// allowing each to be optimized independently.
 #[derive(Clone, PartialEq, Default, Eq, EnumAsInner)]
 pub(crate) enum JsonAst<'a> {
     #[default]
@@ -102,6 +124,7 @@ pub(crate) enum JsonAst<'a> {
 }
 
 impl<'a> JsonAst<'a> {
+    /// Converts the intermediate `JsonAst` representation to the final `Value` type.
     fn into_value(self) -> Result<Value<'a>> {
         let value = match self {
             JsonAst::Null => Value::Null,
@@ -133,6 +156,7 @@ impl<'a> JsonAst<'a> {
         Ok(value)
     }
 
+    /// Calculates the memory size required for the JSONB value.
     fn memory_size(&self, is_root: bool) -> usize {
         let size = match self {
             JsonAst::Null | JsonAst::Bool(_) => 0,
@@ -199,12 +223,32 @@ impl<'a> JsonAst<'a> {
         Ok(())
     }
 
+    /// Converts the `JsonAst` to an owned JSONB representation.
+    ///
+    /// This method optimizes the conversion process by:
+    ///
+    /// 1. Pre-calculating the required buffer size to avoid reallocations
+    /// 2. Using a specialized encoder (JsonAstEncoder) that understands the JsonAst structure
+    /// 3. Directly encoding from the parsing-optimized representation without
+    ///    first converting to the intermediate `Value` type
+    /// 4. Preserving the performance benefits of the sorted keys and compact representation
+    ///
+    /// Returns a `OwnedJsonb` containing the binary JSONB representation.
     fn into_owned_jsonb(self) -> OwnedJsonb {
         let size = self.memory_size(true);
         let mut buf = Vec::with_capacity(size);
         let mut encoder = JsonAstEncoder::new(&mut buf);
         encoder.encode(&self);
         OwnedJsonb::new(buf)
+    }
+
+    /// Converts the `JsonAst` to an owned JSONB representation with result buffer.
+    fn into_owned_jsonb_with_buffer(self, result_buf: &mut Vec<u8>) {
+        let size = self.memory_size(true);
+        let required_size = json_ast.memory_size(true);
+        result_buf.reserve(required_size);
+        let mut encoder = JsonAstEncoder::new(&mut buf);
+        encoder.encode(&self);
     }
 }
 
@@ -265,6 +309,8 @@ pub fn parse_value_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
     json_ast.into_value()
 }
 
+/// Parses JSON text into an owned JSONB binary representation.
+/// The parser will follow extended JSON syntax rules.
 pub fn parse_owned_jsonb(buf: &[u8]) -> Result<OwnedJsonb> {
     let mut parser = Parser::new(buf);
     let mut json_ast = parser.parse()?;
@@ -272,11 +318,36 @@ pub fn parse_owned_jsonb(buf: &[u8]) -> Result<OwnedJsonb> {
     Ok(json_ast.into_owned_jsonb())
 }
 
+/// Parses JSON text into an owned JSONB binary representation using standard JSON syntax rules.
+/// The parser will follow standard JSON syntax rules.
 pub fn parse_owned_jsonb_standard_mode(buf: &[u8]) -> Result<OwnedJsonb> {
     let mut parser = Parser::new_standard_mode(buf);
     let mut json_ast = parser.parse()?;
     json_ast.sort_and_check_object_keys()?;
     Ok(json_ast.into_owned_jsonb())
+}
+
+/// Parses JSON text into a provided buffer as JSONB binary representation.
+/// The parser will follow extended JSON syntax rules.
+pub fn parse_owned_jsonb_with_buf(buf: &[u8], result_buf: &mut Vec<u8>) -> Result<()> {
+    let mut parser = Parser::new(buf);
+    let mut json_ast = parser.parse()?;
+    json_ast.sort_and_check_object_keys()?;
+    json_ast.into_owned_jsonb_with_buffer(result);
+    Ok(())
+}
+
+/// Parses JSON text into a provided buffer as JSONB binary representation using standard JSON syntax rules.
+/// The parser will follow standard JSON syntax rules.
+pub fn parse_owned_jsonb_standard_mode_with_buf(
+    buf: &[u8],
+    result_buf: &mut Vec<u8>,
+) -> Result<()> {
+    let mut parser = Parser::new_standard_mode(buf);
+    let mut json_ast = parser.parse()?;
+    json_ast.sort_and_check_object_keys()?;
+    json_ast.into_owned_jsonb_with_buffer(result);
+    Ok(())
 }
 
 struct Parser<'a> {
@@ -714,13 +785,9 @@ impl<'a> Parser<'a> {
         if !has_exponent && precision <= MAX_DECIMAL256_PRECISION {
             // Combine high value and low value to i256 value
             let multiplier = POWER_TABLE[precision - MAX_DECIMAL128_PRECISION];
-            //let (hi_value, _) = i256::from(hi_value).overflowing_mul(multiplier);
-            //let lo_value = i256::from(lo_value);
-            //let (mut i256_value, _) = hi_value.overflowing_add(lo_value);
             let mut i256_value = i256::from(hi_value) * multiplier + i256::from(lo_value);
-
             if negative {
-                (i256_value, _) = i256_value.overflowing_neg();
+                i256_value *= -1;
             }
 
             return Ok(JsonAst::Number(Number::Decimal256(Decimal256 {

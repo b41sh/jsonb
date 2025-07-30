@@ -1054,7 +1054,13 @@ impl Display for Number {
     }
 }
 
-// Helper function to format a decimal i128 value to a formatter without string allocations
+/// Helper function to format a decimal i128 value to a formatter without string allocations
+///
+/// This function efficiently formats a decimal number with the following optimizations:
+/// 1. Uses stack-allocated buffers instead of heap allocations
+/// 2. Handles the sign separately to simplify the formatting logic
+/// 3. Uses the fast itoa library for integer-to-string conversion
+/// 4. Pre-computed zero strings for padding fractional parts
 fn format_decimal_i128(
     f: &mut impl std::fmt::Write,
     value: i128,
@@ -1064,6 +1070,7 @@ fn format_decimal_i128(
     if scale == 0 {
         f.write_str(itoa_buf.format(value))
     } else {
+        // Handle negative numbers by writing the minus sign and working with absolute value
         let value = if value < 0 {
             f.write_str("-")?;
             -value
@@ -1071,30 +1078,34 @@ fn format_decimal_i128(
             value
         };
         let pow_scale = I128_POWERS_OF_10[scale];
-
-        let int_part = value / pow_scale;
-        f.write_str(itoa_buf.format(int_part))?;
+        // Split the value into integer and fractional parts
+        let integer_part = value / pow_scale;
+        f.write_str(itoa_buf.format(integer_part))?;
         f.write_str(".")?;
 
-        let frac_part = (value % pow_scale).abs();
-        let frac_str = itoa_buf.format(frac_part);
+        // Format the fractional part with leading zeros if needed
+        let fractional_part = (value % pow_scale).abs();
+        let fractional_str = itoa_buf.format(fractional_part);
 
-        let zeros_idx = scale - frac_str.len();
-        if zeros_idx > 0 {
-            let zeros = LEADING_ZEROS[zeros_idx];
+        let leading_zeros_count = scale - fractional_str.len();
+        if leading_zeros_count > 0 {
+            let zeros = LEADING_ZEROS[leading_zeros_count];
             f.write_str(zeros)?;
         }
-
-        f.write_str(frac_str)
+        f.write_str(fractional_str)
     }
 }
 
-// Helper function to format a decimal i256 value to a formatter without string allocations
+/// Formats a decimal i256 value to a formatter without heap allocations.
+///
+/// This function efficiently formats a 256-bit decimal number with the specified scale
+/// (number of decimal places) by splitting it into high and low 128-bit parts.
 fn format_decimal_i256(
     f: &mut impl std::fmt::Write,
     value: i256,
     scale: usize,
 ) -> std::fmt::Result {
+    // Handle negative values by writing the minus sign and negating the value
     let value = if value < i256::ZERO {
         f.write_str("-")?;
         -value
@@ -1102,75 +1113,96 @@ fn format_decimal_i256(
         value
     };
 
-    let hi_value = (value / *I256_DIVIDE_SCALE).as_i128();
-    let lo_value = (value % *I256_DIVIDE_SCALE).as_i128();
+    // Split the i256 value into high and low parts for easier formatting
+    let high_part = (value / *I256_DIVIDE_SCALE).as_i128();
+    let low_part = (value % *I256_DIVIDE_SCALE).as_i128();
     let mut itoa_buf = itoa::Buffer::new();
+
+    // Case 1: Integer-only formatting (no decimal places)
     if scale == 0 {
-        if hi_value > 0 {
-            f.write_str(itoa_buf.format(hi_value))?;
-            let lo_str = itoa_buf.format(lo_value);
-            let zeros_idx = I128_SCALE - lo_str.len();
-            if zeros_idx > 0 {
-                let zeros = LEADING_ZEROS[zeros_idx];
+        if high_part > 0 {
+            // Format high part first (most significant digits)
+            f.write_str(itoa_buf.format(high_part))?;
+
+            // Format low part with proper zero padding to maintain place value
+            let low_str = itoa_buf.format(low_part);
+            let zeros_count = I128_SCALE - low_str.len();
+            if zeros_count > 0 {
+                let zeros = LEADING_ZEROS[zeros_count];
                 f.write_str(zeros)?;
             }
-            f.write_str(lo_str)
+            f.write_str(low_str)
         } else {
-            f.write_str(itoa_buf.format(lo_value))
+            // Only low part has non-zero value
+            f.write_str(itoa_buf.format(low_part))
         }
-    } else if scale >= I128_SCALE {
-        let hi_scale = scale - I128_SCALE;
-        let pow_scale = I128_POWERS_OF_10[hi_scale];
+    }
+    // Case 2: Decimal point falls within the high part (large scale)
+    else if scale >= I128_SCALE {
+        // Calculate how many decimal places are in the high part
+        let high_scale = scale - I128_SCALE;
+        let pow_scale = I128_POWERS_OF_10[high_scale];
 
-        let int_part = hi_value / pow_scale;
+        // Format the integer portion from the high part
+        let int_part = high_part / pow_scale;
         f.write_str(itoa_buf.format(int_part))?;
         f.write_str(".")?;
 
-        if hi_scale > 0 {
-            let frac_part = hi_value % pow_scale;
-            let frac_str = itoa_buf.format(frac_part);
-            let zeros_idx = hi_scale - frac_str.len();
-            if zeros_idx > 0 {
-                let zeros = LEADING_ZEROS[zeros_idx];
+        // Format the fractional portion from the high part
+        if high_scale > 0 {
+            let high_frac_part = high_part % pow_scale;
+            let high_frac_str = itoa_buf.format(high_frac_part);
+
+            // Add leading zeros if needed
+            let high_zeros_count = high_scale - high_frac_str.len();
+            if high_zeros_count > 0 {
+                let zeros = LEADING_ZEROS[high_zeros_count];
                 f.write_str(zeros)?;
             }
-            f.write_str(frac_str)?;
+            f.write_str(high_frac_str)?;
         }
 
-        let mut frac_buf = itoa::Buffer::new();
-        let lo_frac_str = frac_buf.format(lo_value);
-        let lo_zeros_idx = I128_SCALE - lo_frac_str.len();
-        if lo_zeros_idx > 0 {
-            let lo_zeros = LEADING_ZEROS[lo_zeros_idx];
-            f.write_str(lo_zeros)?;
+        // Format the low part with proper zero padding
+        let mut low_buf = itoa::Buffer::new();
+        let low_frac_str = low_buf.format(low_part);
+        let low_zeros_count = I128_SCALE - low_frac_str.len();
+        if low_zeros_count > 0 {
+            let low_zeros = LEADING_ZEROS[low_zeros_count];
+            f.write_str(low_zeros)?;
         }
-        f.write_str(lo_frac_str)
-    } else {
-        if hi_value > 0 {
-            f.write_str(itoa_buf.format(hi_value))?;
+        f.write_str(low_frac_str)
+    }
+    // Case 3: Decimal point falls within the low part
+    else {
+        // Format high part if it exists (integer portion)
+        if high_part > 0 {
+            f.write_str(itoa_buf.format(high_part))?;
         }
         let pow_scale = I128_POWERS_OF_10[scale];
 
-        let int_part = lo_value / pow_scale;
+        // Calculate integer part from low component
+        let int_part = low_part / pow_scale;
         let int_str = itoa_buf.format(int_part);
 
-        if hi_value > 0 {
-            let int_zeros_idx = I128_SCALE - scale - int_str.len();
-            if int_zeros_idx > 0 {
-                let int_zeros = LEADING_ZEROS[int_zeros_idx];
+        // If high part exists, we need to ensure proper place value with padding
+        if high_part > 0 {
+            let int_zeros_count = I128_SCALE - scale - int_str.len();
+            if int_zeros_count > 0 {
+                let int_zeros = LEADING_ZEROS[int_zeros_count];
                 f.write_str(int_zeros)?;
             }
         }
         f.write_str(int_str)?;
         f.write_str(".")?;
 
-        let frac_part = lo_value % pow_scale;
+        // Format fractional part from low component with proper zero padding
+        let frac_part = low_part % pow_scale;
         let mut frac_buf = itoa::Buffer::new();
         let frac_str = frac_buf.format(frac_part);
 
-        let frac_zeros_idx = scale - frac_str.len();
-        if frac_zeros_idx > 0 {
-            let frac_zeros = LEADING_ZEROS[frac_zeros_idx];
+        let frac_zeros_count = scale - frac_str.len();
+        if frac_zeros_count > 0 {
+            let frac_zeros = LEADING_ZEROS[frac_zeros_count];
             f.write_str(frac_zeros)?;
         }
         f.write_str(frac_str)
