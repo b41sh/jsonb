@@ -946,7 +946,7 @@ mod tests {
         let cjk = '\u{4E00}'..='\u{9FFF}';
 
         let chars: Vec<char> = ascii.chain(cjk).collect();
-        prop::collection::vec(prop::sample::select(chars), 1..30)
+        prop::collection::vec(prop::sample::select(chars), 1..50)
             .prop_map(|v| v.into_iter().collect())
     }
 
