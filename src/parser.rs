@@ -359,30 +359,41 @@ pub fn parse_owned_jsonb_standard_mode_with_buf(
     Ok(())
 }
 
+/// JSON parser with optimized parsing strategies.
+///
+/// This parser implements both standard JSON parsing and an extended syntax with additional features.
+/// It uses a single-pass approach for better performance and provides detailed error reporting.
 struct Parser<'a> {
+    /// Input buffer containing the JSON text to parse
     buf: &'a [u8],
+    /// Current position in the buffer
     idx: usize,
-    /// When true, the parser follows standard JSON syntax rules.
-    standard_mode: bool,
+    /// Function pointer for parsing numbers based on the mode
+    parse_number_fn: fn(&mut Self) -> Result<JsonAst<'a>>,
+    /// Function pointer for parsing arrays based on the mode
+    parse_array_fn: fn(&mut Self) -> Result<JsonAst<'a>>,
 }
 
 impl<'a> Parser<'a> {
-    fn new(buf: &'a [u8]) -> Parser<'a> {
+    fn new(buf: &'a [u8]) -> Self {
         Self {
             buf,
             idx: 0,
-            standard_mode: false,
+            parse_number_fn: Self::parse_json_number,
+            parse_array_fn: Self::parse_json_array,
         }
     }
 
-    fn new_standard_mode(buf: &'a [u8]) -> Parser<'a> {
+    fn new_standard_mode(buf: &'a [u8]) -> Self {
         Self {
             buf,
             idx: 0,
-            standard_mode: true,
+            parse_number_fn: Self::parse_standard_json_number,
+            parse_array_fn: Self::parse_standard_json_array,
         }
     }
 
+    /// Parse a complete JSON document from the input buffer.
     fn parse(&mut self) -> Result<JsonAst<'a>> {
         let val = self.parse_json_value()?;
         self.skip_unused();
@@ -393,6 +404,11 @@ impl<'a> Parser<'a> {
         Ok(val)
     }
 
+    /// Parse a JSON value, dispatching to the appropriate parser based on the first character.
+    ///
+    /// This is an optimized version that avoids runtime mode checks by using function pointers
+    /// selected during parser initialization.
+    #[inline]
     fn parse_json_value(&mut self) -> Result<JsonAst<'a>> {
         self.skip_unused();
         let c = self.next()?;
@@ -400,15 +416,9 @@ impl<'a> Parser<'a> {
             b'n' => self.parse_json_null(),
             b't' => self.parse_json_true(),
             b'f' => self.parse_json_false(),
-            b'0'..=b'9' | b'-' | b'+' | b'.' => {
-                if self.standard_mode {
-                    self.parse_standard_json_number()
-                } else {
-                    self.parse_json_number()
-                }
-            }
+            b'0'..=b'9' | b'-' | b'+' | b'.' => (self.parse_number_fn)(self),
             b'"' => self.parse_json_string(),
-            b'[' => self.parse_json_array(),
+            b'[' => (self.parse_array_fn)(self),
             b'{' => self.parse_json_object(),
             _ => {
                 self.step();
@@ -892,6 +902,43 @@ impl<'a> Parser<'a> {
         Ok(JsonAst::String(val))
     }
 
+    /// Parse a JSON array with standard mode.
+    fn parse_standard_json_array(&mut self) -> Result<JsonAst<'a>> {
+        // Ensure the array starts with an opening bracket
+        self.must_is(b'[')?;
+
+        let mut first = true;
+        let mut values = Vec::new();
+
+        // Parse array elements until closing bracket is found
+        loop {
+            self.skip_unused();
+            let c = self.next()?;
+
+            // Check for end of array
+            if *c == b']' {
+                self.step();
+                break;
+            }
+
+            // Handle comma separator between elements (not for the first element)
+            if !first {
+                if *c != b',' {
+                    return Err(self.error(ParseErrorCode::ExpectedArrayCommaOrEnd));
+                }
+                self.step();
+            }
+            first = false;
+
+            self.skip_unused();
+
+            // Parse a regular array element
+            let value = self.parse_json_value()?;
+            values.push(value);
+        }
+        Ok(JsonAst::Array(values))
+    }
+
     /// Parse a JSON array with extended syntax support.
     ///
     /// This function implements a JSON array parser that:
@@ -934,9 +981,6 @@ impl<'a> Parser<'a> {
             // Extended syntax: Check for empty elements (consecutive commas or comma before closing bracket)
             // This is where the parser extends standard JSON by allowing empty elements
             if self.check_next_either(b',', b']') {
-                if self.standard_mode {
-                    return Err(self.error(ParseErrorCode::ExpectedSomeValue));
-                }
                 // Insert null for empty element
                 values.push(JsonAst::Null);
                 continue;

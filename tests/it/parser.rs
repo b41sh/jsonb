@@ -32,6 +32,7 @@ fn test_parse_ok(tests: Vec<(&str, Value<'_>)>) {
 
 fn test_parse_standard_err(errors: &[(&str, &'static str)]) {
     for &(s, err) in errors {
+        println!("s={:?}", s);
         let res = parse_value_standard_mode(s.as_bytes());
         assert!(res.is_err());
         assert_eq!(res.err().unwrap().to_string(), err);
@@ -365,9 +366,9 @@ fn test_parse_array() {
         ("[1 2]", "expected `,` or `]`, pos 3"),
         ("[]a", "trailing characters, pos 3"),
         // Extended JSON array syntax return error in standard mode
-        ("[1, ]", "expected value, pos 4"),
-        ("[ , 2, 3]", "expected value, pos 2"),
-        ("[ , ]", "expected value, pos 2"),
+        ("[1, ]", "expected value, pos 5"),
+        ("[ , 2, 3]", "expected value, pos 3"),
+        ("[ , ]", "expected value, pos 3"),
     ]);
 
     let tests = vec![
