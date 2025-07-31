@@ -16,6 +16,7 @@ use crate::parser::JsonAst;
 use compact_str::CompactString;
 use std::collections::VecDeque;
 
+use std::borrow::Cow;
 use byteorder::BigEndian;
 use byteorder::WriteBytesExt;
 use serde::ser;
@@ -903,7 +904,8 @@ impl<'a> JsonAstEncoder<'a> {
 
     /// Encodes an object of `JsonAst` values (vector of key-value pairs).
     /// Returns the total length of the encoded object.
-    fn encode_object(&mut self, obj: &[(CompactString, JsonAst<'a>, usize)]) -> usize {
+    //fn encode_object(&mut self, obj: &[(CompactString, JsonAst<'a>, usize)]) -> usize {
+    fn encode_object(&mut self, obj: &[(Cow<'a, str>, JsonAst<'a>, usize)]) -> usize {
         let (mut object_len, mut jentry_index) = self.base_encoder.encode_object_header(obj.len());
 
         // encode all keys first

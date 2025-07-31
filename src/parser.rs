@@ -129,7 +129,8 @@ pub(crate) enum JsonAst<'a> {
     String(Cow<'a, str>),
     Number(Number),
     Array(Vec<JsonAst<'a>>),
-    Object(Vec<(CompactString, JsonAst<'a>, usize)>),
+    //Object(Vec<(CompactString, JsonAst<'a>, usize)>),
+    Object(Vec<(Cow<'a, str>, JsonAst<'a>, usize)>),
 }
 
 impl<'a> JsonAst<'a> {
@@ -158,7 +159,7 @@ impl<'a> JsonAst<'a> {
             JsonAst::Object(kvs) => {
                 let mut object = Object::new();
                 for (key, val, pos) in kvs.into_iter() {
-                    let key_str = key.into_string();
+                    let key_str = key.to_string();
                     if object.contains_key(&key_str) {
                         let code = ParseErrorCode::ObjectDuplicateKey(key_str);
                         return Err(Error::Syntax(code, pos));
@@ -988,10 +989,12 @@ impl<'a> Parser<'a> {
             let value = self.parse_json_value()?;
 
             // Add the key-value pair to the object
-            let key = key.as_string().unwrap();
-            let k_str = CompactString::new(key);
+            let key_str = key.as_string().unwrap();
+            //obj2.push((key, value.clone(), pos));
+            //let k_str = CompactString::new(key);
 
-            obj.push((k_str, value, pos));
+            //obj.push((k_str, value, pos));
+            obj.push((key_str.clone(), value, pos));
         }
 
         // Sort the Object fields by key and check for duplicate keys.
@@ -999,7 +1002,7 @@ impl<'a> Parser<'a> {
         obj.sort_by(|a, b| a.0.cmp(&b.0));
         for i in 1..obj.len() {
             if obj[i - 1].0 == obj[i].0 {
-                let key_str = obj[i].0.clone().into_string();
+                let key_str = obj[i].0.clone().to_string();
                 let pos = obj[i].2;
                 let code = ParseErrorCode::ObjectDuplicateKey(key_str);
                 return Err(Error::Syntax(code, pos));
