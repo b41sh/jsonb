@@ -458,6 +458,10 @@ fn test_parse_object() {
         ("{\"a\":1 1", "expected `,` or `}`, pos 7"),
         ("{\"a\":1,", "EOF while parsing a value, pos 7"),
         ("{}a", "trailing characters, pos 3"),
+        (
+            "{\"k\":\"v\",\"k\":\"v2\"}",
+            "duplicate object attribute \"k\", pos 12",
+        ),
     ]);
 
     let mut obj1 = Object::new();

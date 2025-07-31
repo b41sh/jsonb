@@ -34,14 +34,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::cmp::Ordering::*;
-
 use jsonb::RawJsonb;
-use jsonb::{parse_value, parse_value_standard_mode, Number, Value};
+use jsonb::{parse_value, parse_value_standard_mode};
 use ordered_float::OrderedFloat;
 
 #[test]
+#[cfg(feature = "arbitrary_precision")]
 fn it_cmps_decimals() {
+    use core::cmp::Ordering::*;
+    use jsonb::{Number, Value};
+
     fn cmp(a: &str, b: &str, c: core::cmp::Ordering) {
         let v1 = parse_value(a.as_bytes()).unwrap();
         let v2 = parse_value(b.as_bytes()).unwrap();
@@ -2234,6 +2236,7 @@ fn test_parse_decimal() {
         "317000006395220278118691742155288870912",
     ];
 
+    #[cfg(feature = "arbitrary_precision")]
     for test in tests {
         let v = parse_value(test.as_bytes()).unwrap();
         let s = format!("{v}");

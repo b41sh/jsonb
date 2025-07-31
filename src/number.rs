@@ -17,7 +17,6 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::io::Write;
 
 use crate::error::Result;
 use crate::Error;
@@ -29,10 +28,7 @@ use serde::de::Deserialize;
 use serde::de::Deserializer;
 use serde::de::Visitor;
 use serde::ser::Serialize;
-use serde::ser::SerializeStruct;
 use serde::ser::Serializer;
-
-const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
 // Pre-calculate powers of 10 for common scales to avoid repeated computation
 const I128_POWERS_OF_10: [i128; 39] = [
@@ -288,6 +284,24 @@ impl Serialize for Number {
             Number::Float64(v) => serializer.serialize_f64(*v),
             #[cfg(feature = "arbitrary_precision")]
             Number::Decimal64(_) | Number::Decimal128(_) | Number::Decimal256(_) => {
+                use serde::ser::SerializeStruct;
+                use std::io::Write;
+                const NUMBER_TOKEN: &str = "$serde_json::private::Number";
+
+                struct WriteAdapter<'a>(&'a mut std::io::Cursor<&'a mut [u8]>);
+
+                impl std::fmt::Write for WriteAdapter<'_> {
+                    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+                        self.0.write_all(s.as_bytes()).map_err(|_| std::fmt::Error)
+                    }
+                }
+
+                impl WriteAdapter<'_> {
+                    fn position(&self) -> usize {
+                        self.0.position() as usize
+                    }
+                }
+
                 let mut buffer = [0u8; 128];
                 let mut cursor = std::io::Cursor::new(&mut buffer[..]);
                 let mut adapter = WriteAdapter(&mut cursor);
@@ -334,20 +348,6 @@ impl Serialize for Number {
                 serializer.serialize_f64(scaled_value)
             }
         }
-    }
-}
-
-struct WriteAdapter<'a>(&'a mut std::io::Cursor<&'a mut [u8]>);
-
-impl std::fmt::Write for WriteAdapter<'_> {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        self.0.write_all(s.as_bytes()).map_err(|_| std::fmt::Error)
-    }
-}
-
-impl WriteAdapter<'_> {
-    fn position(&self) -> usize {
-        self.0.position() as usize
     }
 }
 

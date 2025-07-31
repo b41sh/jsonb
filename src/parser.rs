@@ -25,14 +25,19 @@ use super::value::Value;
 use crate::core::Decoder;
 
 use crate::core::JsonAstEncoder;
+#[cfg(feature = "arbitrary_precision")]
 use crate::Decimal128;
+#[cfg(feature = "arbitrary_precision")]
 use crate::Decimal256;
+#[cfg(feature = "arbitrary_precision")]
 use crate::Decimal64;
 use crate::OwnedJsonb;
 use compact_str::CompactString;
 use enum_as_inner::EnumAsInner;
+#[cfg(feature = "arbitrary_precision")]
 use ethnum::i256;
 
+#[cfg(feature = "arbitrary_precision")]
 const MAX_DECIMAL64_PRECISION: usize = 18;
 const MAX_DECIMAL128_PRECISION: usize = 38;
 const MAX_DECIMAL256_PRECISION: usize = 76;
@@ -41,11 +46,16 @@ const UINT64_MIN: i128 = 0i128;
 const UINT64_MAX: i128 = 18_446_744_073_709_551_615i128;
 const INT64_MIN: i128 = -9_223_372_036_854_775_808i128;
 const INT64_MAX: i128 = 9_223_372_036_854_775_807i128;
+#[cfg(feature = "arbitrary_precision")]
 const DECIMAL64_MIN: i128 = -999999999999999999i128;
+#[cfg(feature = "arbitrary_precision")]
 const DECIMAL64_MAX: i128 = 999999999999999999i128;
+#[cfg(feature = "arbitrary_precision")]
 const DECIMAL128_MIN: i128 = -99999999999999999999999999999999999999i128;
+#[cfg(feature = "arbitrary_precision")]
 const DECIMAL128_MAX: i128 = 99999999999999999999999999999999999999i128;
 
+#[cfg(feature = "arbitrary_precision")]
 static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|| {
     [
         i256::from(1_i128),
@@ -1009,7 +1019,6 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethnum::i256;
     use proptest::prelude::*;
 
     fn string_strategy() -> impl Strategy<Value = String> {
@@ -1032,7 +1041,12 @@ mod tests {
         ]
     }
 
+    #[cfg(feature = "arbitrary_precision")]
     fn number_strategy() -> impl Strategy<Value = Number> {
+        use crate::Decimal128;
+        use crate::Decimal256;
+        use crate::Decimal64;
+        use ethnum::i256;
         prop_oneof![
             any::<u64>().prop_map(Number::UInt64),
             any::<i64>().prop_map(Number::Int64),
@@ -1049,6 +1063,7 @@ mod tests {
         ]
     }
 
+    #[cfg(feature = "arbitrary_precision")]
     fn json_strategy() -> impl Strategy<Value = Value<'static>> {
         let leaf = prop_oneof![
             Just(Value::Null),
@@ -1085,21 +1100,20 @@ mod tests {
 
     proptest! {
         #[test]
+        #[cfg(feature = "arbitrary_precision")]
         fn test_json_parser(json in json_strategy()) {
             let source = format!("{}", json);
             let res1 = serde_json::from_slice::<serde_json::Value>(source.as_bytes());
             let res2 = parse_value(source.as_bytes());
-            assert_eq!(res1.is_ok(), res2.is_ok());
-            if let Ok(res2) = res2 {
-                let result = format!("{}", res2);
-                assert_eq!(source, result);
-            }
             let res3 = parse_owned_jsonb(source.as_bytes());
+            assert_eq!(res1.is_ok(), res2.is_ok());
             assert_eq!(res1.is_ok(), res3.is_ok());
-            if let Ok(res3) = res3 {
-                let raw_jsonb = res3.as_raw();
-                let result = raw_jsonb.to_string();
-                assert_eq!(source, result);
+            if res1.is_ok() {
+                let res1 = format!("{}", res1.unwrap());
+                let res2 = format!("{}", res2.unwrap());
+                let res3 = format!("{}", res3.unwrap());
+                assert_eq!(res1, res2);
+                assert_eq!(res1, res3);
             }
         }
     }
@@ -1110,17 +1124,14 @@ mod tests {
             let source = format!("{}", json);
             let res1 = serde_json::from_slice::<serde_json::Value>(source.as_bytes());
             let res2 = parse_value_standard_mode(source.as_bytes());
-            assert_eq!(res1.is_ok(), res2.is_ok());
-            if let Ok(res2) = res2 {
-                let result = format!("{}", res2);
-                assert_eq!(source, result);
-            }
             let res3 = parse_owned_jsonb_standard_mode(source.as_bytes());
+            assert_eq!(res1.is_ok(), res2.is_ok());
             assert_eq!(res1.is_ok(), res3.is_ok());
-            if let Ok(res3) = res3 {
-                let raw_jsonb = res3.as_raw();
-                let result = raw_jsonb.to_string();
-                assert_eq!(source, result);
+            if res1.is_ok() {
+                let res2 = format!("{}", res2.unwrap());
+                let res3 = format!("{}", res3.unwrap());
+                assert_eq!(source, res2);
+                assert_eq!(source, res3);
             }
         }
     }
