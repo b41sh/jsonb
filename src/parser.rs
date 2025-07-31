@@ -907,7 +907,7 @@ impl<'a> Parser<'a> {
         self.must_is(b'[')?;
 
         let mut first = true;
-        let mut values = Vec::with_capacity(5);
+        let mut values = Vec::new();
 
         // Parse array elements until closing bracket is found
         loop {
@@ -965,7 +965,7 @@ impl<'a> Parser<'a> {
         self.must_is(b'{')?;
 
         let mut first = true;
-        let mut obj = Vec::with_capacity(10);
+        let mut obj = Vec::new();
 
         // Parse key-value pairs until closing brace is found
         loop {
