@@ -765,22 +765,27 @@ impl<'a> Parser<'a> {
                 return Ok(JsonAst::Number(Number::Int64(
                     i64::try_from(value).unwrap(),
                 )));
-            } else if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&value)
-                && precision <= MAX_DECIMAL64_PRECISION
+            }
+            #[cfg(feature = "arbitrary_precision")]
             {
-                return Ok(JsonAst::Number(Number::Decimal64(Decimal64 {
-                    scale: scale as u8,
-                    value: i64::try_from(value).unwrap(),
-                })));
-            } else if (DECIMAL128_MIN..=DECIMAL128_MAX).contains(&value) {
-                return Ok(JsonAst::Number(Number::Decimal128(Decimal128 {
-                    scale: scale as u8,
-                    value,
-                })));
+                if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&value)
+                    && precision <= MAX_DECIMAL64_PRECISION
+                {
+                    return Ok(JsonAst::Number(Number::Decimal64(Decimal64 {
+                        scale: scale as u8,
+                        value: i64::try_from(value).unwrap(),
+                    })));
+                } else if (DECIMAL128_MIN..=DECIMAL128_MAX).contains(&value) {
+                    return Ok(JsonAst::Number(Number::Decimal128(Decimal128 {
+                        scale: scale as u8,
+                        value,
+                    })));
+                }
             }
         }
 
         // Second parsing strategy: Try to parse as i256 for very large numbers
+        #[cfg(feature = "arbitrary_precision")]
         if !has_exponent && precision <= MAX_DECIMAL256_PRECISION {
             // Combine high value and low value to i256 value
             let multiplier = POWER_TABLE[precision - MAX_DECIMAL128_PRECISION];

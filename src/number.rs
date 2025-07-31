@@ -275,6 +275,9 @@ impl Serialize for Number {
     ///
     /// This implementation supports serialization to JSON integers and floats.
     /// It automatically selects the most suitable output format based on the internal representation.
+    ///
+    /// When the `arbitrary_precision` feature is enabled, decimal types are serialized with full precision
+    /// using the optimized formatting functions. When disabled, decimal types are converted to f64.
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -283,6 +286,7 @@ impl Serialize for Number {
             Number::Int64(v) => serializer.serialize_i64(*v),
             Number::UInt64(v) => serializer.serialize_u64(*v),
             Number::Float64(v) => serializer.serialize_f64(*v),
+            #[cfg(feature = "arbitrary_precision")]
             Number::Decimal64(_) | Number::Decimal128(_) | Number::Decimal256(_) => {
                 let mut buffer = [0u8; 128];
                 let mut cursor = std::io::Cursor::new(&mut buffer[..]);
@@ -309,12 +313,25 @@ impl Serialize for Number {
                 }
 
                 let pos = adapter.position();
-                let num_str = std::str::from_utf8(&buffer[..pos])
-                    .map_err(|_| serde::ser::Error::custom("Invalid decimal number"))?;
+                let num_str = std::str::from_utf8(&buffer[..pos]).map_err(|e| {
+                    serde::ser::Error::custom(format!("Invalid decimal number: {e}"))
+                })?;
 
-                let mut serialize_struct = serializer.serialize_struct(NUMBER_TOKEN, 0)?;
+                let mut serialize_struct = serializer.serialize_struct(NUMBER_TOKEN, 1)?;
                 serialize_struct.serialize_field(NUMBER_TOKEN, num_str)?;
                 serialize_struct.end()
+            }
+            #[cfg(not(feature = "arbitrary_precision"))]
+            Number::Decimal64(_) | Number::Decimal128(_) | Number::Decimal256(_) => {
+                // Convert to f64 when arbitrary_precision is not enabled
+                let (value, scale) = match self {
+                    Number::Decimal64(v) => (v.value as f64, v.scale as i32),
+                    Number::Decimal128(v) => (v.value as f64, v.scale as i32),
+                    Number::Decimal256(v) => (v.value.as_f64(), v.scale as i32),
+                    _ => unreachable!(),
+                };
+                let scaled_value = value / 10f64.powi(scale);
+                serializer.serialize_f64(scaled_value)
             }
         }
     }
