@@ -46,8 +46,8 @@ fn it_cmps_decimals() {
         let v1 = parse_value(a.as_bytes()).unwrap();
         let v2 = parse_value(b.as_bytes()).unwrap();
 
-        let s1 = format!("{}", v1);
-        let s2 = format!("{}", v2);
+        let s1 = format!("{v1}");
+        let s2 = format!("{v2}");
 
         let buf1 = v1.to_vec();
         let buf2 = v2.to_vec();
@@ -2236,7 +2236,7 @@ fn test_parse_decimal() {
 
     for test in tests {
         let v = parse_value(test.as_bytes()).unwrap();
-        let s = format!("{}", v);
+        let s = format!("{v}");
         let buf = v.to_vec();
         let r = RawJsonb::new(&buf);
         let ss = r.to_string();
@@ -2280,7 +2280,7 @@ fn test_parse_float() {
 
     for (expected, test) in tests {
         let v = parse_value(test.as_bytes()).unwrap();
-        let s = format!("{}", v);
+        let s = format!("{v}");
         let buf = v.to_vec();
         let r = RawJsonb::new(&buf);
         let ss = r.to_string();
@@ -2292,7 +2292,7 @@ fn test_parse_float() {
     // standard json
     for (expected, test) in tests {
         let v = parse_value_standard_mode(test.as_bytes()).unwrap();
-        let s = format!("{}", v);
+        let s = format!("{v}");
         let buf = v.to_vec();
         let r = RawJsonb::new(&buf);
         let ss = r.to_string();
