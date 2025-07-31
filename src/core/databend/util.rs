@@ -247,48 +247,6 @@ impl OwnedJsonb {
 
 impl Number {
     #[inline]
-    pub(crate) fn memory_size(&self) -> usize {
-        match self {
-            Self::Int64(v) => {
-                if *v == 0 {
-                    1
-                } else if *v >= i8::MIN.into() && *v <= i8::MAX.into() {
-                    2
-                } else if *v >= i16::MIN.into() && *v <= i16::MAX.into() {
-                    3
-                } else if *v >= i32::MIN.into() && *v <= i32::MAX.into() {
-                    5
-                } else {
-                    9
-                }
-            }
-            Self::UInt64(v) => {
-                if *v == 0 {
-                    1
-                } else if *v <= u8::MAX.into() {
-                    2
-                } else if *v <= u16::MAX.into() {
-                    3
-                } else if *v <= u32::MAX.into() {
-                    5
-                } else {
-                    9
-                }
-            }
-            Self::Float64(v) => {
-                if v.is_nan() || v.is_infinite() {
-                    1
-                } else {
-                    9
-                }
-            }
-            Self::Decimal64(_) => 10,
-            Self::Decimal128(_) => 18,
-            Self::Decimal256(_) => 34,
-        }
-    }
-
-    #[inline]
     pub(crate) fn compact_encode<W: Write>(&self, mut writer: W) -> Result<usize> {
         match self {
             Self::Int64(v) => {

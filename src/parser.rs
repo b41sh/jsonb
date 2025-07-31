@@ -33,7 +33,6 @@ use crate::Decimal256;
 use crate::Decimal64;
 use crate::OwnedJsonb;
 use compact_str::CompactString;
-use enum_as_inner::EnumAsInner;
 #[cfg(feature = "arbitrary_precision")]
 use ethnum::i256;
 
@@ -122,7 +121,7 @@ static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|
 ///
 /// This approach separates the parsing concerns from the final representation concerns,
 /// allowing each to be optimized independently.
-#[derive(Clone, PartialEq, Default, Eq, EnumAsInner)]
+#[derive(Clone, PartialEq, Default, Eq)]
 pub(crate) enum JsonAst<'a> {
     #[default]
     Null,
@@ -134,6 +133,13 @@ pub(crate) enum JsonAst<'a> {
 }
 
 impl<'a> JsonAst<'a> {
+    fn as_string(&self) -> Option<&Cow<'a, str>> {
+        match self {
+            JsonAst::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
     /// Converts the intermediate `JsonAst` representation to the final `Value` type.
     fn into_value(self) -> Result<Value<'a>> {
         let value = match self {
@@ -166,73 +172,6 @@ impl<'a> JsonAst<'a> {
         Ok(value)
     }
 
-    /// Calculates the memory size required for the JSONB value.
-    fn memory_size(&self, is_root: bool) -> usize {
-        let size = match self {
-            JsonAst::Null | JsonAst::Bool(_) => 0,
-            JsonAst::String(v) => v.len(),
-            JsonAst::Number(v) => v.memory_size(),
-            JsonAst::Array(vals) => {
-                let mut size = 4;
-                size += 4;
-                size += 4 * vals.len();
-                for val in vals.iter() {
-                    size += val.memory_size(false);
-                }
-                return size;
-            }
-            JsonAst::Object(kvs) => {
-                let mut size = 4;
-                size += 8 * kvs.len();
-                for (key, val, _) in kvs.iter() {
-                    size += key.len();
-                    size += val.memory_size(false);
-                }
-                return size;
-            }
-        };
-        if is_root {
-            size + 8
-        } else {
-            size
-        }
-    }
-
-    /// Sort the Object fields by key and check for duplicate keys.
-    /// Returns an error if duplicate keys are found.
-    fn sort_and_check_object_keys(&mut self) -> Result<()> {
-        match self {
-            JsonAst::Object(fields) => {
-                // First sort the fields by key
-                fields.sort_by(|a, b| a.0.cmp(&b.0));
-
-                // Then check for duplicates by comparing adjacent keys
-                for i in 1..fields.len() {
-                    if fields[i - 1].0 == fields[i].0 {
-                        let key_str = fields[i].0.clone().into_string();
-                        let pos = fields[i].2;
-                        let code = ParseErrorCode::ObjectDuplicateKey(key_str);
-                        return Err(Error::Syntax(code, pos));
-                    }
-                }
-
-                // Recursively sort and check nested objects
-                for (_, value, _) in fields.iter_mut() {
-                    value.sort_and_check_object_keys()?;
-                }
-            }
-            JsonAst::Array(items) => {
-                // Recursively sort and check objects in arrays
-                for item in items.iter_mut() {
-                    item.sort_and_check_object_keys()?;
-                }
-            }
-            _ => {}
-        }
-
-        Ok(())
-    }
-
     /// Converts the `JsonAst` to an owned JSONB representation.
     ///
     /// This method optimizes the conversion process by:
@@ -244,8 +183,7 @@ impl<'a> JsonAst<'a> {
     /// 4. Preserving the performance benefits of the sorted keys and compact representation
     ///
     /// Returns a `OwnedJsonb` containing the binary JSONB representation.
-    fn into_owned_jsonb(self) -> OwnedJsonb {
-        let size = self.memory_size(true);
+    fn into_owned_jsonb(self, size: usize) -> OwnedJsonb {
         let mut buf = Vec::with_capacity(size);
         let mut encoder = JsonAstEncoder::new(&mut buf);
         encoder.encode(&self);
@@ -253,8 +191,7 @@ impl<'a> JsonAst<'a> {
     }
 
     /// Converts the `JsonAst` to an owned JSONB representation with result buffer.
-    fn into_owned_jsonb_with_buffer(self, result_buf: &mut Vec<u8>) {
-        let size = self.memory_size(true);
+    fn into_owned_jsonb_with_buffer(self, size: usize, result_buf: &mut Vec<u8>) {
         result_buf.reserve(size);
         let mut encoder = JsonAstEncoder::new(result_buf);
         encoder.encode(&self);
@@ -321,28 +258,28 @@ pub fn parse_value_standard_mode(buf: &[u8]) -> Result<Value<'_>> {
 /// Parses JSON text into an owned JSONB binary representation.
 /// The parser will follow extended JSON syntax rules.
 pub fn parse_owned_jsonb(buf: &[u8]) -> Result<OwnedJsonb> {
+    let size = buf.len();
     let mut parser = Parser::new(buf);
-    let mut json_ast = parser.parse()?;
-    json_ast.sort_and_check_object_keys()?;
-    Ok(json_ast.into_owned_jsonb())
+    let json_ast = parser.parse()?;
+    Ok(json_ast.into_owned_jsonb(size))
 }
 
 /// Parses JSON text into an owned JSONB binary representation using standard JSON syntax rules.
 /// The parser will follow standard JSON syntax rules.
 pub fn parse_owned_jsonb_standard_mode(buf: &[u8]) -> Result<OwnedJsonb> {
+    let size = buf.len();
     let mut parser = Parser::new_standard_mode(buf);
-    let mut json_ast = parser.parse()?;
-    json_ast.sort_and_check_object_keys()?;
-    Ok(json_ast.into_owned_jsonb())
+    let json_ast = parser.parse()?;
+    Ok(json_ast.into_owned_jsonb(size))
 }
 
 /// Parses JSON text into a provided buffer as JSONB binary representation.
 /// The parser will follow extended JSON syntax rules.
 pub fn parse_owned_jsonb_with_buf(buf: &[u8], result_buf: &mut Vec<u8>) -> Result<()> {
+    let size = buf.len();
     let mut parser = Parser::new(buf);
-    let mut json_ast = parser.parse()?;
-    json_ast.sort_and_check_object_keys()?;
-    json_ast.into_owned_jsonb_with_buffer(result_buf);
+    let json_ast = parser.parse()?;
+    json_ast.into_owned_jsonb_with_buffer(size, result_buf);
     Ok(())
 }
 
@@ -352,10 +289,10 @@ pub fn parse_owned_jsonb_standard_mode_with_buf(
     buf: &[u8],
     result_buf: &mut Vec<u8>,
 ) -> Result<()> {
+    let size = buf.len();
     let mut parser = Parser::new_standard_mode(buf);
-    let mut json_ast = parser.parse()?;
-    json_ast.sort_and_check_object_keys()?;
-    json_ast.into_owned_jsonb_with_buffer(result_buf);
+    let json_ast = parser.parse()?;
+    json_ast.into_owned_jsonb_with_buffer(size, result_buf);
     Ok(())
 }
 
@@ -1055,6 +992,18 @@ impl<'a> Parser<'a> {
             let k_str = CompactString::new(key);
 
             obj.push((k_str, value, pos));
+        }
+
+        // Sort the Object fields by key and check for duplicate keys.
+        // Returns an error if duplicate keys are found.
+        obj.sort_by(|a, b| a.0.cmp(&b.0));
+        for i in 1..obj.len() {
+            if obj[i - 1].0 == obj[i].0 {
+                let key_str = obj[i].0.clone().into_string();
+                let pos = obj[i].2;
+                let code = ParseErrorCode::ObjectDuplicateKey(key_str);
+                return Err(Error::Syntax(code, pos));
+            }
         }
         Ok(JsonAst::Object(obj))
     }
