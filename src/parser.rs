@@ -53,6 +53,14 @@ const DECIMAL128_MIN: i128 = -99999999999999999999999999999999999999i128;
 #[cfg(feature = "arbitrary_precision")]
 const DECIMAL128_MAX: i128 = 99999999999999999999999999999999999999i128;
 
+// JSON literal constants
+const NULL_LOWERCASE: [u8; 4] = [b'n', b'u', b'l', b'l'];
+const NULL_UPPERCASE: [u8; 4] = [b'N', b'U', b'L', b'L'];
+const TRUE_LOWERCASE: [u8; 4] = [b't', b'r', b'u', b'e'];
+const TRUE_UPPERCASE: [u8; 4] = [b'T', b'R', b'U', b'E'];
+const FALSE_LOWERCASE: [u8; 5] = [b'f', b'a', b'l', b's', b'e'];
+const FALSE_UPPERCASE: [u8; 5] = [b'F', b'A', b'L', b'S', b'E'];
+
 #[cfg(feature = "arbitrary_precision")]
 static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|| {
     [
@@ -122,7 +130,7 @@ static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|
 ///
 /// This approach separates the parsing concerns from the final representation concerns,
 /// allowing each to be optimized independently.
-#[derive(Clone, PartialEq, Default, Eq)]
+#[derive(Clone, PartialEq, Default, Eq, Debug)]
 pub(crate) enum JsonAst<'a> {
     #[default]
     Null,
@@ -134,13 +142,6 @@ pub(crate) enum JsonAst<'a> {
 }
 
 impl<'a> JsonAst<'a> {
-    fn as_string(&self) -> Option<Cow<'a, str>> {
-        match self {
-            JsonAst::String(s) => Some(s.clone()),
-            _ => None,
-        }
-    }
-
     /// Converts the intermediate `JsonAst` representation to the final `Value` type.
     fn into_value(self) -> Result<Value<'a>> {
         let value = match self {
@@ -302,10 +303,20 @@ struct Parser<'a> {
     buf: &'a [u8],
     /// Current position in the buffer
     idx: usize,
+    /// Function pointer for parsing null based on the mode
+    parse_null_fn: fn(&mut Self) -> Result<JsonAst<'a>>,
+    /// Function pointer for parsing true based on the mode
+    parse_true_fn: fn(&mut Self) -> Result<JsonAst<'a>>,
+    /// Function pointer for parsing false based on the mode
+    parse_false_fn: fn(&mut Self) -> Result<JsonAst<'a>>,
     /// Function pointer for parsing numbers based on the mode
     parse_number_fn: fn(&mut Self) -> Result<JsonAst<'a>>,
-    /// Function pointer for parsing arrays based on the mode
-    parse_array_fn: fn(&mut Self) -> Result<JsonAst<'a>>,
+    /// Function pointer for parsing string based on the mode
+    parse_string_fn: fn(&mut Self) -> Result<JsonAst<'a>>,
+    /// Function pointer for parsing array value based on the mode
+    parse_array_value_fn: fn(&mut Self) -> Result<JsonAst<'a>>,
+    /// Function pointer for parsing object_key based on the mode
+    parse_object_key_fn: fn(&mut Self) -> Result<Cow<'a, str>>,
 }
 
 impl<'a> Parser<'a> {
@@ -313,8 +324,13 @@ impl<'a> Parser<'a> {
         Self {
             buf,
             idx: 0,
+            parse_null_fn: Self::parse_json_null,
+            parse_true_fn: Self::parse_json_true,
+            parse_false_fn: Self::parse_json_false,
             parse_number_fn: Self::parse_json_number,
-            parse_array_fn: Self::parse_json_array,
+            parse_string_fn: Self::parse_json_string,
+            parse_array_value_fn: Self::parse_array_value,
+            parse_object_key_fn: Self::parse_object_key,
         }
     }
 
@@ -322,8 +338,13 @@ impl<'a> Parser<'a> {
         Self {
             buf,
             idx: 0,
+            parse_null_fn: Self::parse_standard_json_null,
+            parse_true_fn: Self::parse_standard_json_true,
+            parse_false_fn: Self::parse_standard_json_false,
             parse_number_fn: Self::parse_standard_json_number,
-            parse_array_fn: Self::parse_standard_json_array,
+            parse_string_fn: Self::parse_standard_json_string,
+            parse_array_value_fn: Self::parse_json_value,
+            parse_object_key_fn: Self::parse_standard_object_key,
         }
     }
 
@@ -347,12 +368,12 @@ impl<'a> Parser<'a> {
         self.skip_unused();
         let c = self.next()?;
         match c {
-            b'n' => self.parse_json_null(),
-            b't' => self.parse_json_true(),
-            b'f' => self.parse_json_false(),
+            b'n' | b'N' => (self.parse_null_fn)(self),
+            b't' | b'T' => (self.parse_true_fn)(self),
+            b'f' | b'F' => (self.parse_false_fn)(self),
             b'0'..=b'9' | b'-' | b'+' | b'.' => (self.parse_number_fn)(self),
-            b'"' => self.parse_json_string(),
-            b'[' => (self.parse_array_fn)(self),
+            b'"' | b'\'' => (self.parse_string_fn)(self),
+            b'[' => self.parse_json_array(),
             b'{' => self.parse_json_object(),
             _ => {
                 self.step();
@@ -362,20 +383,35 @@ impl<'a> Parser<'a> {
     }
 
     #[inline]
-    fn next(&mut self) -> Result<&u8> {
+    fn next(&mut self) -> Result<u8> {
         match self.buf.get(self.idx) {
-            Some(c) => Ok(c),
+            Some(c) => Ok(*c),
             None => Err(self.error(ParseErrorCode::InvalidEOF)),
         }
     }
 
     #[inline]
-    fn must_is(&mut self, c: u8) -> Result<()> {
+    fn must_is(&mut self, c: &u8) -> Result<()> {
         match self.buf.get(self.idx) {
             Some(v) => {
                 self.step();
-                if v == &c {
+                if v == c {
                     Ok(())
+                } else {
+                    Err(self.error(ParseErrorCode::ExpectedSomeIdent))
+                }
+            }
+            None => Err(self.error(ParseErrorCode::InvalidEOF)),
+        }
+    }
+
+    #[inline]
+    fn must_either(&mut self, c1: &u8, c2: &u8) -> Result<u8> {
+        match self.buf.get(self.idx) {
+            Some(v) => {
+                self.step();
+                if v == c1 || v == c2 {
+                    Ok(*v)
                 } else {
                     Err(self.error(ParseErrorCode::ExpectedSomeIdent))
                 }
@@ -483,26 +519,44 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_json_null(&mut self) -> Result<JsonAst<'a>> {
-        let data = [b'n', b'u', b'l', b'l'];
-        for v in data.into_iter() {
+    fn parse_standard_json_null(&mut self) -> Result<JsonAst<'a>> {
+        for v in NULL_LOWERCASE.iter() {
             self.must_is(v)?;
         }
         Ok(JsonAst::Null)
     }
 
-    fn parse_json_true(&mut self) -> Result<JsonAst<'a>> {
-        let data = [b't', b'r', b'u', b'e'];
-        for v in data.into_iter() {
+    fn parse_json_null(&mut self) -> Result<JsonAst<'a>> {
+        for (v1, v2) in NULL_LOWERCASE.iter().zip(NULL_UPPERCASE.iter()) {
+            self.must_either(v1, v2)?;
+        }
+        Ok(JsonAst::Null)
+    }
+
+    fn parse_standard_json_true(&mut self) -> Result<JsonAst<'a>> {
+        for v in TRUE_LOWERCASE.iter() {
             self.must_is(v)?;
         }
         Ok(JsonAst::Bool(true))
     }
 
-    fn parse_json_false(&mut self) -> Result<JsonAst<'a>> {
-        let data = [b'f', b'a', b'l', b's', b'e'];
-        for v in data.into_iter() {
+    fn parse_json_true(&mut self) -> Result<JsonAst<'a>> {
+        for (v1, v2) in TRUE_LOWERCASE.iter().zip(TRUE_UPPERCASE.iter()) {
+            self.must_either(v1, v2)?;
+        }
+        Ok(JsonAst::Bool(true))
+    }
+
+    fn parse_standard_json_false(&mut self) -> Result<JsonAst<'a>> {
+        for v in FALSE_LOWERCASE.iter() {
             self.must_is(v)?;
+        }
+        Ok(JsonAst::Bool(false))
+    }
+
+    fn parse_json_false(&mut self) -> Result<JsonAst<'a>> {
+        for (v1, v2) in FALSE_LOWERCASE.iter().zip(FALSE_UPPERCASE.iter()) {
+            self.must_either(v1, v2)?;
         }
         Ok(JsonAst::Bool(false))
     }
@@ -526,10 +580,10 @@ impl<'a> Parser<'a> {
         let mut has_exponent = false;
 
         let c = self.next()?;
-        if *c == b'-' {
+        if c == b'-' {
             negative = true;
             self.step();
-        } else if *c == b'+' || *c == b'.' {
+        } else if c == b'+' || c == b'.' {
             self.step();
             return Err(self.error(ParseErrorCode::InvalidNumberValue));
         }
@@ -611,10 +665,10 @@ impl<'a> Parser<'a> {
 
         // Handle sign prefix (+ or -), extending JSON to support leading plus sign
         let c = self.next()?;
-        if *c == b'-' {
+        if c == b'-' {
             negative = true;
             self.step();
-        } else if *c == b'+' {
+        } else if c == b'+' {
             // Extended syntax: Support for leading plus sign
             self.step();
         }
@@ -777,10 +831,62 @@ impl<'a> Parser<'a> {
     /// The implementation uses a two-pass approach for strings with escapes:
     /// - First pass: Count escapes and determine string boundaries
     /// - Second pass: Process escape sequences only when necessary
+    fn parse_standard_json_string(&mut self) -> Result<JsonAst<'a>> {
+        // Ensure the string starts with a quote
+        self.must_is(&b'"')?;
+        let val = self.parse_string(b'"')?;
+        Ok(JsonAst::String(val))
+    }
+
     fn parse_json_string(&mut self) -> Result<JsonAst<'a>> {
         // Ensure the string starts with a quote
-        self.must_is(b'"')?;
+        let end_quote = self.must_either(&b'"', &b'\'')?;
+        let val = self.parse_string(end_quote)?;
+        Ok(JsonAst::String(val))
+    }
 
+    fn parse_standard_object_key(&mut self) -> Result<Cow<'a, str>> {
+        self.must_is(&b'"')?;
+        self.parse_string(b'"')
+    }
+
+    fn parse_object_key(&mut self) -> Result<Cow<'a, str>> {
+        if let Ok(end_quote) = self.must_either(&b'"', &b'\'') {
+            self.parse_string(end_quote)
+        } else {
+            self.parse_string_literal()
+        }
+    }
+
+    fn parse_string_literal(&mut self) -> Result<Cow<'a, str>> {
+        let start_idx = self.idx;
+
+        let c = self.next()?;
+        if matches!(c, b'0'..=b'9') {
+            return Err(self.error(ParseErrorCode::ObjectKeyInvalidNumber));
+        }
+
+        loop {
+            let c = self.next()?;
+            if matches!(c, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z') {
+                self.step();
+            } else {
+                break;
+            }
+        }
+        if self.idx == start_idx {
+            return Err(self.error(ParseErrorCode::ObjectKeyInvalidCharacter));
+        }
+
+        // Get the string data
+        let data = &self.buf[start_idx..self.idx];
+        let val = std::str::from_utf8(data)
+            .map(Cow::Borrowed)
+            .map_err(|_| self.error(ParseErrorCode::InvalidStringValue))?;
+        Ok(val)
+    }
+
+    fn parse_string(&mut self, end_quote: u8) -> Result<Cow<'a, str>> {
         // Mark the starting position (after the opening quote)
         let start_idx = self.idx;
         let mut escapes = 0;
@@ -794,11 +900,11 @@ impl<'a> Parser<'a> {
                     self.step();
                     escapes += 1;
                     let next_c = self.next()?;
-                    if *next_c == b'u' {
+                    if next_c == b'u' {
                         // Handle Unicode escape sequence
                         self.step();
                         let next_c = self.next()?;
-                        if *next_c == b'{' {
+                        if next_c == b'{' {
                             // Extended Unicode format: \u{XXXX}
                             self.step_by(UNICODE_LEN + 2);
                         } else {
@@ -809,16 +915,14 @@ impl<'a> Parser<'a> {
                         // Simple escape sequence like \n, \t, etc.
                         self.step();
                     }
-                    continue;
                 }
-                b'"' => {
-                    // End of string found
+                _ => {
                     self.step();
-                    break;
+                    if c == end_quote {
+                        break;
+                    }
                 }
-                _ => {}
             }
-            self.step();
         }
 
         // Get the string data (excluding quotes)
@@ -837,44 +941,18 @@ impl<'a> Parser<'a> {
                 .map(Cow::Borrowed)
                 .map_err(|_| self.error(ParseErrorCode::InvalidStringValue))?
         };
-        Ok(JsonAst::String(val))
+        Ok(val)
     }
 
-    /// Parse a JSON array with standard mode.
-    fn parse_standard_json_array(&mut self) -> Result<JsonAst<'a>> {
-        // Ensure the array starts with an opening bracket
-        self.must_is(b'[')?;
-
-        let mut first = true;
-        let mut values = Vec::with_capacity(8);
-
-        // Parse array elements until closing bracket is found
-        loop {
-            self.skip_unused();
-            let c = self.next()?;
-
-            // Check for end of array
-            if *c == b']' {
-                self.step();
-                break;
-            }
-
-            // Handle comma separator between elements (not for the first element)
-            if !first {
-                if *c != b',' {
-                    return Err(self.error(ParseErrorCode::ExpectedArrayCommaOrEnd));
-                }
-                self.step();
-            }
-            first = false;
-
-            self.skip_unused();
-
-            // Parse a regular array element
-            let value = self.parse_json_value()?;
-            values.push(value);
+    // Extended syntax: Check for empty elements (consecutive commas or comma before closing bracket)
+    // This is where the parser extends standard JSON by allowing empty elements
+    fn parse_array_value(&mut self) -> Result<JsonAst<'a>> {
+        if self.check_next_either(b',', b']') {
+            // Insert null for empty element
+            Ok(JsonAst::Null)
+        } else {
+            self.parse_json_value()
         }
-        Ok(JsonAst::Array(values))
     }
 
     /// Parse a JSON array with extended syntax support.
@@ -889,7 +967,7 @@ impl<'a> Parser<'a> {
     /// - Empty elements at the end of arrays (e.g., [1,2,]) which standard JSON doesn't allow
     fn parse_json_array(&mut self) -> Result<JsonAst<'a>> {
         // Ensure the array starts with an opening bracket
-        self.must_is(b'[')?;
+        self.must_is(&b'[')?;
 
         let mut first = true;
         let mut values = Vec::with_capacity(8);
@@ -900,14 +978,14 @@ impl<'a> Parser<'a> {
             let c = self.next()?;
 
             // Check for end of array
-            if *c == b']' {
+            if c == b']' {
                 self.step();
                 break;
             }
 
             // Handle comma separator between elements (not for the first element)
             if !first {
-                if *c != b',' {
+                if c != b',' {
                     return Err(self.error(ParseErrorCode::ExpectedArrayCommaOrEnd));
                 }
                 self.step();
@@ -915,17 +993,8 @@ impl<'a> Parser<'a> {
             first = false;
 
             self.skip_unused();
-
-            // Extended syntax: Check for empty elements (consecutive commas or comma before closing bracket)
-            // This is where the parser extends standard JSON by allowing empty elements
-            if self.check_next_either(b',', b']') {
-                // Insert null for empty element
-                values.push(JsonAst::Null);
-                continue;
-            }
-
             // Parse a regular array element
-            let value = self.parse_json_value()?;
+            let value = (self.parse_array_value_fn)(self)?;
             values.push(value);
         }
         Ok(JsonAst::Array(values))
@@ -944,7 +1013,7 @@ impl<'a> Parser<'a> {
     /// - Key-value pairs are separated by commas
     fn parse_json_object(&mut self) -> Result<JsonAst<'a>> {
         // Ensure the object starts with an opening brace
-        self.must_is(b'{')?;
+        self.must_is(&b'{')?;
 
         let mut first = true;
         let mut obj = Vec::with_capacity(16);
@@ -955,32 +1024,30 @@ impl<'a> Parser<'a> {
             let c = self.next()?;
 
             // Check for end of object
-            if *c == b'}' {
+            if c == b'}' {
                 self.step();
                 break;
             }
 
             // Handle comma separator between key-value pairs (not for the first pair)
             if !first {
-                if *c != b',' {
+                if c != b',' {
                     return Err(self.error(ParseErrorCode::ExpectedObjectCommaOrEnd));
                 }
                 self.step();
             }
             first = false;
 
+            self.skip_unused();
             // Parse the key (must be a string)
-            let key = self.parse_json_value()?;
-            let Some(key_str) = key.as_string() else {
-                return Err(self.error(ParseErrorCode::KeyMustBeAString));
-            };
+            let key_str = (self.parse_object_key_fn)(self)?;
             let pos = self.idx;
 
             self.skip_unused();
 
             // Ensure key and value are separated by a colon
             let c = self.next()?;
-            if *c != b':' {
+            if c != b':' {
                 return Err(self.error(ParseErrorCode::ExpectedColon));
             }
             self.step();
@@ -1127,3 +1194,4 @@ mod tests {
         }
     }
 }
+
