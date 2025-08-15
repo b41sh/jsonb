@@ -422,8 +422,7 @@ impl<'a> Parser<'a> {
 
     #[inline]
     fn check_next(&mut self, c: u8) -> bool {
-        if self.idx < self.buf.len() {
-            let v = self.buf.get(self.idx).unwrap();
+        if let Some(v) = self.buf.get(self.idx) {
             if v == &c {
                 return true;
             }
@@ -432,33 +431,31 @@ impl<'a> Parser<'a> {
     }
 
     #[inline]
-    fn check_next_either(&mut self, c1: u8, c2: u8) -> bool {
-        if self.idx < self.buf.len() {
-            let v = self.buf.get(self.idx).unwrap();
+    fn check_next_either(&mut self, c1: u8, c2: u8) -> Option<u8> {
+        if let Some(v) = self.buf.get(self.idx) {
             if v == &c1 || v == &c2 {
-                return true;
+                return Some(*v);
             }
         }
-        false
+        None
     }
 
     #[inline]
-    fn check_digit(&mut self) -> bool {
-        if self.idx < self.buf.len() {
-            let v = self.buf.get(self.idx).unwrap();
+    fn check_digit(&mut self) -> Option<u8> {
+        if let Some(v) = self.buf.get(self.idx) {
             if v.is_ascii_digit() {
-                return true;
+                let digit = v - b'0';
+                return Some(digit);
             }
         }
-        false
+        None
     }
 
     #[inline]
     fn step_digits(&mut self) -> usize {
         let mut len = 0;
-        while self.idx < self.buf.len() {
-            let c = self.buf.get(self.idx).unwrap();
-            if !c.is_ascii_digit() {
+        while let Some(v) = self.buf.get(self.idx) {
+            if !v.is_ascii_digit() {
                 break;
             }
             len += 1;
@@ -589,7 +586,7 @@ impl<'a> Parser<'a> {
         }
         if self.check_next(b'0') {
             self.step();
-            if self.check_digit() {
+            if self.check_digit().is_some() {
                 self.step();
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
             }
@@ -611,10 +608,10 @@ impl<'a> Parser<'a> {
                 return Err(self.error(ParseErrorCode::InvalidNumberValue));
             }
         }
-        if self.check_next_either(b'E', b'e') {
+        if self.check_next_either(b'E', b'e').is_some() {
             has_exponent = true;
             self.step();
-            if self.check_next_either(b'+', b'-') {
+            if self.check_next_either(b'+', b'-').is_some() {
                 self.step();
             }
             let len = self.step_digits();
@@ -693,17 +690,15 @@ impl<'a> Parser<'a> {
 
         // Parse digits, supporting up to MAX_DECIMAL256_PRECISION digits
         while precision < MAX_DECIMAL256_PRECISION {
-            if self.check_digit() {
+            if let Some(digit) = self.check_digit() {
                 // Parse digit and accumulate value
-                let digit = (self.buf[self.idx] - b'0') as i128;
-
                 // Store in hi_value or lo_value based on precision
                 if precision < MAX_DECIMAL128_PRECISION {
                     hi_value = unsafe { hi_value.unchecked_mul(10_i128) };
-                    hi_value = unsafe { hi_value.unchecked_add(digit) };
+                    hi_value = unsafe { hi_value.unchecked_add(digit as i128) };
                 } else {
                     lo_value = unsafe { lo_value.unchecked_mul(10_i128) };
-                    lo_value = unsafe { lo_value.unchecked_add(digit) };
+                    lo_value = unsafe { lo_value.unchecked_add(digit as i128) };
                 }
                 self.step();
             } else if self.check_next(b'.') {
@@ -750,11 +745,11 @@ impl<'a> Parser<'a> {
             return Err(self.error(ParseErrorCode::InvalidNumberValue));
         }
         // Handle exponent notation (e.g., 1e10, 1.5E-7)
-        if self.check_next_either(b'E', b'e') {
+        if self.check_next_either(b'E', b'e').is_some() {
             has_exponent = true;
             self.step();
             // Handle exponent sign
-            if self.check_next_either(b'+', b'-') {
+            if self.check_next_either(b'+', b'-').is_some() {
                 self.step();
             }
             // Parse exponent digits
@@ -851,7 +846,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_object_key(&mut self) -> Result<Cow<'a, str>> {
-        if let Ok(end_quote) = self.must_either(&b'"', &b'\'') {
+        if let Some(end_quote) = self.check_next_either(b'"', b'\'') {
+            self.step();
             self.parse_string(end_quote)
         } else {
             self.parse_string_literal()
@@ -947,7 +943,7 @@ impl<'a> Parser<'a> {
     // Extended syntax: Check for empty elements (consecutive commas or comma before closing bracket)
     // This is where the parser extends standard JSON by allowing empty elements
     fn parse_array_value(&mut self) -> Result<JsonAst<'a>> {
-        if self.check_next_either(b',', b']') {
+        if self.check_next_either(b',', b']').is_some() {
             // Insert null for empty element
             Ok(JsonAst::Null)
         } else {
