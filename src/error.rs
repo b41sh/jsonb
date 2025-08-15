@@ -74,8 +74,12 @@ impl Display for ParseErrorCode {
             ParseErrorCode::ObjectDuplicateKey(key) => {
                 write!(f, "duplicate object attribute \"{}\"", key)
             }
-            ParseErrorCode::ObjectKeyInvalidNumber => f.write_str("object attribute name cannot be a number"),
-            ParseErrorCode::ObjectKeyInvalidCharacter => f.write_str("object attribute name cannot be invalid character"),
+            ParseErrorCode::ObjectKeyInvalidNumber => {
+                f.write_str("object attribute name cannot be a number")
+            }
+            ParseErrorCode::ObjectKeyInvalidCharacter => {
+                f.write_str("object attribute name cannot be invalid character")
+            }
         }
     }
 }
