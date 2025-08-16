@@ -926,7 +926,7 @@ impl<'a> Parser<'a> {
         let start_idx = self.idx;
 
         let c = self.next()?;
-        if matches!(c, b'0'..=b'9') {
+        if c.is_ascii_digit() {
             return Err(self.error(ParseErrorCode::ObjectKeyInvalidNumber));
         }
 
