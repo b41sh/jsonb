@@ -473,6 +473,19 @@ impl<'a> Parser<'a> {
     }
 
     #[inline]
+    fn step_hexdigits(&mut self) -> usize {
+        let mut len = 0;
+        while let Some(v) = self.buf.get(self.idx) {
+            if !v.is_ascii_hexdigit() {
+                break;
+            }
+            len += 1;
+            self.step();
+        }
+        len
+    }
+
+    #[inline]
     fn step(&mut self) {
         self.idx += 1;
     }
@@ -738,13 +751,112 @@ impl<'a> Parser<'a> {
                 b'0' => {
                     self.step();
                     if self.check_next_either(&b'x', &b'X').is_some() {
-                        // todo
+                        // Parse hexadecimal number (0x...)
+                        self.step(); // Skip 'x' or 'X'
+                        
+                        // Mark the start position of hex digits
+                        let hex_start = self.idx;
+                        
+                        // Find the end of the integer part
+                        let int_len = self.step_hexdigits();
 
+                        // Check if we have any hex digits
+                        if int_len == 0 {
+                            return Err(self.error(ParseErrorCode::InvalidNumberValue));
+                        }
+                        
+                        // Check if we have a fractional part
+                        let has_fraction = self.check_next(&b'.');
+                        
+                        if has_fraction {
+                            // Skip the decimal point
+                            self.step();
+                            
+                            // Mark the start of fractional digits
+                            let frac_start = self.idx;
+                            
+                            // Find the end of the fractional part
+                            let frac_len = self.step_hexdigits();
+                            
+                            // Check if we have any fractional digits
+                            if frac_len == 0 {
+                                return Err(self.error(ParseErrorCode::InvalidNumberValue));
+                            }
+                            
+                            // Convert both parts to f64
+                            let int_str = std::str::from_utf8(&self.buf[hex_start..hex_start + int_len])
+                                .map_err(|_| self.error(ParseErrorCode::InvalidNumberValue))?;
+                            let frac_str = std::str::from_utf8(&self.buf[frac_start..frac_start + frac_len])
+                                .map_err(|_| self.error(ParseErrorCode::InvalidNumberValue))?;
+                            
+                            // Parse integer part
+                            let int_val = u128::from_str_radix(int_str, 16)
+                                .map_err(|_| self.error(ParseErrorCode::InvalidNumberValue))?;
+                            
+                            // Parse fractional part and calculate its value
+                            let frac_val = u128::from_str_radix(frac_str, 16)
+                                .map_err(|_| self.error(ParseErrorCode::InvalidNumberValue))?;
+                            let frac_divisor = 16.0_f64.powi(frac_len as i32);
 
-
-
-
-
+                            // Combine integer and fractional parts
+                            let mut final_val = int_val as f64 + (frac_val as f64 / frac_divisor);
+                            if negative {
+                                final_val = -final_val;
+                            }
+                            return Ok(JsonAst::Number(Number::Float64(final_val)));
+                        } else {
+                            // Integer-only hex value
+                            let int_str = std::str::from_utf8(&self.buf[hex_start..self.idx])
+                                .map_err(|_| self.error(ParseErrorCode::InvalidNumberValue))?;
+                            
+                            // Parse the hex value
+                            let value = u128::from_str_radix(int_str, 16)
+                                .map_err(|_| self.error(ParseErrorCode::InvalidNumberValue))?;
+                            
+                            // Convert to appropriate number type based on size
+                            if negative {
+                                // Handle negative values
+                                if value <= (i64::MAX as u128 + 1) {
+                                    let i_val = -(value as i64);
+                                    return Ok(JsonAst::Number(Number::Int64(i_val)));
+                                }
+                                #[cfg(feature = "arbitrary_precision")]
+                                {
+                                    if value <= (DECIMAL128_MAX as u128 + 1) {
+                                        return Ok(JsonAst::Number(Number::Decimal128(Decimal128 {
+                                            scale: 0,
+                                            value: -(value as i128),
+                                        })));
+                                    } else {
+                                        return Ok(JsonAst::Number(Number::Decimal256(Decimal256 {
+                                            scale: 0,
+                                            value: i256::from(value) * -1,
+                                        })));
+                                    }
+                                }
+                                return Ok(JsonAst::Number(Number::Float64(-(value as f64))));
+                            } else {
+                                // Handle positive values
+                                if value <= u64::MAX as u128 {
+                                    return Ok(JsonAst::Number(Number::UInt64(value as u64)));
+                                }
+                                #[cfg(feature = "arbitrary_precision")]
+                                {
+                                    if value <= DECIMAL128_MAX as u128 {
+                                        return Ok(JsonAst::Number(Number::Decimal128(Decimal128 {
+                                            scale: 0,
+                                            value: value as i128,
+                                        })));
+                                    } else {
+                                        return Ok(JsonAst::Number(Number::Decimal256(Decimal256 {
+                                            scale: 0,
+                                            value: i256::from(value),
+                                        })));
+                                    }
+                                }
+                                return Ok(JsonAst::Number(Number::Float64(value as f64)));
+                            }
+                        }
                     } else {
                         leading_zeros = true;
                         // Extended syntax: Support for multiple leading zeros (e.g., 000123)
