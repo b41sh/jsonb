@@ -826,30 +826,35 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a JSON string value with support for escape sequences.
-    ///
-    /// This function implements a high-performance JSON string parser that:
-    /// 1. Efficiently handles strings without escape sequences using direct memory access
-    /// 2. Falls back to a more complex parsing routine only when escape sequences are present
-    /// 3. Supports standard JSON escape sequences and Unicode escapes (\uXXXX and \u{XXXX})
-    ///
-    /// The implementation uses a two-pass approach for strings with escapes:
-    /// - First pass: Count escapes and determine string boundaries
-    /// - Second pass: Process escape sequences only when necessary
+    /// Parse a JSON string in standard mode
+    /// 
+    /// Only supports double quotes (") as string delimiters
+    /// and follows strict JSON specification.
+    #[inline]
     fn parse_standard_json_string(&mut self) -> Result<JsonAst<'a>> {
-        // Ensure the string starts with a quote
         self.must_is(&b'"')?;
         let val = self.parse_string(b'"')?;
         Ok(JsonAst::String(val))
     }
 
+    /// Parse a JSON string with extended syntax support
+    /// 
+    /// Extended syntax allows both double quotes (") and single quotes (')
+    /// as string delimiters, which is not allowed in standard JSON.
+    #[inline]
     fn parse_json_string(&mut self) -> Result<JsonAst<'a>> {
-        // Ensure the string starts with a quote
         let end_quote = self.must_either(&b'"', &b'\'')?;
         let val = self.parse_string(end_quote)?;
         Ok(JsonAst::String(val))
     }
 
+    /// Parse an unquoted string literal for object keys
+    /// 
+    /// Extended syntax feature that allows object keys without quotes.
+    /// Restrictions:
+    /// - Only letters, numbers, and underscores are allowed
+    /// - First character cannot be a number
+    /// - Must contain at least one character
     fn parse_string_literal(&mut self) -> Result<Cow<'a, str>> {
         let start_idx = self.idx;
 
@@ -878,6 +883,15 @@ impl<'a> Parser<'a> {
         Ok(val)
     }
 
+    /// Parse a quoted string with support for escape sequences
+    /// 
+    /// Handles both standard and extended Unicode escape sequences:
+    /// - Standard: \uXXXX (4 hex digits)
+    /// - Extended: \u{XXXX} (variable number of hex digits in braces)
+    /// 
+    /// Uses a two-pass approach for efficiency:
+    /// 1. First pass: Find string boundaries and count escapes
+    /// 2. Second pass: Process escapes only when necessary
     fn parse_string(&mut self, end_quote: u8) -> Result<Cow<'a, str>> {
         // Mark the starting position (after the opening quote)
         let start_idx = self.idx;
@@ -936,27 +950,64 @@ impl<'a> Parser<'a> {
         Ok(val)
     }
 
-    // Extended syntax: Check for empty elements (consecutive commas or comma before closing bracket)
-    // This is where the parser extends standard JSON by allowing empty elements
+    /// Parse an array value with support for empty elements
+    /// 
+    /// Extended syntax feature that treats empty elements as null:
+    /// - [1,,3] is parsed as [1,null,3]
+    /// - [1,2,] is parsed as [1,2,null]
+    /// 
+    /// This is not allowed in standard JSON but supported in extended mode.
+    #[inline]
     fn parse_array_value(&mut self) -> Result<JsonAst<'a>> {
         if self.check_next_either(&b',', &b']').is_some() {
-            // Insert null for empty element
             Ok(JsonAst::Null)
         } else {
             self.parse_json_value()
         }
     }
 
-    /// Parse a JSON array with extended syntax support.
+    /// Parse an object key in standard mode
+    /// 
+    /// Only supports double-quoted strings as keys,
+    /// following strict JSON specification.
+    #[inline]
+    fn parse_standard_object_key(&mut self) -> Result<Cow<'a, str>> {
+        self.must_is(&b'"')?;
+        self.parse_string(b'"')
+    }
+
+    /// Parse an object key with extended syntax support
+    /// 
+    /// Extended syntax allows:
+    /// 1. Double-quoted strings (")
+    /// 2. Single-quoted strings (')
+    /// 3. Unquoted identifiers (letters, numbers, underscores)
+    ///    with the restriction that they cannot start with a number
+    #[inline]
+    fn parse_object_key(&mut self) -> Result<Cow<'a, str>> {
+        if let Some(end_quote) = self.check_next_either(&b'"', &b'\'') {
+            self.step();
+            self.parse_string(end_quote)
+        } else {
+            self.parse_string_literal()
+        }
+    }
+
+    /// Parse a JSON array with support for both standard and extended syntax
+    /// 
+    /// This function handles the common array parsing logic for both modes:
+    /// - Parses arrays enclosed in square brackets [...]
+    /// - Handles comma-separated values
+    /// - Validates proper syntax for separators and closing brackets
+    /// 
+    /// The behavior differs between standard and extended mode through the function pointer:
+    /// - In standard mode: Uses parse_standard_json_value which enforces strict JSON rules
+    /// - In extended mode: Uses parse_array_value which allows empty elements (treated as null)
     ///
-    /// This function implements a JSON array parser that:
-    /// 1. Handles standard JSON arrays with comma-separated values
-    /// 2. Extends JSON syntax to support empty elements (e.g., [1,,3]) which are parsed as null values
-    /// 3. Efficiently processes arrays of any size with minimal allocations
-    ///
-    /// Extended JSON array syntax support:
-    /// - Empty elements between commas (e.g., [1,,3]) which standard JSON doesn't allow
-    /// - Empty elements at the end of arrays (e.g., [1,2,]) which standard JSON doesn't allow
+    /// Examples of valid arrays in extended mode:
+    /// - [1,2,3]     (standard JSON)
+    /// - [1,,3]      (empty element treated as null)
+    /// - [1,2,]      (trailing comma treated as null element)
     fn parse_json_array(&mut self) -> Result<JsonAst<'a>> {
         // Ensure the array starts with an opening bracket
         self.must_is(&b'[')?;
@@ -992,20 +1043,27 @@ impl<'a> Parser<'a> {
         Ok(JsonAst::Array(values))
     }
 
-    fn parse_standard_object_key(&mut self) -> Result<Cow<'a, str>> {
-        self.must_is(&b'"')?;
-        self.parse_string(b'"')
-    }
-
-    fn parse_object_key(&mut self) -> Result<Cow<'a, str>> {
-        if let Some(end_quote) = self.check_next_either(&b'"', &b'\'') {
-            self.step();
-            self.parse_string(end_quote)
-        } else {
-            self.parse_string_literal()
-        }
-    }
-
+    /// Parse a JSON object with support for both standard and extended syntax
+    /// 
+    /// This function handles the common object parsing logic for both modes:
+    /// - Parses objects enclosed in curly braces {...}
+    /// - Handles key-value pairs separated by colons
+    /// - Validates proper syntax for separators and closing braces
+    /// - Detects and reports duplicate keys
+    /// 
+    /// The behavior differs between standard and extended mode through function pointers:
+    /// - In standard mode:
+    ///   * Uses parse_standard_object_key which only accepts double-quoted keys
+    ///   * Uses parse_standard_json_value which enforces strict JSON rules for values
+    /// - In extended mode:
+    ///   * Uses parse_object_key which accepts quoted (double/single) and unquoted keys
+    ///   * Uses parse_json_value which allows extended syntax for values
+    ///
+    /// Examples of valid objects in extended mode:
+    /// - {"key": "value"}      (standard JSON)
+    /// - {'key': 'value'}      (single quotes)
+    /// - {key: "value"}        (unquoted key)
+    /// - {_user123: 'value'}   (unquoted key with underscore)
     fn parse_json_object(&mut self) -> Result<JsonAst<'a>> {
         // Ensure the object starts with an opening brace
         self.must_is(&b'{')?;
