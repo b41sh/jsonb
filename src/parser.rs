@@ -927,12 +927,13 @@ impl<'a> Parser<'a> {
 
         let c = self.next()?;
         if c.is_ascii_digit() {
+            self.step();
             return Err(self.error(ParseErrorCode::ObjectKeyInvalidNumber));
         }
 
         loop {
             let c = self.next()?;
-            if matches!(c, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') {
+            if c.is_ascii_alphanumeric() || matches!(c, b'_') {
                 self.step();
             } else {
                 break;
