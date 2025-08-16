@@ -61,6 +61,11 @@ const TRUE_UPPERCASE: [u8; 4] = [b'T', b'R', b'U', b'E'];
 const FALSE_LOWERCASE: [u8; 5] = [b'f', b'a', b'l', b's', b'e'];
 const FALSE_UPPERCASE: [u8; 5] = [b'F', b'A', b'L', b'S', b'E'];
 
+const NAN_LOWERCASE: [u8; 3] = [b'n', b'a', b'n'];
+const NAN_UPPERCASE: [u8; 3] = [b'N', b'A', b'N'];
+const INFINITY_LOWERCASE: [u8; 8] = [b'i', b'n', b'f', b'i', b'n', b'i', b't', b'y'];
+const INFINITY_UPPERCASE: [u8; 8] = [b'I', b'N', b'F', b'I', b'N', b'I', b'T', b'Y'];
+
 #[cfg(feature = "arbitrary_precision")]
 static POWER_TABLE: std::sync::LazyLock<[i256; 39]> = std::sync::LazyLock::new(|| {
     [
@@ -370,9 +375,10 @@ impl<'a> Parser<'a> {
         self.skip_unused();
         let c = self.next()?;
         match c {
-            b'n' | b'N' => self.parse_json_null(),
+            b'n' | b'N' => self.parse_json_null_or_nan(),
             b't' | b'T' => self.parse_json_true(),
             b'f' | b'F' => self.parse_json_false(),
+            b'i' | b'I' => self.parse_json_infinity(),
             b'0'..=b'9' | b'-' | b'+' | b'.' => self.parse_json_number(),
             b'"' | b'\'' => self.parse_json_string(),
             b'[' => self.parse_json_array(),
@@ -530,6 +536,17 @@ impl<'a> Parser<'a> {
     /// Parse a JSON null literal in extended mode with case-insensitivity
     /// Accepts any case variation of "null" (e.g., "Null", "NULL", "nUlL").
     #[inline]
+    fn parse_json_null_or_nan(&mut self) -> Result<JsonAst<'a>> {
+        if let Ok(null) = self.parse_json_null() {
+            Ok(null)
+        } else {
+            self.parse_json_nan()
+        }
+    }
+
+    /// Parse a JSON null literal in extended mode with case-insensitivity
+    /// Accepts any case variation of "null" (e.g., "Null", "NULL", "nUlL").
+    #[inline]
     fn parse_json_null(&mut self) -> Result<JsonAst<'a>> {
         for (v1, v2) in NULL_LOWERCASE.iter().zip(NULL_UPPERCASE.iter()) {
             self.must_either(v1, v2)?;
@@ -573,6 +590,26 @@ impl<'a> Parser<'a> {
             self.must_either(v1, v2)?;
         }
         Ok(JsonAst::Bool(false))
+    }
+
+    /// Parse a JSON infinity literal in extended mode with case-insensitivity
+    /// Accepts any case variation of "infinity" (e.g., "Infinity", "INFINITY").
+    #[inline]
+    fn parse_json_infinity(&mut self) -> Result<JsonAst<'a>> {
+        for (v1, v2) in INFINITY_LOWERCASE.iter().zip(INFINITY_UPPERCASE.iter()) {
+            self.must_either(v1, v2)?;
+        }
+        Ok(JsonAst::Number(Number::Float64(f64::INFINITY)))
+    }
+
+    /// Parse a JSON NaN literal in extended mode with case-insensitivity
+    /// Accepts any case variation of "infinity" (e.g., "Infinity", "INFINITY").
+    #[inline]
+    fn parse_json_nan(&mut self) -> Result<JsonAst<'a>> {
+        for (v1, v2) in NAN_LOWERCASE.iter().zip(NAN_UPPERCASE.iter()) {
+            self.must_either(v1, v2)?;
+        }
+        Ok(JsonAst::Number(Number::Float64(f64::NAN)))
     }
 
     /// Parse JSON numbers in standard mode
@@ -680,13 +717,47 @@ impl<'a> Parser<'a> {
             self.step();
         }
 
-        // Extended syntax: Support for multiple leading zeros (e.g., 000123)
-        loop {
-            if self.check_next(&b'0') {
-                leading_zeros = true;
-                self.step();
-            } else {
-                break;
+        if let Ok(c) = self.next() {
+            match c {
+                b'i' | b'I' => {
+                    let val = self.parse_json_infinity()?;
+                    if negative {
+                        return Ok(JsonAst::Number(Number::Float64(f64::NEG_INFINITY)));
+                    } else {
+                        return Ok(val);
+                    }
+                },
+                b'n' | b'N' => {
+                    let val = self.parse_json_nan()?;
+                    if negative {
+                        return Err(self.error(ParseErrorCode::InvalidNumberValue));
+                    } else {
+                        return Ok(val);
+                    }
+                },
+                b'0' => {
+                    self.step();
+                    if self.check_next_either(&b'x', &b'X').is_some() {
+                        // todo
+
+
+
+
+
+
+                    } else {
+                        leading_zeros = true;
+                        // Extended syntax: Support for multiple leading zeros (e.g., 000123)
+                        loop {
+                            if self.check_next(&b'0') {
+                                self.step();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
