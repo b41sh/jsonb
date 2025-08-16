@@ -827,7 +827,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a JSON string in standard mode
-    /// 
+    ///
     /// Only supports double quotes (") as string delimiters
     /// and follows strict JSON specification.
     #[inline]
@@ -838,7 +838,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a JSON string with extended syntax support
-    /// 
+    ///
     /// Extended syntax allows both double quotes (") and single quotes (')
     /// as string delimiters, which is not allowed in standard JSON.
     #[inline]
@@ -849,7 +849,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse an unquoted string literal for object keys
-    /// 
+    ///
     /// Extended syntax feature that allows object keys without quotes.
     /// Restrictions:
     /// - Only letters, numbers, and underscores are allowed
@@ -884,11 +884,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a quoted string with support for escape sequences
-    /// 
+    ///
     /// Handles both standard and extended Unicode escape sequences:
     /// - Standard: \uXXXX (4 hex digits)
     /// - Extended: \u{XXXX} (variable number of hex digits in braces)
-    /// 
+    ///
     /// Uses a two-pass approach for efficiency:
     /// 1. First pass: Find string boundaries and count escapes
     /// 2. Second pass: Process escapes only when necessary
@@ -951,11 +951,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse an array value with support for empty elements
-    /// 
+    ///
     /// Extended syntax feature that treats empty elements as null:
     /// - [1,,3] is parsed as [1,null,3]
     /// - [1,2,] is parsed as [1,2,null]
-    /// 
+    ///
     /// This is not allowed in standard JSON but supported in extended mode.
     #[inline]
     fn parse_array_value(&mut self) -> Result<JsonAst<'a>> {
@@ -967,7 +967,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse an object key in standard mode
-    /// 
+    ///
     /// Only supports double-quoted strings as keys,
     /// following strict JSON specification.
     #[inline]
@@ -977,7 +977,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse an object key with extended syntax support
-    /// 
+    ///
     /// Extended syntax allows:
     /// 1. Double-quoted strings (")
     /// 2. Single-quoted strings (')
@@ -994,12 +994,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a JSON array with support for both standard and extended syntax
-    /// 
+    ///
     /// This function handles the common array parsing logic for both modes:
     /// - Parses arrays enclosed in square brackets [...]
     /// - Handles comma-separated values
     /// - Validates proper syntax for separators and closing brackets
-    /// 
+    ///
     /// The behavior differs between standard and extended mode through the function pointer:
     /// - In standard mode: Uses parse_standard_json_value which enforces strict JSON rules
     /// - In extended mode: Uses parse_array_value which allows empty elements (treated as null)
@@ -1044,13 +1044,13 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a JSON object with support for both standard and extended syntax
-    /// 
+    ///
     /// This function handles the common object parsing logic for both modes:
     /// - Parses objects enclosed in curly braces {...}
     /// - Handles key-value pairs separated by colons
     /// - Validates proper syntax for separators and closing braces
     /// - Detects and reports duplicate keys
-    /// 
+    ///
     /// The behavior differs between standard and extended mode through function pointers:
     /// - In standard mode:
     ///   * Uses parse_standard_object_key which only accepts double-quoted keys
