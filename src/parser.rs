@@ -833,7 +833,7 @@ impl<'a> Parser<'a> {
     #[inline]
     fn parse_standard_json_string(&mut self) -> Result<JsonAst<'a>> {
         self.must_is(&b'"')?;
-        let val = self.parse_string(b'"')?;
+        let val = self.parse_quoted_string(b'"')?;
         Ok(JsonAst::String(val))
     }
 
@@ -844,43 +844,8 @@ impl<'a> Parser<'a> {
     #[inline]
     fn parse_json_string(&mut self) -> Result<JsonAst<'a>> {
         let end_quote = self.must_either(&b'"', &b'\'')?;
-        let val = self.parse_string(end_quote)?;
+        let val = self.parse_quoted_string(end_quote)?;
         Ok(JsonAst::String(val))
-    }
-
-    /// Parse an unquoted string literal for object keys
-    ///
-    /// Extended syntax feature that allows object keys without quotes.
-    /// Restrictions:
-    /// - Only letters, numbers, and underscores are allowed
-    /// - First character cannot be a number
-    /// - Must contain at least one character
-    fn parse_string_literal(&mut self) -> Result<Cow<'a, str>> {
-        let start_idx = self.idx;
-
-        let c = self.next()?;
-        if matches!(c, b'0'..=b'9') {
-            return Err(self.error(ParseErrorCode::ObjectKeyInvalidNumber));
-        }
-
-        loop {
-            let c = self.next()?;
-            if matches!(c, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') {
-                self.step();
-            } else {
-                break;
-            }
-        }
-        if self.idx == start_idx {
-            return Err(self.error(ParseErrorCode::ObjectKeyInvalidCharacter));
-        }
-
-        // Get the string data
-        let data = &self.buf[start_idx..self.idx];
-        let val = std::str::from_utf8(data)
-            .map(Cow::Borrowed)
-            .map_err(|_| self.error(ParseErrorCode::InvalidStringValue))?;
-        Ok(val)
     }
 
     /// Parse a quoted string with support for escape sequences
@@ -892,7 +857,7 @@ impl<'a> Parser<'a> {
     /// Uses a two-pass approach for efficiency:
     /// 1. First pass: Find string boundaries and count escapes
     /// 2. Second pass: Process escapes only when necessary
-    fn parse_string(&mut self, end_quote: u8) -> Result<Cow<'a, str>> {
+    fn parse_quoted_string(&mut self, end_quote: u8) -> Result<Cow<'a, str>> {
         // Mark the starting position (after the opening quote)
         let start_idx = self.idx;
         let mut escapes = 0;
@@ -950,6 +915,41 @@ impl<'a> Parser<'a> {
         Ok(val)
     }
 
+    /// Parse an unquoted string literal for object keys
+    ///
+    /// Extended syntax feature that allows object keys without quotes.
+    /// Restrictions:
+    /// - Only letters, numbers, and underscores are allowed
+    /// - First character cannot be a number
+    /// - Must contain at least one character
+    fn parse_unquoted_string(&mut self) -> Result<Cow<'a, str>> {
+        let start_idx = self.idx;
+
+        let c = self.next()?;
+        if matches!(c, b'0'..=b'9') {
+            return Err(self.error(ParseErrorCode::ObjectKeyInvalidNumber));
+        }
+
+        loop {
+            let c = self.next()?;
+            if matches!(c, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') {
+                self.step();
+            } else {
+                break;
+            }
+        }
+        if self.idx == start_idx {
+            return Err(self.error(ParseErrorCode::ObjectKeyInvalidCharacter));
+        }
+
+        // Get the string data
+        let data = &self.buf[start_idx..self.idx];
+        let val = std::str::from_utf8(data)
+            .map(Cow::Borrowed)
+            .map_err(|_| self.error(ParseErrorCode::InvalidStringValue))?;
+        Ok(val)
+    }
+
     /// Parse an array value with support for empty elements
     ///
     /// Extended syntax feature that treats empty elements as null:
@@ -963,33 +963,6 @@ impl<'a> Parser<'a> {
             Ok(JsonAst::Null)
         } else {
             self.parse_json_value()
-        }
-    }
-
-    /// Parse an object key in standard mode
-    ///
-    /// Only supports double-quoted strings as keys,
-    /// following strict JSON specification.
-    #[inline]
-    fn parse_standard_object_key(&mut self) -> Result<Cow<'a, str>> {
-        self.must_is(&b'"')?;
-        self.parse_string(b'"')
-    }
-
-    /// Parse an object key with extended syntax support
-    ///
-    /// Extended syntax allows:
-    /// 1. Double-quoted strings (")
-    /// 2. Single-quoted strings (')
-    /// 3. Unquoted identifiers (letters, numbers, underscores)
-    ///    with the restriction that they cannot start with a number
-    #[inline]
-    fn parse_object_key(&mut self) -> Result<Cow<'a, str>> {
-        if let Some(end_quote) = self.check_next_either(&b'"', &b'\'') {
-            self.step();
-            self.parse_string(end_quote)
-        } else {
-            self.parse_string_literal()
         }
     }
 
@@ -1041,6 +1014,33 @@ impl<'a> Parser<'a> {
             values.push(value);
         }
         Ok(JsonAst::Array(values))
+    }
+
+    /// Parse an object key in standard mode
+    ///
+    /// Only supports double-quoted strings as keys,
+    /// following strict JSON specification.
+    #[inline]
+    fn parse_standard_object_key(&mut self) -> Result<Cow<'a, str>> {
+        self.must_is(&b'"')?;
+        self.parse_quoted_string(b'"')
+    }
+
+    /// Parse an object key with extended syntax support
+    ///
+    /// Extended syntax allows:
+    /// 1. Double-quoted strings (")
+    /// 2. Single-quoted strings (')
+    /// 3. Unquoted identifiers (letters, numbers, underscores)
+    ///    with the restriction that they cannot start with a number
+    #[inline]
+    fn parse_object_key(&mut self) -> Result<Cow<'a, str>> {
+        if let Some(end_quote) = self.check_next_either(&b'"', &b'\'') {
+            self.step();
+            self.parse_quoted_string(end_quote)
+        } else {
+            self.parse_unquoted_string()
+        }
     }
 
     /// Parse a JSON object with support for both standard and extended syntax
