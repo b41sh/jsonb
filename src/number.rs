@@ -29,6 +29,8 @@ use serde::de::Deserializer;
 use serde::de::Visitor;
 use serde::ser::Serialize;
 use serde::ser::Serializer;
+#[cfg(feature = "arbitrary_precision")]
+use serde::ser::SerializeStruct;
 
 #[cfg(feature = "arbitrary_precision")]
 const NUMBER_TOKEN: &str = "$serde_json::private::Number";
@@ -286,28 +288,23 @@ impl Serialize for Number {
             Number::UInt64(v) => serializer.serialize_u64(*v),
             #[cfg(feature = "arbitrary_precision")]
             Number::Float64(v) => {
-                match v {
-                    f64::NAN | f64::INFINITY | f64::NEG_INFINITY => {
-                        let num_str = match v {
-                            f64::NAN => "NaN",
-                            f64::INFINITY => "Infinity",
-                            f64::NEG_INFINITY => "-Infinity",
-                            _ => unreachable!(),
-                        };
-                        let mut serialize_struct = serializer.serialize_struct(NUMBER_TOKEN, 1)?;
-                        serialize_struct.serialize_field(NUMBER_TOKEN, num_str)?;
-                        serialize_struct.end()
-                    }
-                    _ => {
-                        serializer.serialize_f64(*v)
-                    }
+                if v.is_nan() || v.is_infinite() {
+                    let num_str = match *v {
+                        f64::INFINITY => "Infinity",
+                        f64::NEG_INFINITY => "-Infinity",
+                        _ => "NaN",
+                    };
+                    let mut serialize_struct = serializer.serialize_struct(NUMBER_TOKEN, 1)?;
+                    serialize_struct.serialize_field(NUMBER_TOKEN, num_str)?;
+                    serialize_struct.end()
+                } else {
+                    serializer.serialize_f64(*v)
                 }
             }
             #[cfg(not(feature = "arbitrary_precision"))]
             Number::Float64(v) => serializer.serialize_f64(*v),
             #[cfg(feature = "arbitrary_precision")]
             Number::Decimal64(_) | Number::Decimal128(_) | Number::Decimal256(_) => {
-                use serde::ser::SerializeStruct;
                 use std::io::Write;
 
                 struct WriteAdapter<'a>(&'a mut std::io::Cursor<&'a mut [u8]>);
@@ -1124,14 +1121,17 @@ impl Display for Number {
                 write!(f, "{}", s)
             }
             Number::Float64(v) => {
-                match v {
-                    f64::NAN => write!(f, "NaN"),
-                    f64::INFINITY => write!(f, "Infinity"),
-                    f64::NEG_INFINITY => write!(f, "-Infinity"),
-                    _ => {
-                        let mut buffer = ryu::Buffer::new();
-                        let s = buffer.format(*v);
-                        write!(f, "{}", s)
+                if v.is_nan() {
+                    write!(f, "NaN")
+                } else {
+                    match *v {
+                        f64::INFINITY => write!(f, "Infinity"),
+                        f64::NEG_INFINITY => write!(f, "-Infinity"),
+                        _ => {
+                            let mut buffer = ryu::Buffer::new();
+                            let s = buffer.format(*v);
+                            write!(f, "{}", s)
+                        }
                     }
                 }
             }
