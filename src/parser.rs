@@ -550,9 +550,12 @@ impl<'a> Parser<'a> {
     /// Accepts any case variation of "null" (e.g., "Null", "NULL", "nUlL").
     #[inline]
     fn parse_json_null_or_nan(&mut self) -> Result<JsonAst<'a>> {
+        let idx = self.idx;
         if let Ok(null) = self.parse_json_null() {
             Ok(null)
         } else {
+            // fallback to check is nan
+            self.idx = idx;
             self.parse_json_nan()
         }
     }
@@ -1132,8 +1135,40 @@ impl<'a> Parser<'a> {
 
         loop {
             let c = self.next()?;
-            if c.is_ascii_alphanumeric() || matches!(c, b'_') {
+            if c.is_ascii_alphanumeric() || matches!(c, b'_' | b'$') {
                 self.step();
+            } else if c >= 0x80 {
+                // Handle UTF-8 multi-byte characters (including Chinese)
+                self.step();
+                
+                // UTF-8 continuation bytes start with binary 10xxxxxx (0x80-0xBF)
+                // Determine how many continuation bytes to expect based on the first byte
+                let continuation_bytes = if c >= 0xF0 {
+                    3  // 4-byte sequence (U+10000 to U+10FFFF)
+                } else if c >= 0xE0 {
+                    2  // 3-byte sequence (U+0800 to U+FFFF) - includes most Chinese characters
+                } else if c >= 0xC0 {
+                    1  // 2-byte sequence (U+0080 to U+07FF)
+                } else {
+                    // Invalid UTF-8 start byte
+                    return Err(self.error(ParseErrorCode::ObjectKeyInvalidCharacter));
+                };
+                
+                // Consume the expected continuation bytes
+                for _ in 0..continuation_bytes {
+                    if self.idx >= self.buf.len() {
+                        // Unexpected end of input in the middle of a UTF-8 sequence
+                        return Err(self.error(ParseErrorCode::ObjectKeyInvalidCharacter));
+                    }
+                    
+                    let next_byte = self.buf[self.idx];
+                    // Verify it's a valid continuation byte (0x80-0xBF)
+                    if next_byte & 0xC0 != 0x80 {
+                        return Err(self.error(ParseErrorCode::ObjectKeyInvalidCharacter));
+                    }
+                    
+                    self.step();
+                }
             } else {
                 break;
             }

@@ -30,6 +30,9 @@ use serde::de::Visitor;
 use serde::ser::Serialize;
 use serde::ser::Serializer;
 
+#[cfg(feature = "arbitrary_precision")]
+const NUMBER_TOKEN: &str = "$serde_json::private::Number";
+
 // Pre-calculate powers of 10 for common scales to avoid repeated computation
 const I128_POWERS_OF_10: [i128; 39] = [
     1,
@@ -281,12 +284,31 @@ impl Serialize for Number {
         match self {
             Number::Int64(v) => serializer.serialize_i64(*v),
             Number::UInt64(v) => serializer.serialize_u64(*v),
+            #[cfg(feature = "arbitrary_precision")]
+            Number::Float64(v) => {
+                match v {
+                    f64::NAN | f64::INFINITY | f64::NEG_INFINITY => {
+                        let num_str = match v {
+                            f64::NAN => "NaN",
+                            f64::INFINITY => "Infinity",
+                            f64::NEG_INFINITY => "-Infinity",
+                            _ => unreachable!(),
+                        };
+                        let mut serialize_struct = serializer.serialize_struct(NUMBER_TOKEN, 1)?;
+                        serialize_struct.serialize_field(NUMBER_TOKEN, num_str)?;
+                        serialize_struct.end()
+                    }
+                    _ => {
+                        serializer.serialize_f64(*v)
+                    }
+                }
+            }
+            #[cfg(not(feature = "arbitrary_precision"))]
             Number::Float64(v) => serializer.serialize_f64(*v),
             #[cfg(feature = "arbitrary_precision")]
             Number::Decimal64(_) | Number::Decimal128(_) | Number::Decimal256(_) => {
                 use serde::ser::SerializeStruct;
                 use std::io::Write;
-                const NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
                 struct WriteAdapter<'a>(&'a mut std::io::Cursor<&'a mut [u8]>);
 
@@ -1102,9 +1124,16 @@ impl Display for Number {
                 write!(f, "{}", s)
             }
             Number::Float64(v) => {
-                let mut buffer = ryu::Buffer::new();
-                let s = buffer.format(*v);
-                write!(f, "{}", s)
+                match v {
+                    f64::NAN => write!(f, "NaN"),
+                    f64::INFINITY => write!(f, "Infinity"),
+                    f64::NEG_INFINITY => write!(f, "-Infinity"),
+                    _ => {
+                        let mut buffer = ryu::Buffer::new();
+                        let s = buffer.format(*v);
+                        write!(f, "{}", s)
+                    }
+                }
             }
             Number::Decimal64(v) => format_decimal_i128(f, v.value as i128, v.scale as usize),
             Number::Decimal128(v) => format_decimal_i128(f, v.value, v.scale as usize),
