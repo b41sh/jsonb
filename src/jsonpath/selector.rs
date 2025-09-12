@@ -949,6 +949,8 @@ impl<'a> Selector<'a> {
                 }
             };
             Some(res)
+        } else if matches!(op, BinaryOperator::NotEq) {
+            Some(true)
         } else {
             None
         }

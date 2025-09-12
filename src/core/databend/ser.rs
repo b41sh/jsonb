@@ -36,6 +36,26 @@ use crate::Error;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 
+use crate::Decimal128;
+use crate::Decimal256;
+use crate::Decimal64;
+use ethnum::i256;
+
+use crate::constants::NUMBER_STRUCT_FIELD_HIGH_VALUE;
+use crate::constants::NUMBER_STRUCT_FIELD_LOW_VALUE;
+use crate::constants::NUMBER_STRUCT_FIELD_SCALE;
+use crate::constants::NUMBER_STRUCT_FIELD_VALUE;
+use crate::constants::NUMBER_STRUCT_TOKEN;
+
+use crate::constants::DECIMAL128_MAX;
+use crate::constants::DECIMAL128_MIN;
+use crate::constants::DECIMAL64_MAX;
+use crate::constants::DECIMAL64_MIN;
+
+use crate::constants::MAX_DECIMAL128_PRECISION;
+use crate::constants::MAX_DECIMAL256_PRECISION;
+use crate::constants::MAX_DECIMAL64_PRECISION;
+
 /// `Serializer` is a custom serializer for JSONB data, implementing the
 /// `serde::ser::Serializer` trait. It allows serializing Rust data structures
 /// into a `Vec<u8>` representing the JSONB data.
@@ -121,9 +141,9 @@ impl<'a> ser::Serializer for &'a mut Serializer {
 
     type SerializeMap = ObjectSerializer<'a>;
 
-    type SerializeStruct = ObjectSerializer<'a>;
+    type SerializeStruct = StructSerializer<'a>;
 
-    type SerializeStructVariant = ArraySerializer<'a>;
+    type SerializeStructVariant = StructSerializer<'a>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok> {
         let jentry = if v {
@@ -174,6 +194,43 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self.write_number(Number::Float64(v))
     }
 
+    fn serialize_i128(self, v: i128) -> Result<Self::Ok> {
+        let num = if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&v) {
+            Number::Decimal64(Decimal64 {
+                scale: 0,
+                value: v as i64,
+            })
+        } else if (DECIMAL128_MIN..=DECIMAL128_MAX).contains(&v) {
+            Number::Decimal128(Decimal128 { scale: 0, value: v })
+        } else {
+            Number::Decimal256(Decimal256 {
+                scale: 0,
+                value: i256::from(v),
+            })
+        };
+        self.write_number(num)
+    }
+
+    fn serialize_u128(self, v: u128) -> Result<Self::Ok> {
+        let num = if v <= DECIMAL64_MAX as u128 {
+            Number::Decimal64(Decimal64 {
+                scale: 0,
+                value: v as i64,
+            })
+        } else if v <= DECIMAL128_MAX as u128 {
+            Number::Decimal128(Decimal128 {
+                scale: 0,
+                value: v as i128,
+            })
+        } else {
+            Number::Decimal256(Decimal256 {
+                scale: 0,
+                value: i256::from(v),
+            })
+        };
+        self.write_number(num)
+    }
+
     fn serialize_char(self, v: char) -> Result<Self::Ok> {
         let s: String = v.to_string();
         self.write_str(s.as_str())
@@ -216,23 +273,32 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_newtype_struct<T: ?Sized + Serialize>(
         self,
         _name: &'static str,
-        _value: &T,
+        value: &T,
     ) -> Result<Self::Ok> {
-        self.serialize_unit()
+        T::serialize(value, self)
     }
 
     fn serialize_newtype_variant<T: ?Sized + Serialize>(
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
-        _value: &T,
+        variant: &'static str,
+        value: &T,
     ) -> Result<Self::Ok> {
-        todo!()
+        let mut serializer = Serializer::new();
+        value.serialize(&mut serializer)?;
+        let value_jsonb = OwnedJsonb::new(serializer.buffer);
+
+        let mut builder = ObjectBuilder::new();
+        builder.push_owned_jsonb(variant, value_jsonb)?;
+        let object_jsonb = builder.build()?;
+        let mut buf = object_jsonb.to_vec();
+        self.buffer.append(&mut buf);
+        Ok(())
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
-        Ok(ArraySerializer::new(&mut self.buffer, len))
+        Ok(ArraySerializer::new(None, &mut self.buffer, len))
     }
 
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
@@ -242,51 +308,69 @@ impl<'a> ser::Serializer for &'a mut Serializer {
     fn serialize_tuple_struct(
         self,
         _name: &'static str,
-        _len: usize,
+        len: usize,
     ) -> Result<Self::SerializeTupleStruct> {
-        todo!()
+        self.serialize_seq(Some(len))
     }
 
     fn serialize_tuple_variant(
         self,
         _name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
-        _len: usize,
+        variant: &'static str,
+        len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        todo!()
+        Ok(ArraySerializer::new(
+            Some(variant),
+            &mut self.buffer,
+            Some(len),
+        ))
     }
 
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap> {
         Ok(ObjectSerializer::new(&mut self.buffer, len))
     }
 
-    fn serialize_struct(self, _name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
-        self.serialize_map(Some(len))
+    fn serialize_struct(self, name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
+        Ok(StructSerializer::new(name, None, &mut self.buffer, len))
     }
 
     fn serialize_struct_variant(
         self,
-        _name: &'static str,
+        name: &'static str,
         _variant_index: u32,
-        _variant: &'static str,
-        _len: usize,
+        variant: &'static str,
+        len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        todo!()
+        Ok(StructSerializer::new(
+            name,
+            Some(variant),
+            &mut self.buffer,
+            len,
+        ))
+    }
+
+    fn is_human_readable(&self) -> bool {
+        false
     }
 }
 
 pub struct ArraySerializer<'a> {
+    variant: Option<&'static str>,
     buffer: &'a mut Vec<u8>,
     items: Vec<OwnedJsonb>,
 }
 
 impl<'a> ArraySerializer<'a> {
-    pub fn new(buffer: &'a mut Vec<u8>, len: Option<usize>) -> Self {
+    pub fn new(variant: Option<&'static str>, buffer: &'a mut Vec<u8>, len: Option<usize>) -> Self {
         let len = len.unwrap_or_default();
         let items = Vec::with_capacity(len);
 
-        Self { buffer, items }
+        Self {
+            variant,
+            buffer,
+            items,
+        }
     }
 }
 
@@ -297,10 +381,10 @@ impl ser::SerializeSeq for ArraySerializer<'_> {
 
     fn serialize_element<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
         let mut serializer = Serializer::new();
-        let res = value.serialize(&mut serializer);
+        value.serialize(&mut serializer)?;
         let item_jsonb = OwnedJsonb::new(serializer.buffer);
         self.items.push(item_jsonb);
-        res
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok> {
@@ -326,6 +410,52 @@ impl ser::SerializeTuple for ArraySerializer<'_> {
 
     fn end(self) -> Result<Self::Ok> {
         <Self as ser::SerializeSeq>::end(self)
+    }
+}
+
+impl ser::SerializeTupleStruct for ArraySerializer<'_> {
+    type Ok = ();
+
+    type Error = Error;
+
+    fn serialize_field<T: ?Sized + Serialize>(
+        &mut self,
+        value: &T,
+    ) -> std::prelude::v1::Result<(), Self::Error> {
+        <Self as ser::SerializeSeq>::serialize_element(self, value)
+    }
+
+    fn end(self) -> Result<Self::Ok> {
+        <Self as ser::SerializeSeq>::end(self)
+    }
+}
+
+impl ser::SerializeTupleVariant for ArraySerializer<'_> {
+    type Ok = ();
+
+    type Error = Error;
+
+    fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
+        <Self as ser::SerializeSeq>::serialize_element(self, value)
+    }
+
+    fn end(self) -> Result<Self::Ok> {
+        let Some(variant) = self.variant else {
+            return Err(ser::Error::custom("Variant can not be None".to_string()));
+        };
+
+        let mut builder = ArrayBuilder::with_capacity(self.items.len());
+        for item in self.items.into_iter() {
+            builder.push_owned_jsonb(item);
+        }
+        let array_jsonb = builder.build()?;
+
+        let mut builder = ObjectBuilder::new();
+        builder.push_owned_jsonb(variant, array_jsonb)?;
+        let object_jsonb = builder.build()?;
+        let mut buf = object_jsonb.to_vec();
+        self.buffer.append(&mut buf);
+        Ok(())
     }
 }
 
@@ -356,7 +486,7 @@ impl ser::SerializeMap for ObjectSerializer<'_> {
 
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<()> {
         let mut serializer = Serializer::new();
-        let res = key.serialize(&mut serializer);
+        key.serialize(&mut serializer)?;
         let key_jsonb = OwnedJsonb::new(serializer.buffer);
         let raw_jsonb = key_jsonb.as_raw();
         let Ok(Some(key)) = raw_jsonb.as_str() else {
@@ -364,16 +494,16 @@ impl ser::SerializeMap for ObjectSerializer<'_> {
         };
         self.keys.push(key.to_string());
 
-        res
+        Ok(())
     }
 
     fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
         let mut serializer = Serializer::new();
-        let res = value.serialize(&mut serializer);
+        value.serialize(&mut serializer)?;
         let value_jsonb = OwnedJsonb::new(serializer.buffer);
         self.values.push(value_jsonb);
 
-        res
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok> {
@@ -393,7 +523,32 @@ impl ser::SerializeMap for ObjectSerializer<'_> {
     }
 }
 
-impl ser::SerializeStruct for ObjectSerializer<'_> {
+pub struct StructSerializer<'a> {
+    name: &'static str,
+    variant: Option<&'static str>,
+    buffer: &'a mut Vec<u8>,
+    values: Vec<(&'static str, OwnedJsonb)>,
+}
+
+impl<'a> StructSerializer<'a> {
+    fn new(
+        name: &'static str,
+        variant: Option<&'static str>,
+        buffer: &'a mut Vec<u8>,
+        len: usize,
+    ) -> Self {
+        let values = Vec::with_capacity(len);
+
+        Self {
+            name,
+            variant,
+            buffer,
+            values,
+        }
+    }
+}
+
+impl ser::SerializeStruct for StructSerializer<'_> {
     type Ok = ();
 
     type Error = Error;
@@ -403,61 +558,176 @@ impl ser::SerializeStruct for ObjectSerializer<'_> {
         key: &'static str,
         value: &T,
     ) -> Result<()> {
-        <Self as ser::SerializeMap>::serialize_key(self, key)?;
-        <Self as ser::SerializeMap>::serialize_value(self, value)
+        let mut serializer = Serializer::new();
+        let res = value.serialize(&mut serializer);
+        let value_jsonb = OwnedJsonb::new(serializer.buffer);
+        self.values.push((key, value_jsonb));
+        Ok(())
     }
 
-    fn end(self) -> Result<Self::Ok> {
+    fn end(mut self) -> Result<Self::Ok> {
+        if self.name == NUMBER_STRUCT_TOKEN {
+            let num = if self.values.len() == 2 {
+                let (value_field_name, value_jsonb) = self.values.remove(1);
+                let (scale_field_name, scale_jsonb) = self.values.remove(0);
+
+                if scale_field_name != NUMBER_STRUCT_FIELD_SCALE
+                    || value_field_name != NUMBER_STRUCT_FIELD_VALUE
+                {
+                    return Err(ser::Error::custom(format!(
+                        "Invalid number struct field names: scale={}, value={}",
+                        scale_field_name, value_field_name
+                    )));
+                }
+                let scale = owned_jsonb_to_u64(scale_field_name, scale_jsonb)?;
+                let value = owned_jsonb_to_i128(value_field_name, value_jsonb)?;
+
+                let num = if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&value)
+                    && scale <= MAX_DECIMAL64_PRECISION as u64
+                {
+                    Number::Decimal64(Decimal64 {
+                        scale: scale as u8,
+                        value: value as i64,
+                    })
+                } else if (DECIMAL128_MIN..=DECIMAL128_MAX).contains(&value)
+                    && scale <= MAX_DECIMAL128_PRECISION as u64
+                {
+                    Number::Decimal128(Decimal128 {
+                        scale: scale as u8,
+                        value: value,
+                    })
+                } else if scale <= MAX_DECIMAL256_PRECISION as u64 {
+                    Number::Decimal256(Decimal256 {
+                        scale: scale as u8,
+                        value: i256::from(value),
+                    })
+                } else {
+                    return Err(ser::Error::custom(format!(
+                        "Invalid number struct scale={} value={}",
+                        scale, value
+                    )));
+                };
+                num
+            } else if self.values.len() == 3 {
+                let (low_value_field_name, low_value_jsonb) = self.values.remove(2);
+                let (high_value_field_name, high_value_jsonb) = self.values.remove(1);
+                let (scale_field_name, scale_jsonb) = self.values.remove(0);
+
+                if scale_field_name != NUMBER_STRUCT_FIELD_SCALE
+                    || high_value_field_name != NUMBER_STRUCT_FIELD_HIGH_VALUE
+                    || low_value_field_name != NUMBER_STRUCT_FIELD_LOW_VALUE
+                {
+                    return Err(ser::Error::custom(format!(
+                        "Invalid number struct field names: scale={}, high_value={} low_value={}",
+                        scale_field_name, high_value_field_name, low_value_field_name
+                    )));
+                }
+                let scale = owned_jsonb_to_u64(scale_field_name, scale_jsonb)?;
+                let high_value = owned_jsonb_to_i128(high_value_field_name, high_value_jsonb)?;
+                let low_value = owned_jsonb_to_i128(low_value_field_name, low_value_jsonb)?;
+
+                let num = if scale <= MAX_DECIMAL256_PRECISION as u64 {
+                    Number::Decimal256(Decimal256 {
+                        scale: scale as u8,
+                        value: i256::from_words(high_value, low_value),
+                    })
+                } else {
+                    return Err(ser::Error::custom(format!(
+                        "Invalid number struct scale={} high_value={} low_value={}",
+                        scale, high_value, low_value
+                    )));
+                };
+                num
+            } else {
+                return Err(ser::Error::custom(format!(
+                    "Invalid number of fields for number struct: {}",
+                    self.values.len()
+                )));
+            };
+
+            let mut serializer = Serializer::new();
+            serializer.write_number(num)?;
+            self.buffer.append(&mut serializer.buffer);
+        } else {
+            let mut builder = ObjectBuilder::new();
+            for (key_str, value) in self.values.into_iter() {
+                builder.push_owned_jsonb(key_str, value)?;
+            }
+            let object_jsonb = builder.build()?;
+            let mut buf = object_jsonb.to_vec();
+            self.buffer.append(&mut buf);
+        }
         Ok(())
     }
 }
 
-impl ser::SerializeTupleStruct for ArraySerializer<'_> {
+fn owned_jsonb_to_u64(field: &str, owned_jsonb: OwnedJsonb) -> Result<u64> {
+    let raw_jsonb = owned_jsonb.as_raw();
+    let Ok(Some(num)) = raw_jsonb.as_number() else {
+        return Err(ser::Error::custom(format!(
+            "Invalid number struct field={} value={}",
+            field,
+            raw_jsonb.to_string()
+        )));
+    };
+    let Some(num) = num.as_u64() else {
+        return Err(ser::Error::custom(format!(
+            "Invalid number struct to u64 field={} value={}",
+            field,
+            raw_jsonb.to_string()
+        )));
+    };
+    Ok(num)
+}
+
+fn owned_jsonb_to_i128(field: &str, owned_jsonb: OwnedJsonb) -> Result<i128> {
+    let raw_jsonb = owned_jsonb.as_raw();
+    let Ok(Some(num)) = raw_jsonb.as_number() else {
+        return Err(ser::Error::custom(format!(
+            "Invalid number struct field={} value={}",
+            field,
+            raw_jsonb.to_string()
+        )));
+    };
+    let Some(num) = num.as_i128() else {
+        return Err(ser::Error::custom(format!(
+            "Invalid number struct to i128 field={} value={}",
+            field,
+            raw_jsonb.to_string()
+        )));
+    };
+    Ok(num)
+}
+
+impl ser::SerializeStructVariant for StructSerializer<'_> {
     type Ok = ();
 
     type Error = Error;
 
     fn serialize_field<T: ?Sized + Serialize>(
         &mut self,
-        _value: &T,
-    ) -> std::prelude::v1::Result<(), Self::Error> {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok> {
-        todo!()
-    }
-}
-
-impl ser::SerializeTupleVariant for ArraySerializer<'_> {
-    type Ok = ();
-
-    type Error = Error;
-
-    fn serialize_field<T: ?Sized + Serialize>(&mut self, _value: &T) -> Result<()> {
-        todo!()
-    }
-
-    fn end(self) -> Result<Self::Ok> {
-        todo!()
-    }
-}
-
-impl ser::SerializeStructVariant for ArraySerializer<'_> {
-    type Ok = ();
-
-    type Error = Error;
-
-    fn serialize_field<T: ?Sized + Serialize>(
-        &mut self,
-        _key: &'static str,
-        _value: &T,
+        key: &'static str,
+        value: &T,
     ) -> Result<()> {
-        todo!()
+        <Self as ser::SerializeStruct>::serialize_field(self, key, value)
     }
 
     fn end(self) -> Result<Self::Ok> {
-        todo!()
+        let Some(variant) = self.variant else {
+            return Err(ser::Error::custom("Variant can not be None".to_string()));
+        };
+        let mut builder = ObjectBuilder::new();
+        for (key_str, value) in self.values.into_iter() {
+            builder.push_owned_jsonb(key_str, value)?;
+        }
+        let object_jsonb = builder.build()?;
+
+        let mut builder = ObjectBuilder::new();
+        builder.push_owned_jsonb(variant, object_jsonb)?;
+        let object_jsonb = builder.build()?;
+        let mut buf = object_jsonb.to_vec();
+        self.buffer.append(&mut buf);
+        Ok(())
     }
 }
 

@@ -227,7 +227,7 @@ fn test_path_exists_expr() {
 
 #[test]
 fn test_select_by_path() {
-    let source = r#"{"name":"Fred","phones":[{"type":"home","number":3720453},{"type":"work","number":5062051}],"car_no":123,"测试\"\uD83D\uDC8E":"ab","numbers":[2,3,4]}"#;
+    let source = r#"{"name":"Fred","phones":[{"type":"home","number":3720453},{"type":"work","number":5062051}],"car_no":123,"测试\"\uD83D\uDC8E":"ab","numbers":[2,3,4],"key":null}"#;
 
     let paths = vec![
         (r#"$.name"#, vec![r#""Fred""#]),
@@ -298,6 +298,10 @@ fn test_select_by_path() {
         (
             r#"$.phones[0 to last]?(@.number == 3720453 && @.type == "work")"#,
             vec![],
+        ),
+        (
+            r#"$.car_no?($.name == "Fred" && $.car_no != null)"#,
+            vec![r#"123"#],
         ),
         (r#"$.car_no"#, vec![r#"123"#]),
         (r#"$.测试\"\uD83D\uDC8E"#, vec![r#""ab""#]),
