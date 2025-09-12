@@ -559,7 +559,7 @@ impl ser::SerializeStruct for StructSerializer<'_> {
         value: &T,
     ) -> Result<()> {
         let mut serializer = Serializer::new();
-        let res = value.serialize(&mut serializer);
+        value.serialize(&mut serializer)?;
         let value_jsonb = OwnedJsonb::new(serializer.buffer);
         self.values.push((key, value_jsonb));
         Ok(())
@@ -582,7 +582,7 @@ impl ser::SerializeStruct for StructSerializer<'_> {
                 let scale = owned_jsonb_to_u64(scale_field_name, scale_jsonb)?;
                 let value = owned_jsonb_to_i128(value_field_name, value_jsonb)?;
 
-                let num = if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&value)
+                if (DECIMAL64_MIN..=DECIMAL64_MAX).contains(&value)
                     && scale <= MAX_DECIMAL64_PRECISION as u64
                 {
                     Number::Decimal64(Decimal64 {
@@ -594,7 +594,7 @@ impl ser::SerializeStruct for StructSerializer<'_> {
                 {
                     Number::Decimal128(Decimal128 {
                         scale: scale as u8,
-                        value: value,
+                        value,
                     })
                 } else if scale <= MAX_DECIMAL256_PRECISION as u64 {
                     Number::Decimal256(Decimal256 {
@@ -606,8 +606,7 @@ impl ser::SerializeStruct for StructSerializer<'_> {
                         "Invalid number struct scale={} value={}",
                         scale, value
                     )));
-                };
-                num
+                }
             } else if self.values.len() == 3 {
                 let (low_value_field_name, low_value_jsonb) = self.values.remove(2);
                 let (high_value_field_name, high_value_jsonb) = self.values.remove(1);
@@ -626,7 +625,7 @@ impl ser::SerializeStruct for StructSerializer<'_> {
                 let high_value = owned_jsonb_to_i128(high_value_field_name, high_value_jsonb)?;
                 let low_value = owned_jsonb_to_i128(low_value_field_name, low_value_jsonb)?;
 
-                let num = if scale <= MAX_DECIMAL256_PRECISION as u64 {
+                if scale <= MAX_DECIMAL256_PRECISION as u64 {
                     Number::Decimal256(Decimal256 {
                         scale: scale as u8,
                         value: i256::from_words(high_value, low_value),
@@ -636,8 +635,7 @@ impl ser::SerializeStruct for StructSerializer<'_> {
                         "Invalid number struct scale={} high_value={} low_value={}",
                         scale, high_value, low_value
                     )));
-                };
-                num
+                }
             } else {
                 return Err(ser::Error::custom(format!(
                     "Invalid number of fields for number struct: {}",
