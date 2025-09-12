@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
@@ -34,13 +35,13 @@ use crate::Error;
 
 /// Represents a set of key path chains.
 /// Compatible with PostgreSQL extracts JSON sub-object paths syntax.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct KeyPaths<'a> {
     pub paths: Vec<KeyPath<'a>>,
 }
 
 /// Represents a valid key path.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum KeyPath<'a> {
     /// represents the index of an Array, allow negative indexing.
     Index(i32),
@@ -48,6 +49,62 @@ pub enum KeyPath<'a> {
     QuotedName(Cow<'a, str>),
     /// represents the field name of an Object.
     Name(Cow<'a, str>),
+}
+
+impl Eq for KeyPaths<'_> {}
+
+impl PartialEq for KeyPaths<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        let result = self.cmp(other);
+        result == Ordering::Equal
+    }
+}
+
+impl PartialOrd for KeyPaths<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for KeyPaths<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        for (self_path, other_path) in self.paths.iter().zip(other.paths.iter()) {
+            let ord = self_path.cmp(other_path);
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        }
+        self.paths.len().cmp(&other.paths.len())
+    }
+}
+
+impl Eq for KeyPath<'_> {}
+
+impl PartialEq for KeyPath<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        let ord = self.cmp(other);
+        ord == Ordering::Equal
+    }
+}
+
+impl PartialOrd for KeyPath<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for KeyPath<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (KeyPath::Index(v1), KeyPath::Index(v2)) => v1.cmp(v2),
+            (
+                KeyPath::QuotedName(v1) | KeyPath::Name(v1),
+                KeyPath::QuotedName(v2) | KeyPath::Name(v2),
+            ) => v1.cmp(v2),
+            (KeyPath::QuotedName(_) | KeyPath::Name(_), KeyPath::Index(_)) => Ordering::Greater,
+            (KeyPath::Index(_), KeyPath::QuotedName(_) | KeyPath::Name(_)) => Ordering::Less,
+        }
+    }
 }
 
 impl Display for KeyPaths<'_> {
