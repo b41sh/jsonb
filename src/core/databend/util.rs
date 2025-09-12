@@ -22,8 +22,10 @@ use ethnum::i256;
 
 use super::constants::*;
 use super::jentry::JEntry;
+use crate::core::ExtensionItem;
 use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
+use crate::core::NumberItem;
 use crate::error::*;
 use crate::extension::Date;
 use crate::extension::ExtensionValue;
@@ -52,9 +54,12 @@ impl<'a> JsonbItem<'a> {
                     NULL_TAG => JsonbItem::Null,
                     TRUE_TAG => JsonbItem::Boolean(true),
                     FALSE_TAG => JsonbItem::Boolean(false),
-                    NUMBER_TAG => JsonbItem::Number(data),
-                    STRING_TAG => JsonbItem::String(data),
-                    EXTENSION_TAG => JsonbItem::Extension(data),
+                    NUMBER_TAG => JsonbItem::Number(NumberItem::Raw(data)),
+                    STRING_TAG => {
+                        let s = Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(data) });
+                        JsonbItem::String(s)
+                    }
+                    EXTENSION_TAG => JsonbItem::Extension(ExtensionItem::Raw(data)),
                     _ => {
                         return Err(Error::InvalidJsonb);
                     }
@@ -196,52 +201,77 @@ impl<'a> RawJsonb<'a> {
 
 impl OwnedJsonb {
     pub(crate) fn from_item(item: JsonbItem<'_>) -> Result<OwnedJsonb> {
-        let (jentry, data) = match item {
-            JsonbItem::Null => {
-                let jentry = JEntry::make_null_jentry();
-                (jentry, None)
-            }
-            JsonbItem::Boolean(v) => {
-                let jentry = if v {
-                    JEntry::make_true_jentry()
-                } else {
-                    JEntry::make_false_jentry()
+        match item {
+            JsonbItem::Raw(raw_jsonb) => Ok(raw_jsonb.to_owned()),
+            JsonbItem::Owned(owned_jsonb) => Ok(owned_jsonb),
+            _ => {
+                let mut len = match item {
+                    JsonbItem::Null => 0,
+                    JsonbItem::Boolean(_) => 0,
+                    JsonbItem::Number(NumberItem::Raw(data)) => data.len(),
+                    JsonbItem::String(ref s) => s.len(),
+                    JsonbItem::Extension(ExtensionItem::Raw(data)) => data.len(),
+                    // The estimated lengths for number and extension.
+                    _ => 10,
                 };
-                (jentry, None)
-            }
-            JsonbItem::Number(data) => {
-                let jentry = JEntry::make_number_jentry(data.len());
-                (jentry, Some(data))
-            }
-            JsonbItem::String(data) => {
-                let jentry = JEntry::make_string_jentry(data.len());
-                (jentry, Some(data))
-            }
-            JsonbItem::Extension(data) => {
-                let jentry = JEntry::make_extension_jentry(data.len());
-                (jentry, Some(data))
-            }
-            JsonbItem::Raw(raw_jsonb) => {
-                return Ok(raw_jsonb.to_owned());
-            }
-            JsonbItem::Owned(owned_jsonb) => {
-                return Ok(owned_jsonb.clone());
-            }
-        };
 
-        let len = if let Some(data) = data {
-            data.len() + 8
-        } else {
-            8
-        };
-        let mut buf = Vec::with_capacity(len);
-        let header = SCALAR_CONTAINER_TAG;
-        buf.write_u32::<BigEndian>(header)?;
-        buf.write_u32::<BigEndian>(jentry.encoded())?;
-        if let Some(data) = data {
-            buf.extend_from_slice(data);
+                // add the length of header and jentry.
+                len += 8;
+                let mut buf = Vec::with_capacity(len);
+                let header = SCALAR_CONTAINER_TAG;
+                buf.write_u32::<BigEndian>(header)?;
+
+                match item {
+                    JsonbItem::Null => {
+                        let jentry = JEntry::make_null_jentry();
+                        buf.write_u32::<BigEndian>(jentry.encoded())?;
+                    }
+                    JsonbItem::Boolean(v) => {
+                        let jentry = if v {
+                            JEntry::make_true_jentry()
+                        } else {
+                            JEntry::make_false_jentry()
+                        };
+                        buf.write_u32::<BigEndian>(jentry.encoded())?;
+                    }
+                    JsonbItem::Number(num) => match num {
+                        NumberItem::Raw(data) => {
+                            let jentry = JEntry::make_number_jentry(data.len());
+                            buf.write_u32::<BigEndian>(jentry.encoded())?;
+                            buf.extend_from_slice(data);
+                        }
+                        NumberItem::Number(num) => {
+                            let mut data = vec![];
+                            let len = num.compact_encode(&mut data)?;
+                            let jentry = JEntry::make_number_jentry(len);
+                            buf.write_u32::<BigEndian>(jentry.encoded())?;
+                            buf.extend_from_slice(&data);
+                        }
+                    },
+                    JsonbItem::String(s) => {
+                        let jentry = JEntry::make_string_jentry(s.len());
+                        buf.write_u32::<BigEndian>(jentry.encoded())?;
+                        buf.extend_from_slice(s.as_bytes());
+                    }
+                    JsonbItem::Extension(ext) => match ext {
+                        ExtensionItem::Raw(data) => {
+                            let jentry = JEntry::make_extension_jentry(data.len());
+                            buf.write_u32::<BigEndian>(jentry.encoded())?;
+                            buf.extend_from_slice(data);
+                        }
+                        ExtensionItem::Extension(ext) => {
+                            let mut data = vec![];
+                            let len = ext.compact_encode(&mut data)?;
+                            let jentry = JEntry::make_extension_jentry(len);
+                            buf.write_u32::<BigEndian>(jentry.encoded())?;
+                            buf.extend_from_slice(&data);
+                        }
+                    },
+                    _ => unreachable!(),
+                }
+                Ok(OwnedJsonb::new(buf))
+            }
         }
-        Ok(OwnedJsonb::new(buf))
     }
 }
 
@@ -501,9 +531,12 @@ pub(super) fn jentry_to_jsonb_item(jentry: JEntry, data: &[u8]) -> JsonbItem<'_>
         NULL_TAG => JsonbItem::Null,
         TRUE_TAG => JsonbItem::Boolean(true),
         FALSE_TAG => JsonbItem::Boolean(false),
-        NUMBER_TAG => JsonbItem::Number(data),
-        STRING_TAG => JsonbItem::String(data),
-        EXTENSION_TAG => JsonbItem::Extension(data),
+        NUMBER_TAG => JsonbItem::Number(NumberItem::Raw(data)),
+        STRING_TAG => {
+            let s = Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(data) });
+            JsonbItem::String(s)
+        }
+        EXTENSION_TAG => JsonbItem::Extension(ExtensionItem::Raw(data)),
         CONTAINER_TAG => JsonbItem::Raw(RawJsonb::new(data)),
         _ => unreachable!(),
     }
