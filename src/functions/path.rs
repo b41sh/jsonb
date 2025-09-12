@@ -1045,7 +1045,7 @@ impl RawJsonb<'_> {
         Ok(false)
     }
 
-    pub fn extract_scalar_key_values<'a>(&self) -> Result<Vec<(KeyPaths<'a>, Value<'a>)>> {
+    pub fn extract_scalar_key_values(&self) -> Result<Vec<(KeyPaths<'_>, Value<'_>)>> {
         let item = JsonbItem::from_raw_jsonb(*self)?;
         let mut result = Vec::new();
         let mut current_paths = Vec::new();
