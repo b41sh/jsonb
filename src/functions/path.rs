@@ -18,9 +18,6 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
-use crate::ExtensionValue;
-use crate::keypath::KeyPaths;
-use crate::Value;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
@@ -32,8 +29,11 @@ use crate::error::*;
 use crate::jsonpath::JsonPath;
 use crate::jsonpath::Selector;
 use crate::keypath::KeyPath;
+use crate::keypath::KeyPaths;
+use crate::ExtensionValue;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
+use crate::Value;
 
 impl RawJsonb<'_> {
     /// Gets the element at the specified index in a JSONB array.
@@ -622,6 +622,7 @@ impl RawJsonb<'_> {
     /// // Deleting from an object
     /// let obj_jsonb = r#"{"a": 1, "b": "hello", "c": 3}"#.parse::<OwnedJsonb>().unwrap();
     /// let raw_jsonb = obj_jsonb.as_raw();
+    ///
     /// let deleted = raw_jsonb.delete_by_name("b").unwrap();
     /// assert_eq!(deleted.to_string(), r#"{"a":1,"c":3}"#);
     ///
@@ -1045,6 +1046,63 @@ impl RawJsonb<'_> {
         Ok(false)
     }
 
+    /// Extracts all scalar values from a JSONB document along with their key paths.
+    ///
+    /// This function recursively traverses the JSONB structure (both objects and arrays)
+    /// and collects all leaf node scalar values (null, boolean, number, string, etc.)
+    /// along with their corresponding key paths. The key path represents the navigation
+    /// path from the root to reach each scalar value.
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Vec<(KeyPaths<'_>, Value<'_>)>>` - A vector of tuples, each containing:
+    ///   - `KeyPaths`: The path to reach the scalar value
+    ///   - `Value`: The scalar value itself
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jsonb::OwnedJsonb;
+    ///
+    /// // Example 1: Simple object with scalar values
+    /// let json = r#"{"name": "John", "age": 30, "active": true}"#;
+    /// let jsonb = json.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = jsonb.as_raw();
+    /// let result = raw_jsonb.extract_scalar_key_values();
+    /// assert!(result.is_ok());
+    /// let result = result.unwrap();
+    /// assert_eq!(result.len(), 3);
+    /// // Result contains:
+    /// // - path: "name" -> value: "John"
+    /// // - path: "age" -> value: 30
+    /// // - path: "active" -> value: true
+    ///
+    /// // Example 2: Nested object with array
+    /// let json = r#"{"user": {"name": "Alice", "scores": [85, 92, 78]}}"#;
+    /// let jsonb = json.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = jsonb.as_raw();
+    /// let result = raw_jsonb.extract_scalar_key_values();
+    /// assert!(result.is_ok());
+    /// let result = result.unwrap();
+    /// assert_eq!(result.len(), 4);
+    /// // Result contains:
+    /// // - path: "user", "name" -> value: "Alice"
+    /// // - path: "user", "scores", 0 -> value: 85
+    /// // - path: "user", "scores", 1 -> value: 92
+    /// // - path: "user", "scores", 2 -> value: 78
+    ///
+    /// // Example 3: Complex nested structure
+    /// let json = r#"{"k1": [{"k2": "v2"}, {"k3": "v3"}]}"#;
+    /// let jsonb = json.parse::<OwnedJsonb>().unwrap();
+    /// let raw_jsonb = jsonb.as_raw();
+    /// let result = raw_jsonb.extract_scalar_key_values();
+    /// assert!(result.is_ok());
+    /// let result = result.unwrap();
+    /// assert_eq!(result.len(), 2);
+    /// // Result contains:
+    /// // - path: "k1", 0, "k2" -> value: "v2"
+    /// // - path: "k1", 1, "k3" -> value: "v3"
+    /// ```
     pub fn extract_scalar_key_values(&self) -> Result<Vec<(KeyPaths<'_>, Value<'_>)>> {
         let item = JsonbItem::from_raw_jsonb(*self)?;
         let mut result = Vec::new();
@@ -1053,6 +1111,20 @@ impl RawJsonb<'_> {
         Ok(result)
     }
 
+    /// Helper function for `extract_scalar_key_values` that recursively traverses the JSONB structure.
+    ///
+    /// This function implements a depth-first traversal of the JSONB document, building up the
+    /// key path as it goes and collecting scalar values when it reaches leaf nodes.
+    ///
+    /// # Arguments
+    ///
+    /// * `current_item` - The current JSONB item being processed
+    /// * `current_paths` - The current path from the root to this item (modified during traversal)
+    /// * `result` - The collection where extracted key-value pairs are stored
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - Success or error during traversal
     fn extract_scalar_key_values_recursive<'a>(
         current_item: JsonbItem<'a>,
         current_paths: &mut Vec<KeyPath<'a>>,
