@@ -1046,7 +1046,7 @@ impl RawJsonb<'_> {
         Ok(false)
     }
 
-    /// Extracts all scalar values from a JSONB document along with their key paths.
+    /// Extracts all scalar values from a JSONB value along with their key paths.
     ///
     /// This function recursively traverses the JSONB structure (both objects and arrays)
     /// and collects all leaf node scalar values (null, boolean, number, string, etc.)
@@ -1137,7 +1137,7 @@ impl RawJsonb<'_> {
                     for object_result in &mut object_iter {
                         let (key, val_item) = object_result?;
                         current_paths.push(KeyPath::Name(Cow::Borrowed(key)));
-                        // 递归处理对象值
+                        // Recursively handle object values
                         Self::extract_scalar_key_values_recursive(val_item, current_paths, result)?;
                         current_paths.pop();
                     }
@@ -1148,7 +1148,7 @@ impl RawJsonb<'_> {
                     for (index, array_result) in &mut array_iter.enumerate() {
                         let val_item = array_result?;
                         current_paths.push(KeyPath::Index(index as i32));
-                        // 递归处理对象值
+                        // Recursively handle array values
                         Self::extract_scalar_key_values_recursive(val_item, current_paths, result)?;
                         current_paths.pop();
                     }
@@ -1156,6 +1156,7 @@ impl RawJsonb<'_> {
             }
             JsonbItem::Owned(_) => unreachable!(),
             _ => {
+                // ignore scalar value
                 if current_paths.is_empty() {
                     return Ok(());
                 }
@@ -1179,6 +1180,7 @@ impl RawJsonb<'_> {
                     }
                     _ => unreachable!(),
                 };
+                // Add the path and scalar value
                 result.push((key_paths, value));
             }
         }
