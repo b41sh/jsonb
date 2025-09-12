@@ -15,9 +15,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
-use crate::core::ObjectIterator;
 use crate::error::*;
-use crate::to_owned_jsonb;
 use crate::ExtensionValue;
 use crate::Number;
 use crate::OwnedJsonb;
@@ -87,10 +85,11 @@ pub(crate) enum NumberItem<'a> {
     /// Represents a raw JSONB number, stored as a byte slice.
     Raw(&'a [u8]),
     /// Represents a JSONB number.
+    #[allow(dead_code)]
     Number(Number),
 }
 
-impl<'a> NumberItem<'a> {
+impl NumberItem<'_> {
     pub(crate) fn as_number(&self) -> Result<Number> {
         match self {
             NumberItem::Raw(data) => {
@@ -107,6 +106,7 @@ pub(crate) enum ExtensionItem<'a> {
     /// Represents a raw JSONB extension value, stored as a byte slice.
     Raw(&'a [u8]),
     /// Represents a raw JSONB extension value.
+    #[allow(dead_code)]
     Extension(ExtensionValue<'a>),
 }
 
@@ -297,7 +297,7 @@ impl PartialOrd for JsonbItem<'_> {
             (JsonbItem::Raw(self_raw), JsonbItem::String(other_str)) => {
                 let self_str = self_raw.as_str();
                 if let Ok(Some(self_str)) = self_str {
-                    self_str.partial_cmp(&other_str)
+                    self_str.partial_cmp(other_str)
                 } else {
                     None
                 }

@@ -20,13 +20,11 @@ use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
-use crate::core::NumberItem;
 use crate::core::ObjectValueIterator;
 use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
 use crate::jsonpath::BinaryOperator;
 use crate::jsonpath::Expr;
-use crate::jsonpath::ItemMethodName;
 use crate::jsonpath::JsonPath;
 use crate::jsonpath::Path;
 use crate::jsonpath::PathValue;
@@ -547,7 +545,11 @@ impl<'a> Selector<'a> {
                 if let Some(mut object_val_iter) = object_val_iter_opt {
                     for result in &mut object_val_iter {
                         let val_item = result?;
-                        self.recursive_select_values(val_item, curr_level + 1, recursive_level_opt)?;
+                        self.recursive_select_values(
+                            val_item,
+                            curr_level + 1,
+                            recursive_level_opt,
+                        )?;
                     }
                 }
                 let array_iter_opt = ArrayIterator::new(raw)?;
@@ -564,7 +566,11 @@ impl<'a> Selector<'a> {
                     for result in &mut object_val_iter {
                         let val_item = result?;
                         let owned_item = OwnedJsonb::from_item(val_item)?;
-                        self.recursive_select_values(JsonbItem::Owned(owned_item), curr_level + 1, recursive_level_opt)?;
+                        self.recursive_select_values(
+                            JsonbItem::Owned(owned_item),
+                            curr_level + 1,
+                            recursive_level_opt,
+                        )?;
                     }
                 }
                 let array_iter_opt = ArrayIterator::new(owned.as_raw())?;
@@ -572,7 +578,11 @@ impl<'a> Selector<'a> {
                     for item_result in &mut array_iter {
                         let item = item_result?;
                         let owned_item = OwnedJsonb::from_item(item)?;
-                        self.recursive_select_values(JsonbItem::Owned(owned_item), curr_level + 1, recursive_level_opt)?;
+                        self.recursive_select_values(
+                            JsonbItem::Owned(owned_item),
+                            curr_level + 1,
+                            recursive_level_opt,
+                        )?;
                     }
                 }
             }
@@ -1046,4 +1056,3 @@ impl<'a> Selector<'a> {
         }
     }
 }
-
