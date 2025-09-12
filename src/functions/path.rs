@@ -18,6 +18,9 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
+use crate::ExtensionValue;
+use crate::keypath::KeyPaths;
+use crate::Value;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
@@ -1040,5 +1043,73 @@ impl RawJsonb<'_> {
             }
         }
         Ok(false)
+    }
+
+    pub fn extract_scalar_key_values<'a>(&self) -> Result<Vec<(KeyPaths<'a>, Value<'a>)>> {
+        let item = JsonbItem::from_raw_jsonb(*self)?;
+        let mut result = Vec::new();
+        let mut current_paths = Vec::new();
+        Self::extract_scalar_key_values_recursive(item, &mut current_paths, &mut result)?;
+        Ok(result)
+    }
+
+    fn extract_scalar_key_values_recursive<'a>(
+        current_item: JsonbItem<'a>,
+        current_paths: &mut Vec<KeyPath<'a>>,
+        result: &mut Vec<(KeyPaths<'a>, Value<'a>)>,
+    ) -> Result<()> {
+        match current_item {
+            JsonbItem::Raw(raw) => {
+                let object_iter_opt = ObjectIterator::new(raw)?;
+                if let Some(mut object_iter) = object_iter_opt {
+                    for object_result in &mut object_iter {
+                        let (key, val_item) = object_result?;
+                        current_paths.push(KeyPath::Name(Cow::Borrowed(key)));
+                        // 递归处理对象值
+                        Self::extract_scalar_key_values_recursive(val_item, current_paths, result)?;
+                        current_paths.pop();
+                    }
+                    return Ok(());
+                }
+                let array_iter_opt = ArrayIterator::new(raw)?;
+                if let Some(array_iter) = array_iter_opt {
+                    for (index, array_result) in &mut array_iter.enumerate() {
+                        let val_item = array_result?;
+                        current_paths.push(KeyPath::Index(index as i32));
+                        // 递归处理对象值
+                        Self::extract_scalar_key_values_recursive(val_item, current_paths, result)?;
+                        current_paths.pop();
+                    }
+                }
+            }
+            JsonbItem::Owned(_) => unreachable!(),
+            _ => {
+                if current_paths.is_empty() {
+                    return Ok(());
+                }
+                let key_paths = KeyPaths {
+                    paths: current_paths.clone(),
+                };
+                let value = match current_item {
+                    JsonbItem::Null => Value::Null,
+                    JsonbItem::Boolean(val) => Value::Bool(val),
+                    JsonbItem::String(val) => Value::String(val),
+                    JsonbItem::Number(num) => Value::Number(num.as_number()?),
+                    JsonbItem::Extension(ext) => {
+                        let ext_val = ext.as_extension_value()?;
+                        match ext_val {
+                            ExtensionValue::Binary(val) => Value::Binary(val),
+                            ExtensionValue::Date(val) => Value::Date(val),
+                            ExtensionValue::Timestamp(val) => Value::Timestamp(val),
+                            ExtensionValue::TimestampTz(val) => Value::TimestampTz(val),
+                            ExtensionValue::Interval(val) => Value::Interval(val),
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                result.push((key_paths, value));
+            }
+        }
+        Ok(())
     }
 }
