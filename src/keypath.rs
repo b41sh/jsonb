@@ -16,6 +16,8 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::hash::Hash;
+use std::hash::Hasher;
 
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -104,6 +106,34 @@ impl Ord for KeyPath<'_> {
             (KeyPath::QuotedName(_) | KeyPath::Name(_), KeyPath::Index(_)) => Ordering::Greater,
             (KeyPath::Index(_), KeyPath::QuotedName(_) | KeyPath::Name(_)) => Ordering::Less,
         }
+    }
+}
+
+impl Hash for KeyPath<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            KeyPath::Index(idx) => {
+                // Hash a discriminant to distinguish from other variants
+                0_u8.hash(state);
+                idx.hash(state);
+            }
+            KeyPath::QuotedName(name) => {
+                // Hash a discriminant to distinguish from other variants
+                1_u8.hash(state);
+                name.hash(state);
+            }
+            KeyPath::Name(name) => {
+                // Hash a discriminant to distinguish from other variants
+                2_u8.hash(state);
+                name.hash(state);
+            }
+        }
+    }
+}
+
+impl Hash for KeyPaths<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.paths.hash(state);
     }
 }
 
