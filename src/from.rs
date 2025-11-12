@@ -15,14 +15,17 @@
 use core::iter::FromIterator;
 use std::borrow::Cow;
 
+use ethnum::i256;
 use ordered_float::OrderedFloat;
 use serde_json::Map as JsonMap;
 use serde_json::Number as JsonNumber;
 use serde_json::Value as JsonValue;
 
-use super::number::Number;
-use super::value::Object;
-use super::value::Value;
+use crate::value::Object;
+use crate::value::Value;
+use crate::Decimal128;
+use crate::Decimal256;
+use crate::Number;
 
 macro_rules! from_signed_integer {
     ($($ty:ident)*) => {
@@ -159,19 +162,16 @@ impl From<&JsonValue> for Value<'_> {
                 } else if let Some(n) = v.as_i64() {
                     Value::Number(Number::Int64(n))
                 } else if let Some(n) = v.as_i128() {
-                    Value::Number(Number::Decimal128(Decimal128 {
-                        value: n,
-                        scale: 0,
-                    }))
+                    Value::Number(Number::Decimal128(Decimal128 { value: n, scale: 0 }))
                 } else if let Some(n) = v.as_u128() {
-                    Value::Number(Number::Decimal128(Decimal256 {
+                    Value::Number(Number::Decimal256(Decimal256 {
                         value: n.into(),
                         scale: 0,
                     }))
                 } else if let Some(n) = v.as_f64() {
                     Value::Number(Number::Float64(n))
                 } else {
-                    // fallback to NULL, if the value is NaN or Infinity
+                    // If the value is NaN or Infinity, fallback to NULL
                     Value::Null
                 }
             }
@@ -207,45 +207,40 @@ impl<'a> From<Value<'a>> for JsonValue {
             Value::Null => JsonValue::Null,
             Value::Bool(v) => JsonValue::Bool(v),
             Value::Number(v) => match v {
-                Number::Int64(v) => JsonValue::Number(v.into()),
-                Number::UInt64(v) => JsonValue::Number(v.into()),
-                Number::Decimal64(v) if v.scale == 0 => {
-                    JsonValue::Number(v.value.into()),
-                }
+                Number::Int64(n) => JsonValue::Number(n.into()),
+                Number::UInt64(n) => JsonValue::Number(n.into()),
+                Number::Decimal64(d) if d.scale == 0 => JsonValue::Number(d.value.into()),
                 #[cfg(feature = "arbitrary_precision")]
-                Number::Decimal128(v) if v.scale == 0 => {
-                    if let Some(n) = JsonNumber::from_i128(v.value) {
+                Number::Decimal128(ref d) if d.scale == 0 => {
+                    if let Some(n) = JsonNumber::from_i128(d.value) {
+                        JsonValue::Number(n)
+                    } else if let Some(n) = JsonNumber::from_f64(v.as_f64()) {
                         JsonValue::Number(n)
                     } else {
-                        if let Some(n) = JsonNumber::from_f64(value.as_f64()) {
-                           JsonValue::Number(n)
-                        } else {
-                           JsonValue::Null
-                        }
+                        JsonValue::Null
                     }
                 }
                 #[cfg(feature = "arbitrary_precision")]
-                Number::Decimal256(v) if v.scale == 0 => {
-                    if v.value >= i256::ZERO && v.value <= i256::from(u128::MAX) {
-                        if let Some(n) = JsonNumber::from_u128(v.value.into()) {
-                            return JsonValue::Number(n)
+                Number::Decimal256(ref d) if d.scale == 0 => {
+                    if d.value >= i256::ZERO && d.value <= i256::from(u128::MAX) {
+                        if let Some(n) = JsonNumber::from_u128(d.value.as_u128()) {
+                            return JsonValue::Number(n);
                         }
-                    } else if v.value >= i256(i128::MIN) && v.value < i256::ZERO {
-                        if let Some(n) = JsonNumber::from_i128(v.value.into()) {
-                           return JsonValue::Number(n)
-                        }                        
+                    } else if d.value >= i256::from(i128::MIN) && d.value < i256::ZERO {
+                        if let Some(n) = JsonNumber::from_i128(d.value.as_i128()) {
+                            return JsonValue::Number(n);
+                        }
+                    } else if let Some(n) = JsonNumber::from_f64(v.as_f64()) {
+                        return JsonValue::Number(n);
                     }
-                    if let Some(n) = JsonNumber::from_f64(value.as_f64()) {
-                       JsonValue::Number(n)
-                    } else {
-                       JsonValue::Null
-                    }
+                    JsonValue::Null
                 }
                 _ => {
-                    if let Some(n) = JsonNumber::from_f64(value.as_f64()) {
-                       JsonValue::Number(n)
+                    if let Some(n) = JsonNumber::from_f64(v.as_f64()) {
+                        JsonValue::Number(n)
                     } else {
-                       JsonValue::Null
+                        // If the value is NaN or Infinity, fallback to NULL
+                        JsonValue::Null
                     }
                 }
             },
