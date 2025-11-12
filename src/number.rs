@@ -518,22 +518,22 @@ impl Number {
     /// Returns the f64 representation of the number.
     ///
     /// This method always returns a value, but may lose precision for very large numbers.
-    pub fn as_f64(&self) -> Option<f64> {
+    pub fn as_f64(&self) -> f64 {
         match self {
-            Number::Int64(v) => Some(*v as f64),
-            Number::UInt64(v) => Some(*v as f64),
-            Number::Float64(v) => Some(*v),
+            Number::Int64(v) => *v as f64,
+            Number::UInt64(v) => *v as f64,
+            Number::Float64(v) => *v,
             Number::Decimal64(v) => {
                 let val = v.to_float64();
-                Some(val)
+                val
             }
             Number::Decimal128(v) => {
                 let val = v.to_float64();
-                Some(val)
+                val
             }
             Number::Decimal256(v) => {
                 let val = v.to_float64();
-                Some(val)
+                val
             }
         }
     }

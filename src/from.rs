@@ -154,12 +154,25 @@ impl From<&JsonValue> for Value<'_> {
             JsonValue::Null => Value::Null,
             JsonValue::Bool(v) => Value::Bool(*v),
             JsonValue::Number(v) => {
-                if v.is_u64() {
-                    Value::Number(Number::UInt64(v.as_u64().unwrap()))
-                } else if v.is_i64() {
-                    Value::Number(Number::Int64(v.as_i64().unwrap()))
+                if let Some(n) = v.as_u64() {
+                    Value::Number(Number::UInt64(n))
+                } else if let Some(n) = v.as_i64() {
+                    Value::Number(Number::Int64(n))
+                } else if let Some(n) = v.as_i128() {
+                    Value::Number(Number::Decimal128(Decimal128 {
+                        value: n,
+                        scale: 0,
+                    }))
+                } else if let Some(n) = v.as_u128() {
+                    Value::Number(Number::Decimal128(Decimal256 {
+                        value: n.into(),
+                        scale: 0,
+                    }))
+                } else if let Some(n) = v.as_f64() {
+                    Value::Number(Number::Float64(n))
                 } else {
-                    Value::Number(Number::Float64(v.as_f64().unwrap()))
+                    // fallback to NULL, if the value is NaN or Infinity
+                    Value::Null
                 }
             }
             JsonValue::String(v) => Value::String(v.clone().into()),
@@ -196,15 +209,44 @@ impl<'a> From<Value<'a>> for JsonValue {
             Value::Number(v) => match v {
                 Number::Int64(v) => JsonValue::Number(v.into()),
                 Number::UInt64(v) => JsonValue::Number(v.into()),
-                Number::Float64(v) => JsonValue::Number(JsonNumber::from_f64(v).unwrap()),
-                Number::Decimal64(v) => {
-                    JsonValue::Number(JsonNumber::from_f64(v.to_float64()).unwrap())
+                Number::Decimal64(v) if v.scale == 0 => {
+                    JsonValue::Number(v.value.into()),
                 }
-                Number::Decimal128(v) => {
-                    JsonValue::Number(JsonNumber::from_f64(v.to_float64()).unwrap())
+                #[cfg(feature = "arbitrary_precision")]
+                Number::Decimal128(v) if v.scale == 0 => {
+                    if let Some(n) = JsonNumber::from_i128(v.value) {
+                        JsonValue::Number(n)
+                    } else {
+                        if let Some(n) = JsonNumber::from_f64(value.as_f64()) {
+                           JsonValue::Number(n)
+                        } else {
+                           JsonValue::Null
+                        }
+                    }
                 }
-                Number::Decimal256(v) => {
-                    JsonValue::Number(JsonNumber::from_f64(v.to_float64()).unwrap())
+                #[cfg(feature = "arbitrary_precision")]
+                Number::Decimal256(v) if v.scale == 0 => {
+                    if v.value >= i256::ZERO && v.value <= i256::from(u128::MAX) {
+                        if let Some(n) = JsonNumber::from_u128(v.value.into()) {
+                            return JsonValue::Number(n)
+                        }
+                    } else if v.value >= i256(i128::MIN) && v.value < i256::ZERO {
+                        if let Some(n) = JsonNumber::from_i128(v.value.into()) {
+                           return JsonValue::Number(n)
+                        }                        
+                    }
+                    if let Some(n) = JsonNumber::from_f64(value.as_f64()) {
+                       JsonValue::Number(n)
+                    } else {
+                       JsonValue::Null
+                    }
+                }
+                _ => {
+                    if let Some(n) = JsonNumber::from_f64(value.as_f64()) {
+                       JsonValue::Number(n)
+                    } else {
+                       JsonValue::Null
+                    }
                 }
             },
             Value::String(v) => JsonValue::String(v.to_string()),
