@@ -28,6 +28,7 @@ const MICROS_PER_HOUR: i64 = 60 * MICROS_PER_MINUTE;
 const MONTHS_PER_YEAR: i32 = 12;
 
 const TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.6f";
+const TIMESTAMP_TIMEZONE_FORMAT: &str = "%Y-%m-%d %H:%M:%S%.6f %z";
 
 /// Represents extended JSON value types that are not supported in standard JSON.
 ///
@@ -152,7 +153,11 @@ impl Display for TimestampTz {
         let tz = Offset::constant(self.offset).to_time_zone();
         let zoned = ts.to_zoned(tz);
 
-        write!(f, "{}", strtime::format(TIMESTAMP_FORMAT, &zoned).unwrap())
+        write!(
+            f,
+            "{}",
+            strtime::format(TIMESTAMP_TIMEZONE_FORMAT, &zoned).unwrap()
+        )
     }
 }
 
