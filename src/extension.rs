@@ -164,49 +164,36 @@ impl Display for TimestampTz {
 
 impl Display for Interval {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        let mut date_parts = vec![];
+        let mut wrote_date_part = false;
         let years = self.months / MONTHS_PER_YEAR;
         let months = self.months % MONTHS_PER_YEAR;
-        match years.cmp(&1) {
-            Ordering::Equal => {
-                date_parts.push((years, "year"));
-            }
-            Ordering::Greater => {
-                date_parts.push((years, "years"));
-            }
-            _ => {}
-        }
-        match months.cmp(&1) {
-            Ordering::Equal => {
-                date_parts.push((months, "month"));
-            }
-            Ordering::Greater => {
-                date_parts.push((months, "months"));
-            }
-            _ => {}
-        }
-        match self.days.cmp(&1) {
-            Ordering::Equal => {
-                date_parts.push((self.days, "day"));
-            }
-            Ordering::Greater => {
-                date_parts.push((self.days, "days"));
-            }
-            _ => {}
-        }
-        if !date_parts.is_empty() {
-            for (i, (val, name)) in date_parts.into_iter().enumerate() {
-                if i > 0 {
-                    write!(f, " ")?;
+
+        let mut write_component =
+            |value: i32, singular: &str, plural: &str| -> std::fmt::Result {
+                if value != 0 {
+                    if wrote_date_part {
+                        write!(f, " ")?;
+                    }
+                    let abs_val = value.abs();
+                    let unit = if abs_val == 1 { singular } else { plural };
+                    if value < 0 {
+                        write!(f, "-{} {}", abs_val, unit)?;
+                    } else {
+                        write!(f, "{} {}", abs_val, unit)?;
+                    }
+                    wrote_date_part = true;
                 }
-                write!(f, "{} {}", val, name)?;
-            }
-            if self.micros != 0 {
-                write!(f, " ")?;
-            }
-        }
+                Ok(())
+            };
+
+        write_component(years, "year", "years")?;
+        write_component(months, "month", "months")?;
+        write_component(self.days, "day", "days")?;
 
         if self.micros != 0 {
+            if wrote_date_part {
+                write!(f, " ")?;
+            }
             let mut micros = self.micros;
             if micros < 0 {
                 write!(f, "-")?;
@@ -227,7 +214,7 @@ impl Display for Interval {
             if micros != 0 {
                 write!(f, ".{:06}", micros)?;
             }
-        } else if self.months == 0 && self.days == 0 {
+        } else if !wrote_date_part {
             write!(f, "00:00:00")?;
         }
         Ok(())
