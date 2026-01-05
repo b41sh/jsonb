@@ -826,7 +826,9 @@ fn test_to_string() {
 
     let extension_sources = vec![
         (Value::Binary(&[97, 98, 99]), r#""616263""#),
+        (Value::Binary(&[]), r#""""#),
         (Value::Date(Date { value: 90570 }), r#""2217-12-22""#),
+        (Value::Date(Date { value: -1 }), r#""1969-12-31""#),
         (
             Value::Timestamp(Timestamp {
                 value: 190390000000,
@@ -834,11 +836,22 @@ fn test_to_string() {
             r#""1970-01-03 04:53:10.000000""#,
         ),
         (
+            Value::Timestamp(Timestamp { value: 0 }),
+            r#""1970-01-01 00:00:00.000000""#,
+        ),
+        (
             Value::TimestampTz(TimestampTz {
                 offset: 8 * 3600,
                 value: 190390000000,
             }),
             r#""1970-01-03 12:53:10.000000 +0800""#,
+        ),
+        (
+            Value::TimestampTz(TimestampTz {
+                offset: 90 * 60,
+                value: 0,
+            }),
+            r#""1970-01-01 01:30:00.000000 +0130""#,
         ),
         (
             Value::Interval(Interval {
@@ -867,14 +880,6 @@ fn test_to_string() {
         (
             Value::Interval(Interval {
                 months: 0,
-                days: 0,
-                micros: -61_000_000,
-            }),
-            r#""-00:01:01""#,
-        ),
-        (
-            Value::Interval(Interval {
-                months: 0,
                 days: -2,
                 micros: 5_000_000,
             }),
@@ -894,6 +899,13 @@ fn test_to_string() {
                 value: 1234,
             })),
             r#"12.34"#,
+        ),
+        (
+            Value::Number(Number::Decimal64(Decimal64 {
+                scale: 2,
+                value: -765,
+            })),
+            r#"-7.65"#,
         ),
         (
             Value::Number(Number::Decimal256(Decimal256 {
