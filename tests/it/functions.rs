@@ -835,7 +835,7 @@ fn test_to_string() {
         ),
         (
             Value::TimestampTz(TimestampTz {
-                offset: 8,
+                offset: 8 * 3600,
                 value: 190390000000,
             }),
             r#""1970-01-03 12:53:10.000000 +0800""#,
@@ -870,7 +870,7 @@ fn test_to_string() {
                     value: 190390000000,
                 }),
                 Value::TimestampTz(TimestampTz {
-                    offset: 8,
+                    offset: 8 * 3600,
                     value: 190390000000,
                 }),
                 Value::Interval(Interval {
@@ -902,7 +902,7 @@ fn test_to_string() {
                 (
                     "k4".to_string(),
                     Value::TimestampTz(TimestampTz {
-                        offset: 8,
+                        offset: 8 * 3600,
                         value: 190390000000,
                     }),
                 ),
@@ -1117,7 +1117,7 @@ fn test_type_of() {
         ),
         (
             Value::TimestampTz(TimestampTz {
-                offset: 8,
+                offset: 8 * 3600,
                 value: 190390000000,
             }),
             "TIMESTAMP_TZ",

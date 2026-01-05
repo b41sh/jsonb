@@ -246,9 +246,9 @@ fn test_decode_extension() {
             }),
         ),
         (
-            b"\x20\0\0\0\x60\0\0\x0a\x30\0\x06\x40\xd6\xb7\x23\x80\0\x08".to_vec(),
+            b"\x20\0\0\0\x60\0\0\x0d\x30\0\x06\x40\xd6\xb7\x23\x80\0\0\0\x70\x80".to_vec(),
             Value::TimestampTz(TimestampTz {
-                offset: 8,
+                offset: 8 * 3600,
                 value: 1760140800000000,
             }),
         ),

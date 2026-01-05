@@ -81,8 +81,8 @@ pub struct Timestamp {
 /// Standard JSON has no native timezone-aware timestamp type.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct TimestampTz {
-    /// Timezone offset in hours from UTC
-    pub offset: i8,
+    /// Timezone offset in seconds from UTC
+    pub offset: i32,
     /// Microseconds since Unix epoch (January 1, 1970 00:00:00 UTC)
     pub value: i64,
 }
@@ -150,7 +150,8 @@ impl Display for TimestampTz {
             nanos = 0;
         }
         let ts = jiff::Timestamp::new(secs, nanos as i32).unwrap();
-        let tz = Offset::constant(self.offset).to_time_zone();
+        let tz_offset = Offset::from_seconds(self.offset).expect("invalid timezone offset seconds");
+        let tz = tz_offset.to_time_zone();
         let zoned = ts.to_zoned(tz);
 
         write!(
