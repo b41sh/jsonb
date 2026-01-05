@@ -168,23 +168,22 @@ impl Display for Interval {
         let years = self.months / MONTHS_PER_YEAR;
         let months = self.months % MONTHS_PER_YEAR;
 
-        let mut write_component =
-            |value: i32, singular: &str, plural: &str| -> std::fmt::Result {
-                if value != 0 {
-                    if wrote_date_part {
-                        write!(f, " ")?;
-                    }
-                    let abs_val = value.abs();
-                    let unit = if abs_val == 1 { singular } else { plural };
-                    if value < 0 {
-                        write!(f, "-{} {}", abs_val, unit)?;
-                    } else {
-                        write!(f, "{} {}", abs_val, unit)?;
-                    }
-                    wrote_date_part = true;
+        let mut write_component = |value: i32, singular: &str, plural: &str| -> std::fmt::Result {
+            if value != 0 {
+                if wrote_date_part {
+                    write!(f, " ")?;
                 }
-                Ok(())
-            };
+                let abs_val = value.abs();
+                let unit = if abs_val == 1 { singular } else { plural };
+                if value < 0 {
+                    write!(f, "-{} {}", abs_val, unit)?;
+                } else {
+                    write!(f, "{} {}", abs_val, unit)?;
+                }
+                wrote_date_part = true;
+            }
+            Ok(())
+        };
 
         write_component(years, "year", "years")?;
         write_component(months, "month", "months")?;

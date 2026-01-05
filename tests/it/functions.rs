@@ -857,6 +857,38 @@ fn test_to_string() {
             r#""-1 year -2 months -3 days -00:01:30""#,
         ),
         (
+            Value::Interval(Interval {
+                months: -25,
+                days: -1,
+                micros: 0,
+            }),
+            r#""-2 years -1 month -1 day""#,
+        ),
+        (
+            Value::Interval(Interval {
+                months: 0,
+                days: 0,
+                micros: -61_000_000,
+            }),
+            r#""-00:01:01""#,
+        ),
+        (
+            Value::Interval(Interval {
+                months: 0,
+                days: -2,
+                micros: 5_000_000,
+            }),
+            r#""-2 days 00:00:05""#,
+        ),
+        (
+            Value::Interval(Interval {
+                months: 0,
+                days: 0,
+                micros: 0,
+            }),
+            r#""00:00:00""#,
+        ),
+        (
             Value::Number(Number::Decimal128(Decimal128 {
                 scale: 2,
                 value: 1234,
@@ -2192,56 +2224,6 @@ fn test_to_value() {
         }
     } else {
         panic!("Expected object value");
-    }
-}
-
-#[test]
-fn test_interval_display_negatives() {
-    let cases = vec![
-        (
-            Interval {
-                months: -12,
-                days: 0,
-                micros: 0,
-            },
-            "-1 year",
-        ),
-        (
-            Interval {
-                months: -25,
-                days: -1,
-                micros: 0,
-            },
-            "-2 years -1 month -1 day",
-        ),
-        (
-            Interval {
-                months: 0,
-                days: 0,
-                micros: -61_000_000,
-            },
-            "-00:01:01",
-        ),
-        (
-            Interval {
-                months: 0,
-                days: -2,
-                micros: 5_000_000,
-            },
-            "-2 days 00:00:05",
-        ),
-        (
-            Interval {
-                months: 0,
-                days: 0,
-                micros: 0,
-            },
-            "00:00:00",
-        ),
-    ];
-
-    for (interval, expected) in cases {
-        assert_eq!(interval.to_string(), expected);
     }
 }
 
