@@ -1097,11 +1097,19 @@ impl RawJsonb<'_> {
     /// // - path: "user", "name" -> value: "Alice"
     /// // - path: "user", "scores" -> value: [85, 92, 78]
     /// ```
-    pub fn extract_scalar_key_values(&self, ignore_array: bool) -> Result<Vec<(KeyPaths<'_>, Value<'_>)>> {
+    pub fn extract_scalar_key_values(
+        &self,
+        ignore_array: bool,
+    ) -> Result<Vec<(KeyPaths<'_>, Value<'_>)>> {
         let item = JsonbItem::from_raw_jsonb(*self)?;
         let mut result = Vec::with_capacity(16);
         let mut current_paths = Vec::with_capacity(3);
-        Self::extract_scalar_key_values_recursive(item, ignore_array, &mut current_paths, &mut result)?;
+        Self::extract_scalar_key_values_recursive(
+            item,
+            ignore_array,
+            &mut current_paths,
+            &mut result,
+        )?;
         Ok(result)
     }
 
@@ -1133,7 +1141,12 @@ impl RawJsonb<'_> {
                         let (key, val_item) = object_result?;
                         current_paths.push(KeyPath::Name(Cow::Borrowed(key)));
                         // Recursively handle object values
-                        Self::extract_scalar_key_values_recursive(val_item, ignore_array, current_paths, result)?;
+                        Self::extract_scalar_key_values_recursive(
+                            val_item,
+                            ignore_array,
+                            current_paths,
+                            result,
+                        )?;
                         current_paths.pop();
                     }
                     return Ok(());
