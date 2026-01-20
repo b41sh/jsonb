@@ -51,13 +51,13 @@ pub enum KeyPath<'a> {
 }
 
 /// Represents a set of owned key path chains.
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct OwnedKeyPaths {
     pub paths: Vec<OwnedKeyPath>,
 }
 
 /// Represents a valid owned key path.
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum OwnedKeyPath {
     /// represents the index of an Array, allow negative indexing.
     Index(i32),
