@@ -2114,6 +2114,44 @@ fn test_extract_scalar_key_values() {
         assert_eq!(key_paths, expected_key_paths);
         assert_eq!(value, expected_value);
     }
+
+    // Test case 5: Empty object/array are returned as values
+    let json = r#"{"empty_obj": {}, "empty_arr": [], "nested": {"empty": []}}"#;
+    let jsonb = json.parse::<OwnedJsonb>().unwrap();
+    let raw_jsonb = jsonb.as_raw();
+
+    let result = raw_jsonb.extract_scalar_key_values(false).unwrap();
+    assert_eq!(result.len(), 3);
+
+    let expected = vec![
+        (
+            KeyPaths {
+                paths: vec![KeyPath::Name(Cow::Borrowed("empty_arr"))],
+            },
+            Value::Array(vec![]),
+        ),
+        (
+            KeyPaths {
+                paths: vec![KeyPath::Name(Cow::Borrowed("empty_obj"))],
+            },
+            Value::Object(BTreeMap::new()),
+        ),
+        (
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("nested")),
+                    KeyPath::Name(Cow::Borrowed("empty")),
+                ],
+            },
+            Value::Array(vec![]),
+        ),
+    ];
+    for ((key_paths, value), (expected_key_paths, expected_value)) in
+        result.into_iter().zip(expected.into_iter())
+    {
+        assert_eq!(key_paths, expected_key_paths);
+        assert_eq!(value, expected_value);
+    }
 }
 
 #[test]

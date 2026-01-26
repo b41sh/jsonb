@@ -1064,6 +1064,9 @@ impl RawJsonb<'_> {
     ///   - `KeyPaths`: The path to reach the scalar value
     ///   - `Value`: The scalar value itself
     ///
+    /// Empty objects or arrays are treated as leaf values and returned as `Value::Object` or
+    /// `Value::Array`.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -1117,6 +1120,8 @@ impl RawJsonb<'_> {
     ///
     /// This function implements a depth-first traversal of the JSONB document, building up the
     /// key path as it goes and collecting scalar values when it reaches leaf nodes.
+    /// Empty objects or arrays are treated as leaf values and returned as `Value::Object` or
+    /// `Value::Array` instead of being skipped.
     ///
     /// # Arguments
     ///
