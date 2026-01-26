@@ -1137,27 +1137,11 @@ impl RawJsonb<'_> {
             JsonbItem::Raw(raw) => {
                 let object_iter_opt = ObjectIterator::new(raw)?;
                 if let Some(mut object_iter) = object_iter_opt {
-                    for object_result in &mut object_iter {
-                        let (key, val_item) = object_result?;
-                        current_paths.push(KeyPath::Name(Cow::Borrowed(key)));
-                        // Recursively handle object values
-                        Self::extract_scalar_key_values_recursive(
-                            val_item,
-                            ignore_array,
-                            current_paths,
-                            result,
-                        )?;
-                        current_paths.pop();
-                    }
-                    return Ok(());
-                }
-                if !ignore_array {
-                    let array_iter_opt = ArrayIterator::new(raw)?;
-                    if let Some(array_iter) = array_iter_opt {
-                        for (index, array_result) in &mut array_iter.enumerate() {
-                            let val_item = array_result?;
-                            current_paths.push(KeyPath::Index(index as i32));
-                            // Recursively handle array values
+                    if object_iter.len() > 0 {
+                        for object_result in &mut object_iter {
+                            let (key, val_item) = object_result?;
+                            current_paths.push(KeyPath::Name(Cow::Borrowed(key)));
+                            // Recursively handle object values
                             Self::extract_scalar_key_values_recursive(
                                 val_item,
                                 ignore_array,
@@ -1166,8 +1150,29 @@ impl RawJsonb<'_> {
                             )?;
                             current_paths.pop();
                         }
+                        return Ok(());
                     }
-                } else if !current_paths.is_empty() {
+                } else if !ignore_array {
+                    let array_iter_opt = ArrayIterator::new(raw)?;
+                    if let Some(array_iter) = array_iter_opt {
+                        if array_iter.len() > 0 {
+                            for (index, array_result) in &mut array_iter.enumerate() {
+                                let val_item = array_result?;
+                                current_paths.push(KeyPath::Index(index as i32));
+                                // Recursively handle array values
+                                Self::extract_scalar_key_values_recursive(
+                                    val_item,
+                                    ignore_array,
+                                    current_paths,
+                                    result,
+                                )?;
+                                current_paths.pop();
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+                if !current_paths.is_empty() {
                     let key_paths = KeyPaths {
                         paths: current_paths.clone(),
                     };
