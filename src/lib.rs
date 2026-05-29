@@ -69,6 +69,8 @@ mod error;
 mod extension;
 mod from;
 mod functions;
+#[cfg(feature = "jaq")]
+pub mod jaq;
 pub mod jsonpath;
 pub mod keypath;
 mod number;

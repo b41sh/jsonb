@@ -18,10 +18,12 @@ mod databend;
 mod sqlite;
 
 mod item;
+mod query_value;
 
 #[cfg(feature = "databend")]
 pub use databend::*;
 pub use item::*;
+pub use query_value::*;
 #[cfg(feature = "sqlite")]
 #[allow(unused_imports)]
 pub use sqlite::*;

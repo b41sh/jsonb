@@ -30,6 +30,8 @@ byteorder = "1.5.0"
 ethnum = "1.5.2"
 fast-float2 = "0.2.3"
 itoa = "1.0"
+jaq-core = { path = "jaq/jaq-core", optional = true }
+jaq-std = { path = "jaq/jaq-std", optional = true }
 jiff = "0.2.10"
 nom = "8.0.0"
 num-traits = "0.2.19"
@@ -54,6 +56,7 @@ default = ["databend", "preserve_order", "arbitrary_precision"]
 databend = []
 sqlite = []
 arbitrary_precision = ["serde_json/arbitrary_precision"]
+jaq = ["dep:jaq-core", "dep:jaq-std"]
 preserve_order = ["serde_json/preserve_order"]
 
 [[bench]]
