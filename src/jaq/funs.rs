@@ -449,4 +449,20 @@ mod tests {
         assert_eq!(run_filter(r#""{\"a\":1}" | fromjson | .a"#, "null"), ["1"]);
         assert_eq!(run_filter("tojson", r#"{"a":1}"#), [r#""{\"a\":1}""#]);
     }
+
+    #[test]
+    fn constructed_values_encode_to_jsonb() {
+        assert_eq!(
+            run_filter("[.a, .b, {nested: .c}]", r#"{"a":1,"b":[2],"c":{"d":3}}"#),
+            [r#"[1,[2],{"nested":{"d":3}}]"#]
+        );
+        assert_eq!(
+            run_filter("{x: .a, y: [.b, 3], z: null}", r#"{"a":1,"b":2}"#),
+            [r#"{"x":1,"y":[2,3],"z":null}"#]
+        );
+        assert_eq!(
+            run_filter(r#"[1, true, null, "x"]"#, "null"),
+            [r#"[1,true,null,"x"]"#]
+        );
+    }
 }

@@ -40,6 +40,30 @@ impl<'a> QueryValue<'a> {
         match self {
             Self::Raw(raw) => Ok(raw.to_owned()),
             Self::Owned(owned) => Ok(owned),
+            Self::Array(values) => {
+                let values = values
+                    .iter()
+                    .cloned()
+                    .map(QueryValue::into_owned_jsonb)
+                    .collect::<crate::error::Result<Vec<_>>>()?;
+                OwnedJsonb::build_array(values.iter().map(|value| value.as_raw()))
+            }
+            Self::Object(values) => {
+                let entries = values
+                    .iter()
+                    .map(|(key, value)| {
+                        let Some(key) = key.as_object_key()? else {
+                            return Err(Error::InvalidObject);
+                        };
+                        Ok((key, value.clone().into_owned_jsonb()?))
+                    })
+                    .collect::<crate::error::Result<Vec<_>>>()?;
+                OwnedJsonb::build_object(
+                    entries
+                        .iter()
+                        .map(|(key, value)| (key.as_str(), value.as_raw())),
+                )
+            }
             value => {
                 let value = value.into_jsonb_value()?;
                 let mut buf = Vec::new();

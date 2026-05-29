@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 use std::rc::Rc;
 
@@ -236,6 +237,54 @@ fn raw_range<'a>(
     }
 }
 
+fn raw_to_query_value(raw: RawJsonb<'_>) -> ValR<QueryValue<'static>, QueryValue<'static>> {
+    match raw.jsonb_item_type().map_err(jsonb_error)? {
+        JsonbItemType::Array(_) => raw_values(raw).map(|values| QueryValue::Array(Rc::new(values))),
+        JsonbItemType::Object(_) => raw_key_values(raw).map(|values| {
+            QueryValue::Object(Rc::new(values.into_iter().collect::<BTreeMap<_, _>>()))
+        }),
+        _ => JsonbItem::from_raw_jsonb(raw)
+            .map_err(jsonb_error)
+            .and_then(|item| item_to_query_value(item).map_err(jsonb_error))
+            .map(QueryValue::into_owned_static),
+    }
+}
+
+fn materialize(value: QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'static>> {
+    match value {
+        QueryValue::Raw(raw) => raw_to_query_value(raw),
+        QueryValue::Owned(owned) => raw_to_query_value(owned.as_raw()),
+        value => Ok(value.into_owned_static()),
+    }
+}
+
+fn materialize_current<'a>(value: QueryValue<'a>) -> ValR<QueryValue<'a>> {
+    materialize(value).map(QueryValue::from_static)
+}
+
+fn range_from_object<'a, 'b>(index: &'b QueryValue<'a>) -> Option<Range<&'b QueryValue<'a>>> {
+    let QueryValue::Object(object) = index else {
+        return None;
+    };
+    let start = object.get(&QueryValue::from("start".to_string()));
+    let end = object.get(&QueryValue::from("end".to_string()));
+    Some(start..end)
+}
+
+fn into_array<'a>(value: QueryValue<'a>) -> ValR<Rc<Vec<QueryValue<'a>>>, QueryValue<'a>> {
+    match materialize_current(value)? {
+        QueryValue::Array(values) => Ok(values),
+        value => Err(jaq_core::Error::typ(value, "array")),
+    }
+}
+
+fn into_string<'a>(value: QueryValue<'a>) -> ValR<String, QueryValue<'a>> {
+    match materialize_current(value)? {
+        QueryValue::String(value) => Ok(value.into_owned()),
+        value => Err(jaq_core::Error::typ(value, "string")),
+    }
+}
+
 fn into_static_iter<T>(items: Vec<T>) -> Box<dyn Iterator<Item = T> + 'static> {
     let iter: Box<dyn Iterator<Item = T>> = Box::new(items.into_iter());
     // All values placed in these iterators are converted through
@@ -377,41 +426,139 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
     fn map_values<'b, I: Iterator<Item = ValX<'b, Self>>>(
         self,
         opt: Opt,
-        _f: impl Fn(Self) -> I,
+        f: impl Fn(Self) -> I,
     ) -> ValX<'b, Self> {
-        match opt {
-            Opt::Optional => Ok(self),
-            Opt::Essential => {
-                Err(str_error("jsonb jaq value updates are not implemented yet").into())
+        match materialize_current(self)? {
+            Self::Array(values) => {
+                let iter = values.iter().cloned().flat_map(f);
+                Ok(Self::Array(Rc::new(iter.collect::<Result<_, _>>()?)))
             }
+            Self::Object(values) => {
+                let mut result = BTreeMap::new();
+                for (key, value) in values.iter() {
+                    if let Some(value) = f(value.clone()).next().transpose()? {
+                        result.insert(key.clone(), value);
+                    }
+                }
+                Ok(Self::Object(Rc::new(result)))
+            }
+            value => opt.fail(value, |value| {
+                jaq_core::Exn::from(jaq_core::Error::typ(value, "iterable (array or object)"))
+            }),
         }
     }
 
     fn map_index<'b, I: Iterator<Item = ValX<'b, Self>>>(
         self,
-        _index: &Self,
+        index: &Self,
         opt: Opt,
-        _f: impl Fn(Self) -> I,
+        f: impl Fn(Self) -> I,
     ) -> ValX<'b, Self> {
-        match opt {
-            Opt::Optional => Ok(self),
-            Opt::Essential => {
-                Err(str_error("jsonb jaq index updates are not implemented yet").into())
+        let self_value = materialize_current(self)?;
+        if matches!(self_value, Self::String(_) | Self::Array(_)) {
+            if let Some(range) = range_from_object(index) {
+                return self_value.map_range(range, opt, f);
             }
+        };
+
+        match self_value {
+            Self::Object(mut values) => {
+                let values = Rc::make_mut(&mut values);
+                if let Some(existing) = values.remove(index) {
+                    if let Some(value) = f(existing).next().transpose()? {
+                        values.insert(index.clone(), value);
+                    }
+                } else if let Some(value) = f(Self::Null).next().transpose()? {
+                    values.insert(index.clone(), value);
+                }
+                Ok(Self::Object(values.clone().into()))
+            }
+            Self::Array(mut values) => {
+                let Some(index) = as_isize(index).and_then(|index| abs_index(index, values.len()))
+                else {
+                    return opt.fail(Self::Array(values), |_| {
+                        jaq_core::Exn::from(jaq_core::Error::str(format!(
+                            "index {index} out of bounds"
+                        )))
+                    });
+                };
+                let values = Rc::make_mut(&mut values);
+                let value = values.remove(index);
+                if let Some(value) = f(value).next().transpose()? {
+                    values.insert(index, value);
+                }
+                Ok(Self::Array(values.clone().into()))
+            }
+            value => opt.fail(value, |value| {
+                jaq_core::Exn::from(jaq_core::Error::typ(value, "iterable (array or object)"))
+            }),
         }
     }
 
     fn map_range<'b, I: Iterator<Item = ValX<'b, Self>>>(
         self,
-        _range: Range<&Self>,
+        range: Range<&Self>,
         opt: Opt,
-        _f: impl Fn(Self) -> I,
+        f: impl Fn(Self) -> I,
     ) -> ValX<'b, Self> {
-        match opt {
-            Opt::Optional => Ok(self),
-            Opt::Essential => {
-                Err(str_error("jsonb jaq range updates are not implemented yet").into())
+        match materialize_current(self)? {
+            Self::Array(mut values) => {
+                let start = match range_bound(range.start, values.len(), 0) {
+                    Ok(start) => start,
+                    Err(error) => {
+                        return opt.fail(Self::Array(values), |_| jaq_core::Exn::from(error))
+                    }
+                };
+                let end = match range_bound(range.end, values.len(), values.len()) {
+                    Ok(end) => end,
+                    Err(error) => {
+                        return opt.fail(Self::Array(values), |_| jaq_core::Exn::from(error))
+                    }
+                };
+                let take = end.saturating_sub(start);
+                let selected = Self::Array(Rc::new(
+                    values.iter().skip(start).take(take).cloned().collect(),
+                ));
+                let replacement = match f(selected).next().transpose()? {
+                    Some(value) => into_array(value).map_err(jaq_core::Exn::from)?,
+                    None => Rc::new(Vec::new()),
+                };
+                Rc::make_mut(&mut values).splice(start..start + take, replacement.iter().cloned());
+                Ok(Self::Array(values))
             }
+            Self::String(value) => {
+                let chars = value.chars().collect::<Vec<_>>();
+                let start = match range_bound(range.start, chars.len(), 0) {
+                    Ok(start) => start,
+                    Err(error) => {
+                        return opt.fail(Self::String(value), |_| jaq_core::Exn::from(error))
+                    }
+                };
+                let end = match range_bound(range.end, chars.len(), chars.len()) {
+                    Ok(end) => end,
+                    Err(error) => {
+                        return opt.fail(Self::String(value), |_| jaq_core::Exn::from(error))
+                    }
+                };
+                let take = end.saturating_sub(start);
+                let selected = Self::String(Cow::Owned(
+                    chars.iter().skip(start).take(take).collect::<String>(),
+                ));
+                let replacement = match f(selected).next().transpose()? {
+                    Some(value) => into_string(value).map_err(jaq_core::Exn::from)?,
+                    None => String::new(),
+                };
+                let result = chars
+                    .iter()
+                    .take(start)
+                    .chain(replacement.chars().collect::<Vec<_>>().iter())
+                    .chain(chars.iter().skip(start + take))
+                    .collect::<String>();
+                Ok(Self::String(Cow::Owned(result)))
+            }
+            value => opt.fail(value, |value| {
+                jaq_core::Exn::from(jaq_core::Error::typ(value, "rangeable (array or string)"))
+            }),
         }
     }
 
@@ -573,13 +720,54 @@ impl<'a> Neg for QueryValue<'a> {
 
 #[cfg(test)]
 mod tests {
+    use jaq_core::load::{Arena, File, Loader};
     use jaq_core::ValT;
+    use jaq_core::{unwrap_valr, Compiler, Ctx, Vars};
 
     use crate::core::QueryValue;
+    use crate::jaq::{defs, funs, JsonbData};
     use crate::OwnedJsonb;
 
     fn query_value(json: &str) -> QueryValue<'static> {
         QueryValue::Owned(json.parse::<OwnedJsonb>().unwrap())
+    }
+
+    fn run_filter(filter: &'static str, input: &str) -> Vec<String> {
+        let arena = Arena::default();
+        let loader = Loader::new(jaq_core::defs().chain(jaq_std::defs()).chain(defs()));
+        let modules = loader
+            .load(
+                &arena,
+                File {
+                    path: (),
+                    code: filter,
+                },
+            )
+            .unwrap();
+        let filter = Compiler::default()
+            .with_funs(
+                jaq_core::funs::<JsonbData>()
+                    .chain(jaq_std::funs::<JsonbData>())
+                    .chain(funs::<JsonbData>()),
+            )
+            .compile(modules)
+            .unwrap();
+
+        let input = QueryValue::Owned(input.parse::<OwnedJsonb>().unwrap());
+        let ctx = Ctx::<JsonbData>::new(&filter.lut, Vars::new([]));
+        filter
+            .id
+            .run((ctx, input))
+            .map(unwrap_valr)
+            .map(|value| {
+                value
+                    .unwrap()
+                    .into_owned_jsonb()
+                    .unwrap()
+                    .as_raw()
+                    .to_string()
+            })
+            .collect()
     }
 
     #[test]
@@ -617,5 +805,56 @@ mod tests {
             range.into_owned_jsonb().unwrap().as_raw().to_string(),
             "[2,3]"
         );
+    }
+
+    #[test]
+    fn update_object_field() {
+        assert_eq!(
+            run_filter(".a |= . + 1", r#"{"a":1,"b":2}"#),
+            [r#"{"a":2,"b":2}"#]
+        );
+    }
+
+    #[test]
+    fn delete_object_field() {
+        assert_eq!(run_filter("del(.a)", r#"{"a":1,"b":2}"#), [r#"{"b":2}"#]);
+    }
+
+    #[test]
+    fn delete_array_index() {
+        assert_eq!(run_filter("del(.[1])", "[1,2,3]"), ["[1,3]"]);
+    }
+
+    #[test]
+    fn update_array_values() {
+        assert_eq!(run_filter(".[] |= . + 1", "[1,2]"), ["[2,3]"]);
+    }
+
+    #[test]
+    fn update_array_range() {
+        assert_eq!(run_filter(".[1:3] |= [9]", "[1,2,3,4]"), ["[1,9,4]"]);
+    }
+
+    #[test]
+    fn update_string_range() {
+        assert_eq!(run_filter(r#".[1:3] |= "X""#, r#""abcd""#), [r#""aXd""#]);
+    }
+
+    #[test]
+    fn update_array_with_multiple_outputs() {
+        assert_eq!(run_filter(".[] |= (., . + 1)", "[1,3]"), ["[1,2,3,4]"]);
+    }
+
+    #[test]
+    fn update_nested_path() {
+        assert_eq!(
+            run_filter(".a.b += 1", r#"{"a":{"b":1},"c":2}"#),
+            [r#"{"a":{"b":2},"c":2}"#]
+        );
+    }
+
+    #[test]
+    fn optional_out_of_bounds_update_keeps_input() {
+        assert_eq!(run_filter(".[3]? |= . + 1", "[1,2]"), ["[1,2]"]);
     }
 }
