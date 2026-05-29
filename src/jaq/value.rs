@@ -478,11 +478,30 @@ impl<'a> Add for QueryValue<'a> {
     type Output = ValR<Self>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        match (as_number(&self), as_number(&rhs)) {
-            (Some(left), Some(right)) => left.add(right).map(Self::Number).map_err(jsonb_error),
-            _ => Err(str_error(
-                "jsonb jaq addition is not implemented for these values",
-            )),
+        match (self, rhs) {
+            (Self::Null, value) | (value, Self::Null) => Ok(value),
+            (left, right) => match (as_number(&left), as_number(&right)) {
+                (Some(left), Some(right)) => left.add(right).map(Self::Number).map_err(jsonb_error),
+                _ => match (left, right) {
+                    (Self::String(left), Self::String(right)) => Ok(Self::String(Cow::Owned(
+                        format!("{}{}", left.as_ref(), right.as_ref()),
+                    ))),
+                    (Self::Array(left), Self::Array(right)) => Ok(Self::Array(Rc::new(
+                        left.iter().chain(right.iter()).cloned().collect(),
+                    ))),
+                    (Self::Object(mut left), Self::Object(right)) => {
+                        Rc::make_mut(&mut left).extend(
+                            right
+                                .iter()
+                                .map(|(key, value)| (key.clone(), value.clone())),
+                        );
+                        Ok(Self::Object(left))
+                    }
+                    (left, right) => {
+                        Err(jaq_core::Error::math(left, jaq_core::ops::Math::Add, right))
+                    }
+                },
+            },
         }
     }
 }
