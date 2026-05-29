@@ -69,6 +69,7 @@ mod error;
 mod extension;
 mod from;
 mod functions;
+pub mod jaq;
 pub mod jsonpath;
 pub mod keypath;
 mod number;
