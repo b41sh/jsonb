@@ -30,8 +30,8 @@ byteorder = "1.5.0"
 ethnum = "1.5.2"
 fast-float2 = "0.2.3"
 itoa = "1.0"
-jaq-core = { path = "jaq/jaq-core" }
-jaq-std = { path = "jaq/jaq-std" }
+jaq-core = "3.0.0"
+jaq-std = "3.0.0"
 jiff = "0.2.10"
 nom = "8.0.0"
 num-traits = "0.2.19"
