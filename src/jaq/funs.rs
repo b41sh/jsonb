@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use jaq_core::native::{bome, run, unary, v, Filter, Fun};
-use jaq_core::{load, DataT, RunPtr, ValR};
+use jaq_core::{load, DataT, Exn, RunPtr, ValR, ValXs};
 
 use crate::core::QueryValue;
 use crate::core::{ArrayIterator, JsonbItem, JsonbItemType, ObjectIterator};
@@ -37,7 +37,7 @@ where
     D: for<'a> DataT<V<'a> = QueryValue<'a>>,
 {
     Box::new([
-        ("fromjson", v(0), |cv| bome(fromjson(cv.1))),
+        ("fromjson", v(0), |cv| fromjson(cv.1)),
         ("tojson", v(0), |cv| bome(Ok(tojson(cv.1)))),
         ("tobytes", v(0), |cv| bome(tobytes(cv.1))),
         ("length", v(0), |cv| bome(length(&cv.1))),
@@ -73,6 +73,14 @@ fn str_error<'a>(message: impl ToString) -> jaq_core::Error<QueryValue<'a>> {
 
 fn jsonb_error<'a>(error: crate::Error) -> jaq_core::Error<QueryValue<'a>> {
     str_error(error)
+}
+
+fn parse_fail<'a>(
+    input: impl std::fmt::Display,
+    format: &str,
+    error: impl std::fmt::Display,
+) -> jaq_core::Error<QueryValue<'a>> {
+    jaq_core::Error::str(format!("cannot parse {input} as {format}: {error}"))
 }
 
 fn item_to_query_value<'a>(item: JsonbItem<'a>) -> crate::error::Result<QueryValue<'a>> {
@@ -214,6 +222,7 @@ fn length(value: &QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'stati
 fn has(value: &QueryValue<'_>, key: &QueryValue<'_>) -> ValR<bool, QueryValue<'static>> {
     if let Some(raw) = raw_value(value) {
         return match raw.jsonb_item_type().map_err(jsonb_error)? {
+            JsonbItemType::Null => Ok(false),
             JsonbItemType::Array(len) => {
                 Ok(as_index(key).and_then(|i| abs_index(i, len)).is_some())
             }
@@ -225,16 +234,23 @@ fn has(value: &QueryValue<'_>, key: &QueryValue<'_>) -> ValR<bool, QueryValue<'s
                     .into_iter()
                     .any(|(entry, _)| entry == key))
             }
-            _ => Ok(false),
+            _ => Err(jaq_core::Error::index(
+                value.clone().into_owned_static(),
+                key.clone().into_owned_static(),
+            )),
         };
     }
 
     match value {
+        QueryValue::Null => Ok(false),
         QueryValue::Array(values) => Ok(as_index(key)
             .and_then(|index| abs_index(index, values.len()))
             .is_some()),
         QueryValue::Object(values) => Ok(values.contains_key(key)),
-        _ => Ok(false),
+        value => Err(jaq_core::Error::index(
+            value.clone().into_owned_static(),
+            key.clone().into_owned_static(),
+        )),
     }
 }
 
@@ -318,7 +334,15 @@ fn indices(
         return Ok(result);
     }
 
-    let values = array_values(value)?;
+    let values = match array_values(value) {
+        Ok(values) => values,
+        Err(_) => {
+            return Err(jaq_core::Error::index(
+                value.clone().into_owned_static(),
+                needle.clone().into_owned_static(),
+            ))
+        }
+    };
     let needles = match array_values(needle) {
         Ok(needles) => needles,
         Err(_) => {
@@ -347,47 +371,151 @@ fn tojson(value: QueryValue<'_>) -> QueryValue<'static> {
     QueryValue::String(Cow::Owned(value.to_string()))
 }
 
-fn fromjson(value: QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'static>> {
-    let Some(value) = as_str_owned(&value) else {
-        return Err(jaq_core::Error::typ(value.into_owned_static(), "string"));
-    };
-    parse_owned_jsonb(value.as_bytes())
-        .map(QueryValue::Owned)
-        .map_err(jsonb_error)
+fn json_value_segments(input: &str) -> ValR<Vec<&str>, QueryValue<'static>> {
+    fn skip_ws(bytes: &[u8], index: &mut usize) {
+        while bytes
+            .get(*index)
+            .is_some_and(|value| value.is_ascii_whitespace())
+        {
+            *index += 1;
+        }
+    }
+
+    fn scan_string(bytes: &[u8], index: &mut usize, quote: u8) -> ValR<(), QueryValue<'static>> {
+        *index += 1;
+        while let Some(value) = bytes.get(*index) {
+            match *value {
+                b'\\' => *index += 2,
+                value if value == quote => {
+                    *index += 1;
+                    return Ok(());
+                }
+                _ => *index += 1,
+            }
+        }
+        Err(str_error("unterminated string"))
+    }
+
+    fn scan_container(bytes: &[u8], index: &mut usize) -> ValR<(), QueryValue<'static>> {
+        let mut stack = Vec::new();
+        loop {
+            let Some(value) = bytes.get(*index) else {
+                return Err(str_error("unterminated JSON container"));
+            };
+            match *value {
+                b'"' | b'\'' => scan_string(bytes, index, *value)?,
+                b'[' | b'{' => {
+                    stack.push(if *value == b'[' { b']' } else { b'}' });
+                    *index += 1;
+                }
+                b']' | b'}' => {
+                    let Some(expected) = stack.pop() else {
+                        return Err(str_error("unexpected JSON container close"));
+                    };
+                    if *value != expected {
+                        return Err(str_error("mismatched JSON container close"));
+                    }
+                    *index += 1;
+                    if stack.is_empty() {
+                        return Ok(());
+                    }
+                }
+                _ => *index += 1,
+            }
+        }
+    }
+
+    let bytes = input.as_bytes();
+    let mut index = 0;
+    let mut segments = Vec::new();
+    loop {
+        skip_ws(bytes, &mut index);
+        if index >= bytes.len() {
+            break;
+        }
+        let start = index;
+        match bytes[index] {
+            b'"' | b'\'' => {
+                let quote = bytes[index];
+                scan_string(bytes, &mut index, quote)?;
+            }
+            b'[' | b'{' => scan_container(bytes, &mut index)?,
+            _ => {
+                while bytes
+                    .get(index)
+                    .is_some_and(|value| !value.is_ascii_whitespace())
+                {
+                    index += 1;
+                }
+            }
+        }
+        segments.push(&input[start..index]);
+    }
+    Ok(segments)
 }
 
-fn tobytes(value: QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'static>> {
+fn fromjson<'a>(value: QueryValue<'a>) -> ValXs<'a, QueryValue<'a>> {
+    let input_display = value.to_string();
+    let Some(input) = as_str_owned(&value) else {
+        return Box::new(std::iter::once(Err(Exn::from(jaq_core::Error::typ(
+            value, "string",
+        )))));
+    };
+
+    let results = match json_value_segments(&input) {
+        Ok(segments) => segments
+            .into_iter()
+            .map(|segment| {
+                parse_owned_jsonb(segment.as_bytes())
+                    .map(QueryValue::Owned)
+                    .map(QueryValue::from_static)
+                    .map_err(|error| Exn::from(parse_fail(&input_display, "JSON", error)))
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => vec![Err(Exn::from(error))],
+    };
+    Box::new(results.into_iter())
+}
+
+fn to_bytes(value: &QueryValue<'_>) -> Result<Vec<u8>, QueryValue<'static>> {
     fn byte(value: &QueryValue<'_>) -> Option<u8> {
         as_number(value)
             .and_then(|number| number.as_u64())
             .and_then(|number| u8::try_from(number).ok())
     }
 
-    match value {
-        QueryValue::String(value) => Ok(QueryValue::String(Cow::Owned(value.into_owned()))),
-        value if as_str_owned(&value).is_some() => Ok(QueryValue::String(Cow::Owned(
-            as_str_owned(&value).unwrap(),
-        ))),
-        value if byte(&value).is_some() => {
-            let byte = byte(&value).unwrap();
-            Ok(QueryValue::String(Cow::Owned(
-                String::from_utf8_lossy(&[byte]).into_owned(),
-            )))
-        }
-        value => {
-            let values = array_values(&value)?;
-            let mut bytes = Vec::with_capacity(values.len());
-            for value in values {
-                let Some(byte) = byte(&value) else {
-                    return Err(str_error(format!("cannot convert {value} to bytes")));
-                };
-                bytes.push(byte);
-            }
-            Ok(QueryValue::String(Cow::Owned(
-                String::from_utf8_lossy(&bytes).into_owned(),
-            )))
-        }
+    if let Some(byte) = byte(value) {
+        return Ok(vec![byte]);
     }
+
+    if let Some(value) = as_str_owned(value) {
+        return Ok(value.into_bytes());
+    }
+
+    match value {
+        QueryValue::Array(values) => {
+            let mut bytes = Vec::new();
+            for value in values.iter() {
+                bytes.extend(to_bytes(value)?);
+            }
+            Ok(bytes)
+        }
+        value if raw_value(value).is_some() => {
+            let values = array_values(value).map_err(|_| value.clone().into_owned_static())?;
+            let mut bytes = Vec::new();
+            for value in values {
+                bytes.extend(to_bytes(&value)?);
+            }
+            Ok(bytes)
+        }
+        value => Err(value.clone().into_owned_static()),
+    }
+}
+
+fn tobytes(value: QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'static>> {
+    to_bytes(&value)
+        .map(|bytes| QueryValue::String(Cow::Owned(String::from_utf8_lossy(&bytes).into_owned())))
+        .map_err(|value| str_error(format!("cannot convert {value} to bytes")))
 }
 
 #[cfg(test)]
@@ -448,6 +576,49 @@ mod tests {
         );
         assert_eq!(run_filter(r#""{\"a\":1}" | fromjson | .a"#, "null"), ["1"]);
         assert_eq!(run_filter("tojson", r#"{"a":1}"#), [r#""{\"a\":1}""#]);
+    }
+
+    #[test]
+    fn native_jsonb_functions_match_jaq_json_edges() {
+        assert_eq!(run_filter("[1, 3] | bsearch(0)", "null"), ["-1"]);
+        assert_eq!(run_filter("[1, 3] | bsearch(2)", "null"), ["-2"]);
+        assert_eq!(run_filter("[1, 3] | [bsearch(1, 3)]", "null"), ["[0,1]"]);
+
+        assert_eq!(
+            run_filter(
+                r#""Infinity +Infinity -Infinity" | [fromjson | tostring]"#,
+                "null"
+            ),
+            [r#"["Infinity","Infinity","-Infinity"]"#]
+        );
+        assert_eq!(run_filter(r#"" 1" | fromjson"#, "null"), ["1"]);
+        assert_eq!(run_filter(r#""+1" | fromjson"#, "null"), ["1"]);
+        assert_eq!(run_filter(r#""-1" | fromjson"#, "null"), ["-1"]);
+
+        assert_eq!(
+            run_filter(r#""a,b, cd, efg" | indices(", ")"#, "null"),
+            ["[3,7]"]
+        );
+        assert_eq!(
+            run_filter("[0, 1, 2, 1, 3, 1, 4] | indices(1)", "null"),
+            ["[1,3,5]"]
+        );
+        assert_eq!(
+            run_filter(
+                "[0, 1, 2, 3, 1, 4, 2, 5, 1, 2, 6, 7] | indices([1, 2])",
+                "null"
+            ),
+            ["[1,8]"]
+        );
+        assert_eq!(run_filter(r#""🇬🇧🇬🇧" | indices("🇬🇧")"#, "null"), ["[0,2]"]);
+
+        assert_eq!(run_filter(r#""ƒoo" | length"#, "null"), ["3"]);
+        assert_eq!(run_filter(r#""नमस्ते" | length"#, "null"), ["6"]);
+        assert_eq!(run_filter("-2.5 | length", "null"), ["2.5"]);
+        assert_eq!(
+            run_filter(r#"[[65], "B", 67] | tobytes"#, "null"),
+            [r#""ABC""#]
+        );
     }
 
     #[test]

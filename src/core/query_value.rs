@@ -205,14 +205,93 @@ impl<'a> QueryValue<'a> {
     }
 
     fn to_json_string(&self) -> String {
+        fn number_string(number: &Number) -> String {
+            match number {
+                Number::Float64(value) if value.is_nan() => "NaN".to_string(),
+                Number::Float64(value) if value.is_infinite() && value.is_sign_positive() => {
+                    "Infinity".to_string()
+                }
+                Number::Float64(value) if value.is_infinite() && value.is_sign_negative() => {
+                    "-Infinity".to_string()
+                }
+                number => number.to_string(),
+            }
+        }
+
         match self {
-            Self::Raw(raw) => raw.to_string(),
-            Self::Owned(owned) => owned.as_raw().to_string(),
-            value => value
-                .clone()
-                .into_owned_jsonb()
-                .map(|owned| owned.as_raw().to_string())
-                .unwrap_or_else(|_| "null".to_string()),
+            Self::Raw(raw) => raw
+                .as_number()
+                .ok()
+                .flatten()
+                .map(|number| number_string(&number))
+                .unwrap_or_else(|| raw.to_string()),
+            Self::Owned(owned) => owned
+                .as_raw()
+                .as_number()
+                .ok()
+                .flatten()
+                .map(|number| number_string(&number))
+                .unwrap_or_else(|| owned.as_raw().to_string()),
+            Self::Null => "null".to_string(),
+            Self::Bool(value) => value.to_string(),
+            Self::Number(value) => number_string(value),
+            Self::String(value) => serde_json::to_string(value.as_ref())
+                .unwrap_or_else(|_| format!("{:?}", value.as_ref())),
+            Self::Array(values) => {
+                let values = values
+                    .iter()
+                    .map(QueryValue::to_json_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("[{values}]")
+            }
+            Self::Object(values) => {
+                let values = values
+                    .iter()
+                    .map(|(key, value)| {
+                        let key = key
+                            .as_object_key()
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| key.to_json_string());
+                        let key =
+                            serde_json::to_string(&key).unwrap_or_else(|_| format!("{key:?}"));
+                        format!("{key}:{}", value.to_json_string())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("{{{values}}}")
+            }
+        }
+    }
+
+    fn as_number_value(&self) -> crate::error::Result<Option<Number>> {
+        match self {
+            Self::Number(value) => Ok(Some(value.clone())),
+            Self::Raw(raw) => raw.as_number(),
+            Self::Owned(owned) => owned.as_raw().as_number(),
+            _ => Ok(None),
+        }
+    }
+
+    fn as_string_value(&self) -> crate::error::Result<Option<Cow<'_, str>>> {
+        match self {
+            Self::String(value) => Ok(Some(Cow::Borrowed(value.as_ref()))),
+            Self::Raw(raw) => raw.as_str(),
+            Self::Owned(owned) => owned
+                .as_raw()
+                .as_str()
+                .map(|value| value.map(|value| Cow::Owned(value.into_owned()))),
+            _ => Ok(None),
+        }
+    }
+
+    fn as_bool_value(&self) -> crate::error::Result<Option<bool>> {
+        match self {
+            Self::Bool(value) => Ok(Some(*value)),
+            Self::Raw(raw) => raw.as_bool(),
+            Self::Owned(owned) => owned.as_raw().as_bool(),
+            _ => Ok(None),
         }
     }
 }
@@ -253,7 +332,25 @@ impl Ord for QueryValue<'_> {
             (Self::Object(left), Self::Object(right)) => left.cmp(right),
             (Self::Raw(left), Self::Raw(right)) => left.cmp(right),
             (Self::Owned(left), Self::Owned(right)) => left.as_raw().cmp(&right.as_raw()),
-            _ => self.to_json_string().cmp(&other.to_json_string()),
+            _ => match self.json_type_rank() {
+                0 => Ordering::Equal,
+                1 => self
+                    .as_bool_value()
+                    .ok()
+                    .flatten()
+                    .cmp(&other.as_bool_value().ok().flatten()),
+                2 => self
+                    .as_number_value()
+                    .ok()
+                    .flatten()
+                    .cmp(&other.as_number_value().ok().flatten()),
+                3 => self
+                    .as_string_value()
+                    .ok()
+                    .flatten()
+                    .cmp(&other.as_string_value().ok().flatten()),
+                _ => self.to_json_string().cmp(&other.to_json_string()),
+            },
         }
     }
 }

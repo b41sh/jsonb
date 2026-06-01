@@ -33,10 +33,22 @@ fn as_key_string(value: &QueryValue<'_>) -> Option<String> {
     }
 }
 
+fn raw_str_bytes(raw: RawJsonb<'_>) -> Option<&[u8]> {
+    match JsonbItem::from_raw_jsonb(raw).ok()? {
+        JsonbItem::String(value) => match value {
+            Cow::Borrowed(value) => Some(value.as_bytes()),
+            Cow::Owned(_) => None,
+        },
+        _ => None,
+    }
+}
+
 fn as_isize(value: &QueryValue<'_>) -> Option<isize> {
-    as_number(value)
-        .and_then(|number| number.as_i64())
-        .and_then(|number| isize::try_from(number).ok())
+    match as_number(value)? {
+        Number::Int64(number) => isize::try_from(number).ok(),
+        Number::UInt64(number) => isize::try_from(number).ok(),
+        _ => None,
+    }
 }
 
 fn abs_index(index: isize, len: usize) -> Option<usize> {
@@ -162,7 +174,13 @@ fn raw_index<'a>(
 ) -> ValR<QueryValue<'static>, QueryValue<'static>> {
     match raw.jsonb_item_type().map_err(jsonb_error)? {
         JsonbItemType::Array(len) => {
-            let Some(index) = as_isize(index).and_then(|index| abs_index(index, len)) else {
+            let Some(index_value) = as_isize(index) else {
+                return Err(jaq_core::Error::index(
+                    QueryValue::Owned(raw.to_owned()),
+                    index.clone().into_owned_static(),
+                ));
+            };
+            let Some(index) = abs_index(index_value, len) else {
                 return Ok(QueryValue::Null);
             };
             let mut iter = ArrayIterator::new(raw)
@@ -285,6 +303,59 @@ fn into_string<'a>(value: QueryValue<'a>) -> ValR<String, QueryValue<'a>> {
     }
 }
 
+fn repeat_string<'a>(value: Cow<'a, str>, count: Number) -> ValR<QueryValue<'a>> {
+    let Some(count) = count.as_i64() else {
+        return Err(jaq_core::Error::typ(QueryValue::Number(count), "integer"));
+    };
+    if count <= 0 {
+        return Ok(QueryValue::Null);
+    }
+    let count = usize::try_from(count).map_err(str_error)?;
+    Ok(QueryValue::String(Cow::Owned(value.repeat(count))))
+}
+
+fn split_string<'a>(value: Cow<'a, str>, separator: Cow<'a, str>) -> QueryValue<'a> {
+    let values = if value.is_empty() {
+        Vec::new()
+    } else if separator.is_empty() {
+        value
+            .chars()
+            .map(|value| QueryValue::String(Cow::Owned(value.to_string())))
+            .collect()
+    } else {
+        value
+            .split(separator.as_ref())
+            .map(|value| QueryValue::String(Cow::Owned(value.to_string())))
+            .collect()
+    };
+    QueryValue::Array(Rc::new(values))
+}
+
+fn merge_object<'a>(
+    left: &mut BTreeMap<QueryValue<'a>, QueryValue<'a>>,
+    right: &BTreeMap<QueryValue<'a>, QueryValue<'a>>,
+) -> ValR<(), QueryValue<'a>> {
+    for (key, right_value) in right {
+        let right_value = materialize_current(right_value.clone())?;
+        match left.get_mut(key) {
+            Some(left_value) => {
+                let left_materialized = materialize_current(left_value.clone())?;
+                match (left_materialized, right_value) {
+                    (QueryValue::Object(mut left_object), QueryValue::Object(right_object)) => {
+                        merge_object(Rc::make_mut(&mut left_object), &right_object)?;
+                        *left_value = QueryValue::Object(left_object);
+                    }
+                    (_, right_value) => *left_value = right_value,
+                }
+            }
+            None => {
+                left.insert(key.clone(), right_value);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn into_static_iter<T>(items: Vec<T>) -> Box<dyn Iterator<Item = T> + 'static> {
     let iter: Box<dyn Iterator<Item = T>> = Box::new(items.into_iter());
     // All values placed in these iterators are converted through
@@ -383,8 +454,10 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
             Self::Owned(owned) => raw_index(owned.as_raw(), index).map(QueryValue::from_static),
             Self::Null => Ok(Self::Null),
             Self::Array(values) => {
-                let Some(index) = as_isize(index).and_then(|index| abs_index(index, values.len()))
-                else {
+                let Some(index_value) = as_isize(index) else {
+                    return Err(jaq_core::Error::index(Self::Array(values), index.clone()));
+                };
+                let Some(index) = abs_index(index_value, values.len()) else {
                     return Ok(Self::Null);
                 };
                 Ok(values
@@ -576,7 +649,7 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
 
 impl<'a> jaq_std::ValT for QueryValue<'a> {
     fn into_seq<S: FromIterator<Self>>(self) -> Result<S, Self> {
-        match self {
+        match materialize_current(self.clone()).unwrap_or(self) {
             Self::Array(values) => Ok(values.iter().cloned().collect()),
             value => Err(value),
         }
@@ -603,6 +676,8 @@ impl<'a> jaq_std::ValT for QueryValue<'a> {
     fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::String(value) => Some(value.as_bytes()),
+            Self::Raw(raw) => raw_str_bytes(*raw),
+            Self::Owned(owned) => raw_str_bytes(owned.as_raw()),
             _ => None,
         }
     }
@@ -629,7 +704,7 @@ impl<'a> Add for QueryValue<'a> {
             (Self::Null, value) | (value, Self::Null) => Ok(value),
             (left, right) => match (as_number(&left), as_number(&right)) {
                 (Some(left), Some(right)) => left.add(right).map(Self::Number).map_err(jsonb_error),
-                _ => match (left, right) {
+                _ => match (materialize_current(left)?, materialize_current(right)?) {
                     (Self::String(left), Self::String(right)) => Ok(Self::String(Cow::Owned(
                         format!("{}{}", left.as_ref(), right.as_ref()),
                     ))),
@@ -659,9 +734,14 @@ impl<'a> Sub for QueryValue<'a> {
     fn sub(self, rhs: Self) -> Self::Output {
         match (as_number(&self), as_number(&rhs)) {
             (Some(left), Some(right)) => left.sub(right).map(Self::Number).map_err(jsonb_error),
-            _ => Err(str_error(
-                "jsonb jaq subtraction is not implemented for these values",
-            )),
+            _ => match (materialize_current(self)?, materialize_current(rhs)?) {
+                (Self::Array(mut left), Self::Array(right)) => {
+                    let right = right.iter().collect::<std::collections::BTreeSet<_>>();
+                    Rc::make_mut(&mut left).retain(|value| !right.contains(value));
+                    Ok(Self::Array(left))
+                }
+                (left, right) => Err(jaq_core::Error::math(left, jaq_core::ops::Math::Sub, right)),
+            },
         }
     }
 }
@@ -672,9 +752,15 @@ impl<'a> Mul for QueryValue<'a> {
     fn mul(self, rhs: Self) -> Self::Output {
         match (as_number(&self), as_number(&rhs)) {
             (Some(left), Some(right)) => left.mul(right).map(Self::Number).map_err(jsonb_error),
-            _ => Err(str_error(
-                "jsonb jaq multiplication is not implemented for these values",
-            )),
+            _ => match (materialize_current(self)?, materialize_current(rhs)?) {
+                (Self::String(value), Self::Number(count))
+                | (Self::Number(count), Self::String(value)) => repeat_string(value, count),
+                (Self::Object(mut left), Self::Object(right)) => {
+                    merge_object(Rc::make_mut(&mut left), &right)?;
+                    Ok(Self::Object(left))
+                }
+                (left, right) => Err(jaq_core::Error::math(left, jaq_core::ops::Math::Mul, right)),
+            },
         }
     }
 }
@@ -684,10 +770,18 @@ impl<'a> Div for QueryValue<'a> {
 
     fn div(self, rhs: Self) -> Self::Output {
         match (as_number(&self), as_number(&rhs)) {
+            (Some(left), Some(right))
+                if matches!(left, Number::Float64(_)) || matches!(right, Number::Float64(_)) =>
+            {
+                Ok(Self::Number(Number::Float64(
+                    left.as_f64() / right.as_f64(),
+                )))
+            }
             (Some(left), Some(right)) => left.div(right).map(Self::Number).map_err(jsonb_error),
-            _ => Err(str_error(
-                "jsonb jaq division is not implemented for these values",
-            )),
+            _ => match (materialize_current(self)?, materialize_current(rhs)?) {
+                (Self::String(left), Self::String(right)) => Ok(split_string(left, right)),
+                (left, right) => Err(jaq_core::Error::math(left, jaq_core::ops::Math::Div, right)),
+            },
         }
     }
 }
@@ -697,10 +791,19 @@ impl<'a> Rem for QueryValue<'a> {
 
     fn rem(self, rhs: Self) -> Self::Output {
         match (as_number(&self), as_number(&rhs)) {
+            (Some(left), Some(right))
+                if matches!(left, Number::Float64(_)) || matches!(right, Number::Float64(_)) =>
+            {
+                Ok(Self::Number(Number::Float64(
+                    left.as_f64() % right.as_f64(),
+                )))
+            }
             (Some(left), Some(right)) => left.rem(right).map(Self::Number).map_err(jsonb_error),
-            _ => Err(str_error(
-                "jsonb jaq remainder is not implemented for these values",
-            )),
+            _ => {
+                let left = materialize_current(self)?;
+                let right = materialize_current(rhs)?;
+                Err(jaq_core::Error::math(left, jaq_core::ops::Math::Rem, right))
+            }
         }
     }
 }
@@ -711,9 +814,7 @@ impl<'a> Neg for QueryValue<'a> {
     fn neg(self) -> Self::Output {
         match as_number(&self) {
             Some(number) => number.neg().map(Self::Number).map_err(jsonb_error),
-            None => Err(str_error(
-                "jsonb jaq negation is not implemented for this value",
-            )),
+            None => Err(jaq_core::Error::typ(materialize_current(self)?, "number")),
         }
     }
 }
@@ -856,5 +957,68 @@ mod tests {
     #[test]
     fn optional_out_of_bounds_update_keeps_input() {
         assert_eq!(run_filter(".[3]? |= . + 1", "[1,2]"), ["[1,2]"]);
+    }
+
+    #[test]
+    fn subtract_arrays() {
+        assert_eq!(
+            run_filter(".a - .b", r#"{"a":[1,2,3,2],"b":[2]}"#),
+            ["[1,3]"]
+        );
+    }
+
+    #[test]
+    fn multiply_string_by_number() {
+        assert_eq!(run_filter(".s * 3", r#"{"s":"ab"}"#), [r#""ababab""#]);
+        assert_eq!(run_filter(".s * 0", r#"{"s":"ab"}"#), ["null"]);
+    }
+
+    #[test]
+    fn split_string_by_string() {
+        assert_eq!(
+            run_filter(r#".s / ",""#, r#"{"s":"a,b,c"}"#),
+            [r#"["a","b","c"]"#]
+        );
+        assert_eq!(
+            run_filter(r#".s / """#, r#"{"s":"abc"}"#),
+            [r#"["a","b","c"]"#]
+        );
+    }
+
+    #[test]
+    fn multiply_objects_merges_recursively() {
+        assert_eq!(
+            run_filter(
+                ".a * .b",
+                r#"{"a":{"x":{"left":1},"replace":1},"b":{"x":{"right":2},"replace":2}}"#
+            ),
+            [r#"{"replace":2,"x":{"left":1,"right":2}}"#]
+        );
+    }
+
+    #[test]
+    fn std_array_functions_accept_owned_jsonb_arrays() {
+        assert_eq!(run_filter("reverse", "[1,2,3]"), ["[3,2,1]"]);
+        assert_eq!(run_filter("sort", "[3,1,2]"), ["[1,2,3]"]);
+    }
+
+    #[test]
+    fn std_string_functions_accept_owned_jsonb_strings() {
+        assert_eq!(run_filter("explode", r#""ab""#), ["[97,98]"]);
+        assert_eq!(run_filter("utf8bytelength", r#""你好""#), ["6"]);
+        assert_eq!(run_filter("ascii_upcase", r#""ab""#), [r#""AB""#]);
+        assert_eq!(run_filter(r#"ltrimstr("ab")"#, r#""abcd""#), [r#""cd""#]);
+    }
+
+    #[test]
+    fn std_string_functions_accept_raw_child_strings() {
+        assert_eq!(
+            run_filter(r#".s | startswith("ab")"#, r#"{"s":"abcd"}"#),
+            ["true"]
+        );
+        assert_eq!(
+            run_filter(r#".s | endswith("cd")"#, r#"{"s":"abcd"}"#),
+            ["true"]
+        );
     }
 }
