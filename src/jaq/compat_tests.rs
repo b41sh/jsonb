@@ -33,7 +33,7 @@ fn run_filter(filter: &'static str, input: &str) -> Vec<String> {
         .compile(modules)
         .unwrap();
 
-    let input = QueryValue::Owned(input.parse::<OwnedJsonb>().unwrap());
+    let input = QueryValue::from_owned(input.parse::<OwnedJsonb>().unwrap());
     let ctx = Ctx::<JsonbData>::new(&filter.lut, Vars::new([]));
     filter
         .id

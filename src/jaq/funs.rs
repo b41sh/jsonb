@@ -121,10 +121,10 @@ fn item_to_query_value<'a>(item: JsonbItem<'a>) -> JsonbResult<QueryValue<'a>> {
         JsonbItem::Boolean(value) => Ok(QueryValue::Bool(value)),
         JsonbItem::Number(value) => value.as_number().map(QueryValue::Number),
         JsonbItem::String(value) => Ok(QueryValue::String(Cow::Owned(value.into_owned()))),
-        JsonbItem::Raw(raw) => Ok(QueryValue::Owned(raw.to_owned())),
-        JsonbItem::Owned(owned) => Ok(QueryValue::Owned(owned)),
+        JsonbItem::Raw(raw) => Ok(QueryValue::from_owned(raw.to_owned())),
+        JsonbItem::Owned(owned) => Ok(QueryValue::from_owned(owned)),
         JsonbItem::Extension(value) => {
-            OwnedJsonb::from_item(JsonbItem::Extension(value)).map(QueryValue::Owned)
+            OwnedJsonb::from_item(JsonbItem::Extension(value)).map(QueryValue::from_owned)
         }
     }
 }
@@ -488,7 +488,7 @@ fn fromjson<'a>(value: QueryValue<'a>) -> ValXs<'a, QueryValue<'a>> {
             .into_iter()
             .map(|segment| {
                 parse_owned_jsonb(segment.as_bytes())
-                    .map(QueryValue::Owned)
+                    .map(QueryValue::from_owned)
                     .map(QueryValue::from_static)
                     .map_err(|error| Exn::from(parse_fail(&input_display, "JSON", error)))
             })
@@ -576,7 +576,7 @@ mod tests {
             .compile(modules)
             .unwrap();
 
-        let input = QueryValue::Owned(input.parse::<OwnedJsonb>().unwrap());
+        let input = QueryValue::from_owned(input.parse::<OwnedJsonb>().unwrap());
         let ctx = Ctx::<JsonbData>::new(&filter.lut, Vars::new([]));
         filter
             .id

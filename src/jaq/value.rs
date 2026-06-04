@@ -34,10 +34,12 @@ use crate::core::ObjectIterator;
 use crate::core::ObjectValueIterator;
 use crate::core::QueryValue;
 use crate::error::Result as JsonbResult;
+use crate::parse_value;
 use crate::Error;
 use crate::Number;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
+use crate::Value;
 
 fn as_number(value: &QueryValue<'_>) -> Option<Number> {
     value.as_number().ok().flatten()
@@ -116,10 +118,10 @@ fn item_to_query_value<'a>(item: JsonbItem<'a>) -> JsonbResult<QueryValue<'a>> {
         JsonbItem::Boolean(value) => Ok(QueryValue::Bool(value)),
         JsonbItem::Number(value) => value.as_number().map(QueryValue::Number),
         JsonbItem::String(value) => Ok(QueryValue::String(Cow::Owned(value.into_owned()))),
-        JsonbItem::Raw(raw) => Ok(QueryValue::Owned(raw.to_owned())),
-        JsonbItem::Owned(owned) => Ok(QueryValue::Owned(owned)),
+        JsonbItem::Raw(raw) => Ok(QueryValue::from_owned(raw.to_owned())),
+        JsonbItem::Owned(owned) => Ok(QueryValue::from_owned(owned)),
         JsonbItem::Extension(value) => {
-            OwnedJsonb::from_item(JsonbItem::Extension(value)).map(QueryValue::Owned)
+            OwnedJsonb::from_item(JsonbItem::Extension(value)).map(QueryValue::from_owned)
         }
     }
 }
@@ -149,7 +151,7 @@ fn raw_values(raw: RawJsonb<'_>) -> ValR<Vec<QueryValue<'static>>, QueryValue<'s
             .collect()
         }
         _ => Err(jaq_core::Error::typ(
-            QueryValue::Owned(raw.to_owned()),
+            QueryValue::from_owned(raw.to_owned()),
             "iterable (array or object)",
         )),
     }
@@ -180,7 +182,7 @@ fn raw_key_values<'a>(
             .collect()
         }
         _ => Err(jaq_core::Error::typ(
-            QueryValue::Owned(raw.to_owned()),
+            QueryValue::from_owned(raw.to_owned()),
             "iterable (array or object)",
         )),
     }
@@ -194,7 +196,7 @@ fn raw_index<'a>(
         JsonbItemType::Array(len) => {
             let Some(index_value) = as_isize(index) else {
                 return Err(jaq_core::Error::index(
-                    QueryValue::Owned(raw.to_owned()),
+                    QueryValue::from_owned(raw.to_owned()),
                     index.clone().into_owned_static(),
                 ));
             };
@@ -231,7 +233,7 @@ fn raw_index<'a>(
         }
         JsonbItemType::Null => Ok(QueryValue::Null),
         _ => Err(jaq_core::Error::index(
-            QueryValue::Owned(raw.to_owned()),
+            QueryValue::from_owned(raw.to_owned()),
             index.clone().into_owned_static(),
         )),
     }
@@ -267,7 +269,7 @@ fn raw_range<'a>(
             string_range(value, range)
         }
         _ => Err(jaq_core::Error::typ(
-            QueryValue::Owned(raw.to_owned()),
+            QueryValue::from_owned(raw.to_owned()),
             "rangeable (array or string)",
         )),
     }
@@ -395,16 +397,10 @@ fn jsonb_error<'a>(error: Error) -> jaq_core::Error<QueryValue<'a>> {
 
 impl<'a> jaq_core::ValT for QueryValue<'a> {
     fn from_num(number: &str) -> ValR<Self> {
-        if let Ok(value) = number.parse::<i64>() {
-            return Ok(Self::Number(Number::Int64(value)));
+        match parse_value(number.as_bytes()).map_err(jsonb_error)? {
+            Value::Number(number) => Ok(Self::Number(number)),
+            _ => Err(str_error("number expected")),
         }
-        if let Ok(value) = number.parse::<u64>() {
-            return Ok(Self::Number(Number::UInt64(value)));
-        }
-        number
-            .parse::<f64>()
-            .map(|value| Self::Number(Number::Float64(value)))
-            .map_err(str_error)
     }
 
     fn from_map<I: IntoIterator<Item = (Self, Self)>>(iter: I) -> ValR<Self> {
@@ -788,14 +784,9 @@ impl<'a> Div for QueryValue<'a> {
 
     fn div(self, rhs: Self) -> Self::Output {
         match (as_number(&self), as_number(&rhs)) {
-            (Some(left), Some(right))
-                if matches!(left, Number::Float64(_)) || matches!(right, Number::Float64(_)) =>
-            {
-                Ok(Self::Number(Number::Float64(
-                    left.as_f64() / right.as_f64(),
-                )))
-            }
-            (Some(left), Some(right)) => left.div(right).map(Self::Number).map_err(jsonb_error),
+            (Some(left), Some(right)) => Ok(Self::Number(Number::Float64(
+                left.as_f64() / right.as_f64(),
+            ))),
             _ => match (materialize_current(self)?, materialize_current(rhs)?) {
                 (Self::String(left), Self::String(right)) => Ok(split_string(left, right)),
                 (left, right) => Err(jaq_core::Error::math(left, jaq_core::ops::Math::Div, right)),
@@ -855,7 +846,7 @@ mod tests {
     use crate::OwnedJsonb;
 
     fn query_value(json: &str) -> QueryValue<'static> {
-        QueryValue::Owned(json.parse::<OwnedJsonb>().unwrap())
+        QueryValue::from_owned(json.parse::<OwnedJsonb>().unwrap())
     }
 
     fn run_filter(filter: &'static str, input: &str) -> Vec<String> {
@@ -879,7 +870,7 @@ mod tests {
             .compile(modules)
             .unwrap();
 
-        let input = QueryValue::Owned(input.parse::<OwnedJsonb>().unwrap());
+        let input = QueryValue::from_owned(input.parse::<OwnedJsonb>().unwrap());
         let ctx = Ctx::<JsonbData>::new(&filter.lut, Vars::new([]));
         filter
             .id

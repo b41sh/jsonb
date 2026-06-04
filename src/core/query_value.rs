@@ -32,8 +32,8 @@ use crate::Value;
 pub enum QueryValue<'a> {
     /// Borrowed JSONB subtree.
     Raw(RawJsonb<'a>),
-    /// Owned JSONB subtree.
-    Owned(OwnedJsonb),
+    /// Shared owned JSONB subtree.
+    Owned(Rc<OwnedJsonb>),
     /// Null.
     Null,
     /// Boolean.
@@ -54,13 +54,16 @@ impl<'a> QueryValue<'a> {
     }
 
     pub fn from_owned(owned: OwnedJsonb) -> Self {
-        Self::Owned(owned)
+        Self::Owned(Rc::new(owned))
     }
 
     pub fn into_owned_jsonb(self) -> Result<OwnedJsonb> {
         match self {
             Self::Raw(raw) => Ok(raw.to_owned()),
-            Self::Owned(owned) => Ok(owned),
+            Self::Owned(owned) => match Rc::try_unwrap(owned) {
+                Ok(owned) => Ok(owned),
+                Err(owned) => Ok((*owned).clone()),
+            },
             Self::Array(values) => {
                 let values = values
                     .iter()
@@ -131,7 +134,7 @@ impl<'a> QueryValue<'a> {
 
     pub(crate) fn into_owned_static(self) -> QueryValue<'static> {
         match self {
-            Self::Raw(raw) => QueryValue::Owned(raw.to_owned()),
+            Self::Raw(raw) => QueryValue::from_owned(raw.to_owned()),
             Self::Owned(owned) => QueryValue::Owned(owned),
             Self::Null => QueryValue::Null,
             Self::Bool(value) => QueryValue::Bool(value),
@@ -160,7 +163,7 @@ impl<'a> QueryValue<'a> {
 
     pub(crate) fn from_static(value: QueryValue<'static>) -> Self {
         match value {
-            QueryValue::Raw(raw) => Self::Owned(raw.to_owned()),
+            QueryValue::Raw(raw) => Self::from_owned(raw.to_owned()),
             QueryValue::Owned(owned) => Self::Owned(owned),
             QueryValue::Null => Self::Null,
             QueryValue::Bool(value) => Self::Bool(value),
