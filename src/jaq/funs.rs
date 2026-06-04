@@ -27,17 +27,14 @@ use jaq_core::RunPtr;
 use jaq_core::ValR;
 use jaq_core::ValXs;
 
-use crate::core::ArrayIterator;
-use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
-use crate::core::ObjectIterator;
 use crate::core::QueryValue;
-use crate::error::Result as JsonbResult;
 use crate::parse_owned_jsonb;
-use crate::Error;
 use crate::Number;
-use crate::OwnedJsonb;
-use crate::RawJsonb;
+
+use super::access::abs_index;
+use super::access::jsonb_error;
+use super::access::str_error;
 
 const DEFS: &str = r#"
 def totype(p; e): if p then . else fromjson | if p then . else e end end;
@@ -99,100 +96,12 @@ where
     ])
 }
 
-fn str_error<'a>(message: impl ToString) -> jaq_core::Error<QueryValue<'a>> {
-    jaq_core::Error::str(message)
-}
-
-fn jsonb_error<'a>(error: Error) -> jaq_core::Error<QueryValue<'a>> {
-    str_error(error)
-}
-
 fn parse_fail<'a>(
     input: impl std::fmt::Display,
     format: &str,
     error: impl std::fmt::Display,
 ) -> jaq_core::Error<QueryValue<'a>> {
     jaq_core::Error::str(format!("cannot parse {input} as {format}: {error}"))
-}
-
-fn item_to_query_value<'a>(item: JsonbItem<'a>) -> JsonbResult<QueryValue<'a>> {
-    match item {
-        JsonbItem::Null => Ok(QueryValue::Null),
-        JsonbItem::Boolean(value) => Ok(QueryValue::Bool(value)),
-        JsonbItem::Number(value) => value.as_number().map(QueryValue::Number),
-        JsonbItem::String(value) => Ok(QueryValue::String(Cow::Owned(value.into_owned()))),
-        JsonbItem::Raw(raw) => Ok(QueryValue::from_owned(raw.to_owned())),
-        JsonbItem::Owned(owned) => Ok(QueryValue::from_owned(owned)),
-        JsonbItem::Extension(value) => {
-            OwnedJsonb::from_item(JsonbItem::Extension(value)).map(QueryValue::from_owned)
-        }
-    }
-}
-
-fn raw_array_values(raw: RawJsonb<'_>) -> ValR<Vec<QueryValue<'static>>, QueryValue<'static>> {
-    let iter = ArrayIterator::new(raw)
-        .map_err(jsonb_error)?
-        .ok_or_else(|| str_error("cannot use value as array"))?;
-    iter.map(|item| {
-        item.map_err(jsonb_error)
-            .and_then(|item| item_to_query_value(item).map_err(jsonb_error))
-            .map(QueryValue::into_owned_static)
-    })
-    .collect()
-}
-
-fn raw_object_entries(
-    raw: RawJsonb<'_>,
-) -> ValR<Vec<(String, QueryValue<'static>)>, QueryValue<'static>> {
-    let iter = ObjectIterator::new(raw)
-        .map_err(jsonb_error)?
-        .ok_or_else(|| str_error("cannot use value as object"))?;
-    iter.map(|item| {
-        item.map_err(jsonb_error).and_then(|(key, value)| {
-            item_to_query_value(value)
-                .map_err(jsonb_error)
-                .map(|value| (key.to_string(), value.into_owned_static()))
-        })
-    })
-    .collect()
-}
-
-fn raw_value<'a>(value: &'a QueryValue<'_>) -> Option<RawJsonb<'a>> {
-    match value {
-        QueryValue::Raw(raw) => Some(*raw),
-        QueryValue::Owned(owned) => Some(owned.as_raw()),
-        _ => None,
-    }
-}
-
-fn as_number(value: &QueryValue<'_>) -> Option<Number> {
-    value.as_number().ok().flatten()
-}
-
-fn as_key_string(value: &QueryValue<'_>) -> Option<String> {
-    value
-        .as_string()
-        .ok()
-        .flatten()
-        .map(|value| value.into_owned())
-}
-
-fn as_str_owned(value: &QueryValue<'_>) -> Option<String> {
-    as_key_string(value)
-}
-
-fn as_index(value: &QueryValue<'_>) -> Option<isize> {
-    as_number(value)
-        .and_then(|number| number.as_i64())
-        .and_then(|number| isize::try_from(number).ok())
-}
-
-fn abs_index(index: isize, len: usize) -> Option<usize> {
-    if index >= 0 {
-        usize::try_from(index).ok().filter(|index| *index < len)
-    } else {
-        len.checked_sub(index.unsigned_abs())
-    }
 }
 
 fn number_abs(number: Number) -> Number {
@@ -208,7 +117,7 @@ fn number_abs(number: Number) -> Number {
 }
 
 fn length(value: &QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'static>> {
-    if let Some(raw) = raw_value(value) {
+    if let Some(raw) = value.raw_value() {
         return match raw.jsonb_item_type().map_err(jsonb_error)? {
             JsonbItemType::Null => Ok(QueryValue::from(0usize)),
             JsonbItemType::Number => raw
@@ -241,17 +150,21 @@ fn length(value: &QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'stati
 }
 
 fn has(value: &QueryValue<'_>, key: &QueryValue<'_>) -> ValR<bool, QueryValue<'static>> {
-    if let Some(raw) = raw_value(value) {
+    if let Some(raw) = value.raw_value() {
         return match raw.jsonb_item_type().map_err(jsonb_error)? {
             JsonbItemType::Null => Ok(false),
-            JsonbItemType::Array(len) => {
-                Ok(as_index(key).and_then(|i| abs_index(i, len)).is_some())
-            }
+            JsonbItemType::Array(len) => Ok(key
+                .as_isize()
+                .ok()
+                .flatten()
+                .and_then(|i| abs_index(i, len))
+                .is_some()),
             JsonbItemType::Object(_) => {
-                let Some(key) = as_key_string(key) else {
+                let Some(key) = key.as_key_string().ok().flatten() else {
                     return Ok(false);
                 };
-                Ok(raw_object_entries(raw)?
+                Ok(raw
+                    .raw_object_entries()?
                     .into_iter()
                     .any(|(entry, _)| entry == key))
             }
@@ -264,7 +177,10 @@ fn has(value: &QueryValue<'_>, key: &QueryValue<'_>) -> ValR<bool, QueryValue<'s
 
     match value {
         QueryValue::Null => Ok(false),
-        QueryValue::Array(values) => Ok(as_index(key)
+        QueryValue::Array(values) => Ok(key
+            .as_isize()
+            .ok()
+            .flatten()
             .and_then(|index| abs_index(index, values.len()))
             .is_some()),
         QueryValue::Object(values) => Ok(values.contains_key(key)),
@@ -276,8 +192,8 @@ fn has(value: &QueryValue<'_>, key: &QueryValue<'_>) -> ValR<bool, QueryValue<'s
 }
 
 fn array_values(value: &QueryValue<'_>) -> ValR<Vec<QueryValue<'static>>, QueryValue<'static>> {
-    if let Some(raw) = raw_value(value) {
-        return raw_array_values(raw);
+    if let Some(raw) = value.raw_value() {
+        return raw.raw_array_values();
     }
     match value {
         QueryValue::Array(values) => Ok(values
@@ -295,14 +211,14 @@ fn array_values(value: &QueryValue<'_>) -> ValR<Vec<QueryValue<'static>>, QueryV
 fn object_entries(
     value: &QueryValue<'_>,
 ) -> ValR<Vec<(String, QueryValue<'static>)>, QueryValue<'static>> {
-    if let Some(raw) = raw_value(value) {
-        return raw_object_entries(raw);
+    if let Some(raw) = value.raw_value() {
+        return raw.raw_object_entries();
     }
     match value {
         QueryValue::Object(values) => values
             .iter()
             .map(|(key, value)| {
-                let Some(key) = as_key_string(key) else {
+                let Some(key) = key.as_key_string().ok().flatten() else {
                     return Err(str_error("object key is not a string"));
                 };
                 Ok((key, value.clone().into_owned_static()))
@@ -316,7 +232,7 @@ fn object_entries(
 }
 
 fn contains(value: &QueryValue<'_>, needle: &QueryValue<'_>) -> bool {
-    if let (Some(value), Some(needle)) = (as_str_owned(value), as_str_owned(needle)) {
+    if let (Some(value), Some(needle)) = (value.as_str_owned(), needle.as_str_owned()) {
         return value.contains(&needle);
     }
 
@@ -342,7 +258,7 @@ fn indices(
     value: &QueryValue<'_>,
     needle: &QueryValue<'_>,
 ) -> ValR<Vec<QueryValue<'static>>, QueryValue<'static>> {
-    if let (Some(value), Some(needle)) = (as_str_owned(value), as_str_owned(needle)) {
+    if let (Some(value), Some(needle)) = (value.as_str_owned(), needle.as_str_owned()) {
         if needle.is_empty() {
             return Ok(Vec::new());
         }
@@ -477,7 +393,7 @@ fn json_value_segments(input: &str) -> ValR<Vec<&str>, QueryValue<'static>> {
 
 fn fromjson<'a>(value: QueryValue<'a>) -> ValXs<'a, QueryValue<'a>> {
     let input_display = value.to_string();
-    let Some(input) = as_str_owned(&value) else {
+    let Some(input) = value.as_str_owned() else {
         return Box::new(std::iter::once(Err(Exn::from(jaq_core::Error::typ(
             value, "string",
         )))));
@@ -500,7 +416,10 @@ fn fromjson<'a>(value: QueryValue<'a>) -> ValXs<'a, QueryValue<'a>> {
 
 fn to_bytes(value: &QueryValue<'_>) -> std::result::Result<Vec<u8>, QueryValue<'static>> {
     fn byte(value: &QueryValue<'_>) -> Option<u8> {
-        as_number(value)
+        value
+            .as_number()
+            .ok()
+            .flatten()
             .and_then(|number| number.as_u64())
             .and_then(|number| u8::try_from(number).ok())
     }
@@ -509,7 +428,7 @@ fn to_bytes(value: &QueryValue<'_>) -> std::result::Result<Vec<u8>, QueryValue<'
         return Ok(vec![byte]);
     }
 
-    if let Some(value) = as_str_owned(value) {
+    if let Some(value) = value.as_str_owned() {
         return Ok(value.into_bytes());
     }
 
@@ -521,7 +440,7 @@ fn to_bytes(value: &QueryValue<'_>) -> std::result::Result<Vec<u8>, QueryValue<'
             }
             Ok(bytes)
         }
-        value if raw_value(value).is_some() => {
+        value if value.raw_value().is_some() => {
             let values = array_values(value).map_err(|_| value.clone().into_owned_static())?;
             let mut bytes = Vec::new();
             for value in values {

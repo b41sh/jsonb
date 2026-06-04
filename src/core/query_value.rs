@@ -98,8 +98,7 @@ impl<'a> QueryValue<'a> {
     }
 
     pub(crate) fn as_object_key(&self) -> Result<Option<String>> {
-        self.as_string()
-            .map(|value| value.map(|value| value.into_owned()))
+        self.as_key_string()
     }
 
     pub(crate) fn as_number(&self) -> Result<Option<Number>> {
@@ -119,6 +118,19 @@ impl<'a> QueryValue<'a> {
                 .as_raw()
                 .as_str()
                 .map(|value| value.map(|value| Cow::Owned(value.into_owned()))),
+            _ => Ok(None),
+        }
+    }
+
+    pub(crate) fn as_key_string(&self) -> Result<Option<String>> {
+        self.as_string()
+            .map(|value| value.map(|value| value.into_owned()))
+    }
+
+    pub(crate) fn as_isize(&self) -> Result<Option<isize>> {
+        match self.as_number()? {
+            Some(Number::Int64(number)) => Ok(isize::try_from(number).ok()),
+            Some(Number::UInt64(number)) => Ok(isize::try_from(number).ok()),
             _ => Ok(None),
         }
     }

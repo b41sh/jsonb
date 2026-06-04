@@ -27,278 +27,16 @@ use jaq_core::val::Range;
 use jaq_core::val::ValR;
 use jaq_core::val::ValX;
 
-use crate::core::ArrayIterator;
-use crate::core::JsonbItem;
-use crate::core::JsonbItemType;
-use crate::core::ObjectIterator;
-use crate::core::ObjectValueIterator;
 use crate::core::QueryValue;
-use crate::error::Result as JsonbResult;
 use crate::parse_value;
-use crate::Error;
 use crate::Number;
-use crate::OwnedJsonb;
-use crate::RawJsonb;
 use crate::Value;
 
-fn as_number(value: &QueryValue<'_>) -> Option<Number> {
-    value.as_number().ok().flatten()
-}
-
-fn as_key_string(value: &QueryValue<'_>) -> Option<String> {
-    value
-        .as_string()
-        .ok()
-        .flatten()
-        .map(|value| value.into_owned())
-}
-
-fn raw_str_bytes(raw: RawJsonb<'_>) -> Option<&[u8]> {
-    match JsonbItem::from_raw_jsonb(raw).ok()? {
-        JsonbItem::String(value) => match value {
-            Cow::Borrowed(value) => Some(value.as_bytes()),
-            Cow::Owned(_) => None,
-        },
-        _ => None,
-    }
-}
-
-fn as_isize(value: &QueryValue<'_>) -> Option<isize> {
-    match as_number(value)? {
-        Number::Int64(number) => isize::try_from(number).ok(),
-        Number::UInt64(number) => isize::try_from(number).ok(),
-        _ => None,
-    }
-}
-
-fn abs_index(index: isize, len: usize) -> Option<usize> {
-    if index >= 0 {
-        usize::try_from(index).ok().filter(|index| *index < len)
-    } else {
-        len.checked_sub(index.unsigned_abs())
-    }
-}
-
-fn range_bound<'a>(
-    bound: Option<&QueryValue<'a>>,
-    len: usize,
-    default: usize,
-) -> ValR<usize, QueryValue<'static>> {
-    match bound {
-        None | Some(QueryValue::Null) => Ok(default),
-        Some(value) => {
-            let index = as_isize(value).ok_or_else(|| {
-                jaq_core::Error::typ(value.clone().into_owned_static(), "integer")
-            })?;
-            Ok(if index >= 0 {
-                usize::try_from(index).unwrap_or(usize::MAX).min(len)
-            } else {
-                len.saturating_sub(index.unsigned_abs())
-            })
-        }
-    }
-}
-
-fn string_range<'a>(
-    value: Cow<'a, str>,
-    range: Range<&QueryValue<'a>>,
-) -> ValR<QueryValue<'static>, QueryValue<'static>> {
-    let chars: Vec<_> = value.chars().collect();
-    let start = range_bound(range.start, chars.len(), 0)?;
-    let end = range_bound(range.end, chars.len(), chars.len())?;
-    let take = end.saturating_sub(start);
-    Ok(QueryValue::String(Cow::Owned(
-        chars.into_iter().skip(start).take(take).collect(),
-    )))
-}
-
-fn item_to_query_value<'a>(item: JsonbItem<'a>) -> JsonbResult<QueryValue<'a>> {
-    match item {
-        JsonbItem::Null => Ok(QueryValue::Null),
-        JsonbItem::Boolean(value) => Ok(QueryValue::Bool(value)),
-        JsonbItem::Number(value) => value.as_number().map(QueryValue::Number),
-        JsonbItem::String(value) => Ok(QueryValue::String(Cow::Owned(value.into_owned()))),
-        JsonbItem::Raw(raw) => Ok(QueryValue::from_owned(raw.to_owned())),
-        JsonbItem::Owned(owned) => Ok(QueryValue::from_owned(owned)),
-        JsonbItem::Extension(value) => {
-            OwnedJsonb::from_item(JsonbItem::Extension(value)).map(QueryValue::from_owned)
-        }
-    }
-}
-
-fn raw_values(raw: RawJsonb<'_>) -> ValR<Vec<QueryValue<'static>>, QueryValue<'static>> {
-    match raw.jsonb_item_type().map_err(jsonb_error)? {
-        JsonbItemType::Array(_) => {
-            let iter = ArrayIterator::new(raw)
-                .map_err(jsonb_error)?
-                .ok_or_else(|| str_error("cannot use value as iterable (array or object)"))?;
-            iter.map(|item| {
-                item.map_err(jsonb_error)
-                    .and_then(|item| item_to_query_value(item).map_err(jsonb_error))
-                    .map(QueryValue::into_owned_static)
-            })
-            .collect()
-        }
-        JsonbItemType::Object(_) => {
-            let iter = ObjectValueIterator::new(raw)
-                .map_err(jsonb_error)?
-                .ok_or_else(|| str_error("cannot use value as iterable (array or object)"))?;
-            iter.map(|item| {
-                item.map_err(jsonb_error)
-                    .and_then(|item| item_to_query_value(item).map_err(jsonb_error))
-                    .map(QueryValue::into_owned_static)
-            })
-            .collect()
-        }
-        _ => Err(jaq_core::Error::typ(
-            QueryValue::from_owned(raw.to_owned()),
-            "iterable (array or object)",
-        )),
-    }
-}
-
-fn raw_key_values<'a>(
-    raw: RawJsonb<'a>,
-) -> ValR<Vec<(QueryValue<'static>, QueryValue<'static>)>, QueryValue<'static>> {
-    match raw.jsonb_item_type().map_err(jsonb_error)? {
-        JsonbItemType::Array(_) => raw_values(raw).map(|values| {
-            values
-                .into_iter()
-                .enumerate()
-                .map(|(index, value)| (QueryValue::from(index), value))
-                .collect()
-        }),
-        JsonbItemType::Object(_) => {
-            let iter = ObjectIterator::new(raw)
-                .map_err(jsonb_error)?
-                .ok_or_else(|| str_error("cannot use value as iterable (array or object)"))?;
-            iter.map(|item| {
-                item.map_err(jsonb_error).and_then(|(key, value)| {
-                    item_to_query_value(value)
-                        .map_err(jsonb_error)
-                        .map(|value| (QueryValue::from(key.to_string()), value.into_owned_static()))
-                })
-            })
-            .collect()
-        }
-        _ => Err(jaq_core::Error::typ(
-            QueryValue::from_owned(raw.to_owned()),
-            "iterable (array or object)",
-        )),
-    }
-}
-
-fn raw_index<'a>(
-    raw: RawJsonb<'a>,
-    index: &QueryValue<'a>,
-) -> ValR<QueryValue<'static>, QueryValue<'static>> {
-    match raw.jsonb_item_type().map_err(jsonb_error)? {
-        JsonbItemType::Array(len) => {
-            let Some(index_value) = as_isize(index) else {
-                return Err(jaq_core::Error::index(
-                    QueryValue::from_owned(raw.to_owned()),
-                    index.clone().into_owned_static(),
-                ));
-            };
-            let Some(index) = abs_index(index_value, len) else {
-                return Ok(QueryValue::Null);
-            };
-            let mut iter = ArrayIterator::new(raw)
-                .map_err(jsonb_error)?
-                .ok_or_else(|| str_error("cannot use value as array"))?;
-            match iter.nth(index) {
-                Some(item) => item
-                    .map_err(jsonb_error)
-                    .and_then(|item| item_to_query_value(item).map_err(jsonb_error))
-                    .map(QueryValue::into_owned_static),
-                None => Ok(QueryValue::Null),
-            }
-        }
-        JsonbItemType::Object(_) => {
-            let Some(key) = as_key_string(index) else {
-                return Ok(QueryValue::Null);
-            };
-            let iter = ObjectIterator::new(raw)
-                .map_err(jsonb_error)?
-                .ok_or_else(|| str_error("cannot use value as object"))?;
-            for item in iter {
-                let (item_key, value) = item.map_err(jsonb_error)?;
-                if item_key == key {
-                    return item_to_query_value(value)
-                        .map_err(jsonb_error)
-                        .map(QueryValue::into_owned_static);
-                }
-            }
-            Ok(QueryValue::Null)
-        }
-        JsonbItemType::Null => Ok(QueryValue::Null),
-        _ => Err(jaq_core::Error::index(
-            QueryValue::from_owned(raw.to_owned()),
-            index.clone().into_owned_static(),
-        )),
-    }
-}
-
-fn raw_range<'a>(
-    raw: RawJsonb<'a>,
-    range: Range<&QueryValue<'a>>,
-) -> ValR<QueryValue<'static>, QueryValue<'static>> {
-    match raw.jsonb_item_type().map_err(jsonb_error)? {
-        JsonbItemType::Array(len) => {
-            let start = range_bound(range.start, len, 0)?;
-            let end = range_bound(range.end, len, len)?;
-            let take = end.saturating_sub(start);
-            let iter = ArrayIterator::new(raw)
-                .map_err(jsonb_error)?
-                .ok_or_else(|| str_error("cannot use value as array"))?;
-            iter.skip(start)
-                .take(take)
-                .map(|item| {
-                    item.map_err(jsonb_error)
-                        .and_then(|item| item_to_query_value(item).map_err(jsonb_error))
-                        .map(QueryValue::into_owned_static)
-                })
-                .collect::<ValR<Vec<_>, _>>()
-                .map(|values| QueryValue::Array(Rc::new(values)))
-        }
-        JsonbItemType::String => {
-            let value = raw
-                .as_str()
-                .map_err(jsonb_error)?
-                .ok_or_else(|| str_error("cannot use value as string"))?;
-            string_range(value, range)
-        }
-        _ => Err(jaq_core::Error::typ(
-            QueryValue::from_owned(raw.to_owned()),
-            "rangeable (array or string)",
-        )),
-    }
-}
-
-fn raw_to_query_value(raw: RawJsonb<'_>) -> ValR<QueryValue<'static>, QueryValue<'static>> {
-    match raw.jsonb_item_type().map_err(jsonb_error)? {
-        JsonbItemType::Array(_) => raw_values(raw).map(|values| QueryValue::Array(Rc::new(values))),
-        JsonbItemType::Object(_) => raw_key_values(raw).map(|values| {
-            QueryValue::Object(Rc::new(values.into_iter().collect::<BTreeMap<_, _>>()))
-        }),
-        _ => JsonbItem::from_raw_jsonb(raw)
-            .map_err(jsonb_error)
-            .and_then(|item| item_to_query_value(item).map_err(jsonb_error))
-            .map(QueryValue::into_owned_static),
-    }
-}
-
-fn materialize(value: QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'static>> {
-    match value {
-        QueryValue::Raw(raw) => raw_to_query_value(raw),
-        QueryValue::Owned(owned) => raw_to_query_value(owned.as_raw()),
-        value => Ok(value.into_owned_static()),
-    }
-}
-
-fn materialize_current<'a>(value: QueryValue<'a>) -> ValR<QueryValue<'a>> {
-    materialize(value).map(QueryValue::from_static)
-}
+use super::access::abs_index;
+use super::access::jsonb_error;
+use super::access::range_bound;
+use super::access::str_error;
+use super::access::string_range;
 
 fn range_from_object<'a, 'b>(index: &'b QueryValue<'a>) -> Option<Range<&'b QueryValue<'a>>> {
     let QueryValue::Object(object) = index else {
@@ -307,20 +45,6 @@ fn range_from_object<'a, 'b>(index: &'b QueryValue<'a>) -> Option<Range<&'b Quer
     let start = object.get(&QueryValue::from("start".to_string()));
     let end = object.get(&QueryValue::from("end".to_string()));
     Some(start..end)
-}
-
-fn into_array<'a>(value: QueryValue<'a>) -> ValR<Rc<Vec<QueryValue<'a>>>, QueryValue<'a>> {
-    match materialize_current(value)? {
-        QueryValue::Array(values) => Ok(values),
-        value => Err(jaq_core::Error::typ(value, "array")),
-    }
-}
-
-fn into_string<'a>(value: QueryValue<'a>) -> ValR<String, QueryValue<'a>> {
-    match materialize_current(value)? {
-        QueryValue::String(value) => Ok(value.into_owned()),
-        value => Err(jaq_core::Error::typ(value, "string")),
-    }
 }
 
 fn repeat_string<'a>(value: Cow<'a, str>, count: Number) -> ValR<QueryValue<'a>> {
@@ -356,10 +80,10 @@ fn merge_object<'a>(
     right: &BTreeMap<QueryValue<'a>, QueryValue<'a>>,
 ) -> ValR<(), QueryValue<'a>> {
     for (key, right_value) in right {
-        let right_value = materialize_current(right_value.clone())?;
+        let right_value = right_value.clone().materialize_current()?;
         match left.get_mut(key) {
             Some(left_value) => {
-                let left_materialized = materialize_current(left_value.clone())?;
+                let left_materialized = left_value.clone().materialize_current()?;
                 match (left_materialized, right_value) {
                     (QueryValue::Object(mut left_object), QueryValue::Object(right_object)) => {
                         merge_object(Rc::make_mut(&mut left_object), &right_object)?;
@@ -387,14 +111,6 @@ fn into_static_iter<T>(items: Vec<T>) -> Box<dyn Iterator<Item = T> + 'static> {
     }
 }
 
-fn str_error<'a>(message: impl ToString) -> jaq_core::Error<QueryValue<'a>> {
-    jaq_core::Error::str(message)
-}
-
-fn jsonb_error<'a>(error: Error) -> jaq_core::Error<QueryValue<'a>> {
-    str_error(error)
-}
-
 impl<'a> jaq_core::ValT for QueryValue<'a> {
     fn from_num(number: &str) -> ValR<Self> {
         match parse_value(number.as_bytes()).map_err(jsonb_error)? {
@@ -409,8 +125,8 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
 
     fn key_values(self) -> jaq_core::box_iter::BoxIter<'static, ValR<(Self, Self), Self>> {
         let values = match self {
-            Self::Raw(raw) => raw_key_values(raw),
-            Self::Owned(owned) => raw_key_values(owned.as_raw()),
+            Self::Raw(raw) => raw.raw_key_values(),
+            Self::Owned(owned) => owned.as_raw().raw_key_values(),
             Self::Array(values) => Ok(values
                 .iter()
                 .cloned()
@@ -439,8 +155,8 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
 
     fn values(self) -> Box<dyn Iterator<Item = ValR<Self>>> {
         let values = match self {
-            Self::Raw(raw) => raw_values(raw),
-            Self::Owned(owned) => raw_values(owned.as_raw()),
+            Self::Raw(raw) => raw.raw_values(),
+            Self::Owned(owned) => owned.as_raw().raw_values(),
             Self::Array(values) => Ok(values
                 .iter()
                 .cloned()
@@ -464,11 +180,11 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
 
     fn index(self, index: &Self) -> ValR<Self> {
         match self {
-            Self::Raw(raw) => raw_index(raw, index).map(QueryValue::from_static),
-            Self::Owned(owned) => raw_index(owned.as_raw(), index).map(QueryValue::from_static),
+            Self::Raw(raw) => raw.raw_index(index).map(QueryValue::from_static),
+            Self::Owned(owned) => owned.as_raw().raw_index(index).map(QueryValue::from_static),
             Self::Null => Ok(Self::Null),
             Self::Array(values) => {
-                let Some(index_value) = as_isize(index) else {
+                let Some(index_value) = index.as_isize().ok().flatten() else {
                     return Err(jaq_core::Error::index(Self::Array(values), index.clone()));
                 };
                 let Some(index) = abs_index(index_value, values.len()) else {
@@ -488,8 +204,8 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
 
     fn range(self, range: Range<&Self>) -> ValR<Self> {
         match self {
-            Self::Raw(raw) => raw_range(raw, range).map(QueryValue::from_static),
-            Self::Owned(owned) => raw_range(owned.as_raw(), range).map(QueryValue::from_static),
+            Self::Raw(raw) => raw.raw_range(range).map(QueryValue::from_static),
+            Self::Owned(owned) => owned.as_raw().raw_range(range).map(QueryValue::from_static),
             Self::Array(values) => {
                 let start = range_bound(range.start, values.len(), 0)?;
                 let end = range_bound(range.end, values.len(), values.len())?;
@@ -515,7 +231,7 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
         opt: Opt,
         f: impl Fn(Self) -> I,
     ) -> ValX<'b, Self> {
-        match materialize_current(self)? {
+        match self.materialize_current()? {
             Self::Array(values) => {
                 let iter = values.iter().cloned().flat_map(f);
                 Ok(Self::Array(Rc::new(
@@ -543,7 +259,7 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
         opt: Opt,
         f: impl Fn(Self) -> I,
     ) -> ValX<'b, Self> {
-        let self_value = materialize_current(self)?;
+        let self_value = self.materialize_current()?;
         if matches!(self_value, Self::String(_) | Self::Array(_)) {
             if let Some(range) = range_from_object(index) {
                 return self_value.map_range(range, opt, f);
@@ -563,7 +279,11 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
                 Ok(Self::Object(values.clone().into()))
             }
             Self::Array(mut values) => {
-                let Some(index) = as_isize(index).and_then(|index| abs_index(index, values.len()))
+                let Some(index) = index
+                    .as_isize()
+                    .ok()
+                    .flatten()
+                    .and_then(|index| abs_index(index, values.len()))
                 else {
                     return opt.fail(Self::Array(values), |_| {
                         jaq_core::Exn::from(jaq_core::Error::str(format!(
@@ -590,7 +310,7 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
         opt: Opt,
         f: impl Fn(Self) -> I,
     ) -> ValX<'b, Self> {
-        match materialize_current(self)? {
+        match self.materialize_current()? {
             Self::Array(mut values) => {
                 let start = match range_bound(range.start, values.len(), 0) {
                     Ok(start) => start,
@@ -609,7 +329,7 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
                     values.iter().skip(start).take(take).cloned().collect(),
                 ));
                 let replacement = match f(selected).next().transpose()? {
-                    Some(value) => into_array(value).map_err(jaq_core::Exn::from)?,
+                    Some(value) => value.into_array().map_err(jaq_core::Exn::from)?,
                     None => Rc::new(Vec::new()),
                 };
                 Rc::make_mut(&mut values).splice(start..start + take, replacement.iter().cloned());
@@ -634,7 +354,7 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
                     chars.iter().skip(start).take(take).collect::<String>(),
                 ));
                 let replacement = match f(selected).next().transpose()? {
-                    Some(value) => into_string(value).map_err(jaq_core::Exn::from)?,
+                    Some(value) => value.into_string_value().map_err(jaq_core::Exn::from)?,
                     None => String::new(),
                 };
                 let result = chars
@@ -665,22 +385,28 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
 
 impl<'a> jaq_std::ValT for QueryValue<'a> {
     fn into_seq<S: FromIterator<Self>>(self) -> std::result::Result<S, Self> {
-        match materialize_current(self.clone()).unwrap_or(self) {
+        match self.clone().materialize_current().unwrap_or(self) {
             Self::Array(values) => Ok(values.iter().cloned().collect()),
             value => Err(value),
         }
     }
 
     fn is_int(&self) -> bool {
-        as_number(self).is_some_and(|number| number.as_i64().is_some() || number.as_u64().is_some())
+        self.as_number()
+            .ok()
+            .flatten()
+            .is_some_and(|number| number.as_i64().is_some() || number.as_u64().is_some())
     }
 
     fn as_isize(&self) -> Option<isize> {
-        as_isize(self)
+        QueryValue::as_isize(self).ok().flatten()
     }
 
     fn as_f64(&self) -> Option<f64> {
-        as_number(self).map(|number| number.as_f64())
+        self.as_number()
+            .ok()
+            .flatten()
+            .map(|number| number.as_f64())
     }
 
     fn is_utf8_str(&self) -> bool {
@@ -690,8 +416,8 @@ impl<'a> jaq_std::ValT for QueryValue<'a> {
     fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::String(value) => Some(value.as_bytes()),
-            Self::Raw(raw) => raw_str_bytes(*raw),
-            Self::Owned(owned) => raw_str_bytes(owned.as_raw()),
+            Self::Raw(raw) => raw.raw_str_bytes(),
+            Self::Owned(owned) => owned.as_raw().raw_str_bytes(),
             _ => None,
         }
     }
@@ -716,9 +442,12 @@ impl<'a> Add for QueryValue<'a> {
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Self::Null, value) | (value, Self::Null) => Ok(value),
-            (left, right) => match (as_number(&left), as_number(&right)) {
+            (left, right) => match (
+                left.as_number().ok().flatten(),
+                right.as_number().ok().flatten(),
+            ) {
                 (Some(left), Some(right)) => left.add(right).map(Self::Number).map_err(jsonb_error),
-                _ => match (materialize_current(left)?, materialize_current(right)?) {
+                _ => match (left.materialize_current()?, right.materialize_current()?) {
                     (Self::String(left), Self::String(right)) => Ok(Self::String(Cow::Owned(
                         format!("{}{}", left.as_ref(), right.as_ref()),
                     ))),
@@ -746,9 +475,12 @@ impl<'a> Sub for QueryValue<'a> {
     type Output = ValR<Self>;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        match (as_number(&self), as_number(&rhs)) {
+        match (
+            self.as_number().ok().flatten(),
+            rhs.as_number().ok().flatten(),
+        ) {
             (Some(left), Some(right)) => left.sub(right).map(Self::Number).map_err(jsonb_error),
-            _ => match (materialize_current(self)?, materialize_current(rhs)?) {
+            _ => match (self.materialize_current()?, rhs.materialize_current()?) {
                 (Self::Array(mut left), Self::Array(right)) => {
                     let right = right.iter().collect::<std::collections::BTreeSet<_>>();
                     Rc::make_mut(&mut left).retain(|value| !right.contains(value));
@@ -764,9 +496,12 @@ impl<'a> Mul for QueryValue<'a> {
     type Output = ValR<Self>;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        match (as_number(&self), as_number(&rhs)) {
+        match (
+            self.as_number().ok().flatten(),
+            rhs.as_number().ok().flatten(),
+        ) {
             (Some(left), Some(right)) => left.mul(right).map(Self::Number).map_err(jsonb_error),
-            _ => match (materialize_current(self)?, materialize_current(rhs)?) {
+            _ => match (self.materialize_current()?, rhs.materialize_current()?) {
                 (Self::String(value), Self::Number(count))
                 | (Self::Number(count), Self::String(value)) => repeat_string(value, count),
                 (Self::Object(mut left), Self::Object(right)) => {
@@ -783,11 +518,14 @@ impl<'a> Div for QueryValue<'a> {
     type Output = ValR<Self>;
 
     fn div(self, rhs: Self) -> Self::Output {
-        match (as_number(&self), as_number(&rhs)) {
+        match (
+            self.as_number().ok().flatten(),
+            rhs.as_number().ok().flatten(),
+        ) {
             (Some(left), Some(right)) => Ok(Self::Number(Number::Float64(
                 left.as_f64() / right.as_f64(),
             ))),
-            _ => match (materialize_current(self)?, materialize_current(rhs)?) {
+            _ => match (self.materialize_current()?, rhs.materialize_current()?) {
                 (Self::String(left), Self::String(right)) => Ok(split_string(left, right)),
                 (left, right) => Err(jaq_core::Error::math(left, jaq_core::ops::Math::Div, right)),
             },
@@ -799,7 +537,10 @@ impl<'a> Rem for QueryValue<'a> {
     type Output = ValR<Self>;
 
     fn rem(self, rhs: Self) -> Self::Output {
-        match (as_number(&self), as_number(&rhs)) {
+        match (
+            self.as_number().ok().flatten(),
+            rhs.as_number().ok().flatten(),
+        ) {
             (Some(left), Some(right))
                 if matches!(left, Number::Float64(_)) || matches!(right, Number::Float64(_)) =>
             {
@@ -809,8 +550,8 @@ impl<'a> Rem for QueryValue<'a> {
             }
             (Some(left), Some(right)) => left.rem(right).map(Self::Number).map_err(jsonb_error),
             _ => {
-                let left = materialize_current(self)?;
-                let right = materialize_current(rhs)?;
+                let left = self.materialize_current()?;
+                let right = rhs.materialize_current()?;
                 Err(jaq_core::Error::math(left, jaq_core::ops::Math::Rem, right))
             }
         }
@@ -821,9 +562,9 @@ impl<'a> Neg for QueryValue<'a> {
     type Output = ValR<Self>;
 
     fn neg(self) -> Self::Output {
-        match as_number(&self) {
+        match self.as_number().ok().flatten() {
             Some(number) => number.neg().map(Self::Number).map_err(jsonb_error),
-            None => Err(jaq_core::Error::typ(materialize_current(self)?, "number")),
+            None => Err(jaq_core::Error::typ(self.materialize_current()?, "number")),
         }
     }
 }

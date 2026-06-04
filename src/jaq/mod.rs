@@ -14,8 +14,10 @@
 
 //! jaq integration for executing filters directly over JSONB values.
 
+mod access;
 mod data;
 mod funs;
+mod raw;
 mod value;
 
 #[cfg(test)]
