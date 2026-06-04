@@ -1,36 +1,54 @@
+// Copyright 2023 Datafuse Labs.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
+use std::ops::Add;
+use std::ops::Div;
+use std::ops::Mul;
+use std::ops::Neg;
+use std::ops::Rem;
+use std::ops::Sub;
 use std::rc::Rc;
 
 use jaq_core::path::Opt;
-use jaq_core::val::{Range, ValR, ValX};
+use jaq_core::val::Range;
+use jaq_core::val::ValR;
+use jaq_core::val::ValX;
 
+use crate::core::ArrayIterator;
+use crate::core::JsonbItem;
+use crate::core::JsonbItemType;
+use crate::core::ObjectIterator;
+use crate::core::ObjectValueIterator;
 use crate::core::QueryValue;
-use crate::core::{ArrayIterator, JsonbItem, JsonbItemType, ObjectIterator, ObjectValueIterator};
-use crate::{Number, OwnedJsonb, RawJsonb};
+use crate::error::Result as JsonbResult;
+use crate::Error;
+use crate::Number;
+use crate::OwnedJsonb;
+use crate::RawJsonb;
 
 fn as_number(value: &QueryValue<'_>) -> Option<Number> {
-    match value {
-        QueryValue::Number(number) => Some(number.clone()),
-        QueryValue::Raw(raw) => raw.as_number().ok().flatten(),
-        QueryValue::Owned(owned) => owned.as_raw().as_number().ok().flatten(),
-        _ => None,
-    }
+    value.as_number().ok().flatten()
 }
 
 fn as_key_string(value: &QueryValue<'_>) -> Option<String> {
-    match value {
-        QueryValue::String(value) => Some(value.to_string()),
-        QueryValue::Raw(raw) => raw.as_str().ok().flatten().map(|value| value.into_owned()),
-        QueryValue::Owned(owned) => owned
-            .as_raw()
-            .as_str()
-            .ok()
-            .flatten()
-            .map(|value| value.into_owned()),
-        _ => None,
-    }
+    value
+        .as_string()
+        .ok()
+        .flatten()
+        .map(|value| value.into_owned())
 }
 
 fn raw_str_bytes(raw: RawJsonb<'_>) -> Option<&[u8]> {
@@ -92,7 +110,7 @@ fn string_range<'a>(
     )))
 }
 
-fn item_to_query_value<'a>(item: JsonbItem<'a>) -> crate::error::Result<QueryValue<'a>> {
+fn item_to_query_value<'a>(item: JsonbItem<'a>) -> JsonbResult<QueryValue<'a>> {
     match item {
         JsonbItem::Null => Ok(QueryValue::Null),
         JsonbItem::Boolean(value) => Ok(QueryValue::Bool(value)),
@@ -371,7 +389,7 @@ fn str_error<'a>(message: impl ToString) -> jaq_core::Error<QueryValue<'a>> {
     jaq_core::Error::str(message)
 }
 
-fn jsonb_error<'a>(error: crate::Error) -> jaq_core::Error<QueryValue<'a>> {
+fn jsonb_error<'a>(error: Error) -> jaq_core::Error<QueryValue<'a>> {
     str_error(error)
 }
 
@@ -504,7 +522,9 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
         match materialize_current(self)? {
             Self::Array(values) => {
                 let iter = values.iter().cloned().flat_map(f);
-                Ok(Self::Array(Rc::new(iter.collect::<Result<_, _>>()?)))
+                Ok(Self::Array(Rc::new(
+                    iter.collect::<std::result::Result<_, _>>()?,
+                )))
             }
             Self::Object(values) => {
                 let mut result = BTreeMap::new();
@@ -648,7 +668,7 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
 }
 
 impl<'a> jaq_std::ValT for QueryValue<'a> {
-    fn into_seq<S: FromIterator<Self>>(self) -> Result<S, Self> {
+    fn into_seq<S: FromIterator<Self>>(self) -> std::result::Result<S, Self> {
         match materialize_current(self.clone()).unwrap_or(self) {
             Self::Array(values) => Ok(values.iter().cloned().collect()),
             value => Err(value),
@@ -668,9 +688,7 @@ impl<'a> jaq_std::ValT for QueryValue<'a> {
     }
 
     fn is_utf8_str(&self) -> bool {
-        matches!(self, Self::String(_))
-            || matches!(self, Self::Raw(raw) if raw.as_str().ok().flatten().is_some())
-            || matches!(self, Self::Owned(owned) if owned.as_raw().as_str().ok().flatten().is_some())
+        self.as_string().ok().flatten().is_some()
     }
 
     fn as_bytes(&self) -> Option<&[u8]> {
@@ -821,12 +839,19 @@ impl<'a> Neg for QueryValue<'a> {
 
 #[cfg(test)]
 mod tests {
-    use jaq_core::load::{Arena, File, Loader};
+    use jaq_core::load::Arena;
+    use jaq_core::load::File;
+    use jaq_core::load::Loader;
+    use jaq_core::unwrap_valr;
+    use jaq_core::Compiler;
+    use jaq_core::Ctx;
     use jaq_core::ValT;
-    use jaq_core::{unwrap_valr, Compiler, Ctx, Vars};
+    use jaq_core::Vars;
 
     use crate::core::QueryValue;
-    use crate::jaq::{defs, funs, JsonbData};
+    use crate::jaq::defs;
+    use crate::jaq::funs;
+    use crate::jaq::JsonbData;
     use crate::OwnedJsonb;
 
     fn query_value(json: &str) -> QueryValue<'static> {

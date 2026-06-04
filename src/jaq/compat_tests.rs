@@ -1,8 +1,15 @@
-use jaq_core::load::{Arena, File, Loader};
-use jaq_core::{unwrap_valr, Compiler, Ctx, Vars};
+use jaq_core::load::Arena;
+use jaq_core::load::File;
+use jaq_core::load::Loader;
+use jaq_core::unwrap_valr;
+use jaq_core::Compiler;
+use jaq_core::Ctx;
+use jaq_core::Vars;
 
 use crate::core::QueryValue;
-use crate::jaq::{defs, funs, JsonbData};
+use crate::jaq::defs;
+use crate::jaq::funs;
+use crate::jaq::JsonbData;
 use crate::OwnedJsonb;
 
 fn run_filter(filter: &'static str, input: &str) -> Vec<String> {

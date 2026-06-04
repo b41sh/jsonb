@@ -1,10 +1,31 @@
+// Copyright 2023 Datafuse Labs.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::rc::Rc;
 
-use crate::{Error, Number, OwnedJsonb, RawJsonb, Value};
+use crate::core::JsonbItemType;
+use crate::error::Result;
+use crate::Error;
+use crate::Number;
+use crate::OwnedJsonb;
+use crate::RawJsonb;
+use crate::Value;
 
 /// JSONB-backed value used by jaq.
 #[derive(Clone, Debug)]
@@ -36,7 +57,7 @@ impl<'a> QueryValue<'a> {
         Self::Owned(owned)
     }
 
-    pub fn into_owned_jsonb(self) -> crate::error::Result<OwnedJsonb> {
+    pub fn into_owned_jsonb(self) -> Result<OwnedJsonb> {
         match self {
             Self::Raw(raw) => Ok(raw.to_owned()),
             Self::Owned(owned) => Ok(owned),
@@ -45,7 +66,7 @@ impl<'a> QueryValue<'a> {
                     .iter()
                     .cloned()
                     .map(QueryValue::into_owned_jsonb)
-                    .collect::<crate::error::Result<Vec<_>>>()?;
+                    .collect::<Result<Vec<_>>>()?;
                 OwnedJsonb::build_array(values.iter().map(|value| value.as_raw()))
             }
             Self::Object(values) => {
@@ -57,7 +78,7 @@ impl<'a> QueryValue<'a> {
                         };
                         Ok((key, value.clone().into_owned_jsonb()?))
                     })
-                    .collect::<crate::error::Result<Vec<_>>>()?;
+                    .collect::<Result<Vec<_>>>()?;
                 OwnedJsonb::build_object(
                     entries
                         .iter()
@@ -73,16 +94,41 @@ impl<'a> QueryValue<'a> {
         }
     }
 
-    pub(crate) fn as_object_key(&self) -> crate::error::Result<Option<String>> {
+    pub(crate) fn as_object_key(&self) -> Result<Option<String>> {
+        self.as_string()
+            .map(|value| value.map(|value| value.into_owned()))
+    }
+
+    pub(crate) fn as_number(&self) -> Result<Option<Number>> {
         match self {
-            Self::String(value) => Ok(Some(value.to_string())),
-            Self::Raw(raw) => raw.as_str().map(|s| s.map(|s| s.into_owned())),
-            Self::Owned(owned) => owned.as_raw().as_str().map(|s| s.map(|s| s.into_owned())),
+            Self::Number(value) => Ok(Some(value.clone())),
+            Self::Raw(raw) => raw.as_number(),
+            Self::Owned(owned) => owned.as_raw().as_number(),
             _ => Ok(None),
         }
     }
 
-    #[allow(dead_code)]
+    pub(crate) fn as_string(&self) -> Result<Option<Cow<'_, str>>> {
+        match self {
+            Self::String(value) => Ok(Some(Cow::Borrowed(value.as_ref()))),
+            Self::Raw(raw) => raw.as_str(),
+            Self::Owned(owned) => owned
+                .as_raw()
+                .as_str()
+                .map(|value| value.map(|value| Cow::Owned(value.into_owned()))),
+            _ => Ok(None),
+        }
+    }
+
+    pub(crate) fn as_bool(&self) -> Result<Option<bool>> {
+        match self {
+            Self::Bool(value) => Ok(Some(*value)),
+            Self::Raw(raw) => raw.as_bool(),
+            Self::Owned(owned) => owned.as_raw().as_bool(),
+            _ => Ok(None),
+        }
+    }
+
     pub(crate) fn into_owned_static(self) -> QueryValue<'static> {
         match self {
             Self::Raw(raw) => QueryValue::Owned(raw.to_owned()),
@@ -112,7 +158,6 @@ impl<'a> QueryValue<'a> {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn from_static(value: QueryValue<'static>) -> Self {
         match value {
             QueryValue::Raw(raw) => Self::Owned(raw.to_owned()),
@@ -142,7 +187,7 @@ impl<'a> QueryValue<'a> {
         }
     }
 
-    fn into_jsonb_value(self) -> crate::error::Result<Value<'static>> {
+    fn into_jsonb_value(self) -> Result<Value<'static>> {
         match self {
             Self::Null => Ok(Value::Null),
             Self::Bool(value) => Ok(Value::Bool(value)),
@@ -152,7 +197,7 @@ impl<'a> QueryValue<'a> {
                 .iter()
                 .cloned()
                 .map(QueryValue::into_jsonb_value)
-                .collect::<crate::error::Result<Vec<_>>>()
+                .collect::<Result<Vec<_>>>()
                 .map(Value::Array),
             Self::Object(values) => {
                 let mut object = BTreeMap::new();
@@ -179,26 +224,26 @@ impl<'a> QueryValue<'a> {
             Self::Raw(raw) => raw
                 .jsonb_item_type()
                 .map(|typ| match typ {
-                    crate::core::JsonbItemType::Null => 0,
-                    crate::core::JsonbItemType::Boolean => 1,
-                    crate::core::JsonbItemType::Number => 2,
-                    crate::core::JsonbItemType::String => 3,
-                    crate::core::JsonbItemType::Object(_) => 4,
-                    crate::core::JsonbItemType::Array(_) => 5,
-                    crate::core::JsonbItemType::Extension => 6,
+                    JsonbItemType::Null => 0,
+                    JsonbItemType::Boolean => 1,
+                    JsonbItemType::Number => 2,
+                    JsonbItemType::String => 3,
+                    JsonbItemType::Object(_) => 4,
+                    JsonbItemType::Array(_) => 5,
+                    JsonbItemType::Extension => 6,
                 })
                 .unwrap_or(6),
             Self::Owned(owned) => owned
                 .as_raw()
                 .jsonb_item_type()
                 .map(|typ| match typ {
-                    crate::core::JsonbItemType::Null => 0,
-                    crate::core::JsonbItemType::Boolean => 1,
-                    crate::core::JsonbItemType::Number => 2,
-                    crate::core::JsonbItemType::String => 3,
-                    crate::core::JsonbItemType::Object(_) => 4,
-                    crate::core::JsonbItemType::Array(_) => 5,
-                    crate::core::JsonbItemType::Extension => 6,
+                    JsonbItemType::Null => 0,
+                    JsonbItemType::Boolean => 1,
+                    JsonbItemType::Number => 2,
+                    JsonbItemType::String => 3,
+                    JsonbItemType::Object(_) => 4,
+                    JsonbItemType::Array(_) => 5,
+                    JsonbItemType::Extension => 6,
                 })
                 .unwrap_or(6),
         }
@@ -264,36 +309,6 @@ impl<'a> QueryValue<'a> {
             }
         }
     }
-
-    fn as_number_value(&self) -> crate::error::Result<Option<Number>> {
-        match self {
-            Self::Number(value) => Ok(Some(value.clone())),
-            Self::Raw(raw) => raw.as_number(),
-            Self::Owned(owned) => owned.as_raw().as_number(),
-            _ => Ok(None),
-        }
-    }
-
-    fn as_string_value(&self) -> crate::error::Result<Option<Cow<'_, str>>> {
-        match self {
-            Self::String(value) => Ok(Some(Cow::Borrowed(value.as_ref()))),
-            Self::Raw(raw) => raw.as_str(),
-            Self::Owned(owned) => owned
-                .as_raw()
-                .as_str()
-                .map(|value| value.map(|value| Cow::Owned(value.into_owned()))),
-            _ => Ok(None),
-        }
-    }
-
-    fn as_bool_value(&self) -> crate::error::Result<Option<bool>> {
-        match self {
-            Self::Bool(value) => Ok(Some(*value)),
-            Self::Raw(raw) => raw.as_bool(),
-            Self::Owned(owned) => owned.as_raw().as_bool(),
-            _ => Ok(None),
-        }
-    }
 }
 
 impl Display for QueryValue<'_> {
@@ -335,20 +350,20 @@ impl Ord for QueryValue<'_> {
             _ => match self.json_type_rank() {
                 0 => Ordering::Equal,
                 1 => self
-                    .as_bool_value()
+                    .as_bool()
                     .ok()
                     .flatten()
-                    .cmp(&other.as_bool_value().ok().flatten()),
+                    .cmp(&other.as_bool().ok().flatten()),
                 2 => self
-                    .as_number_value()
+                    .as_number()
                     .ok()
                     .flatten()
-                    .cmp(&other.as_number_value().ok().flatten()),
+                    .cmp(&other.as_number().ok().flatten()),
                 3 => self
-                    .as_string_value()
+                    .as_string()
                     .ok()
                     .flatten()
-                    .cmp(&other.as_string_value().ok().flatten()),
+                    .cmp(&other.as_string().ok().flatten()),
                 _ => self.to_json_string().cmp(&other.to_json_string()),
             },
         }
