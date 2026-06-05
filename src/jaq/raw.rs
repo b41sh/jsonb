@@ -26,10 +26,13 @@ use crate::core::ObjectIterator;
 use crate::core::ObjectValueIterator;
 use crate::core::QueryValue;
 use crate::error::Result as JsonbResult;
+use crate::ExtensionValue;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
 
 use super::access::abs_index;
+use super::access::array_subsequence_indices;
+use super::access::bytes_range;
 use super::access::jsonb_error;
 use super::access::range_bound;
 use super::access::str_error;
@@ -43,9 +46,10 @@ pub(super) fn item_to_query_value<'a>(item: JsonbItem<'a>) -> JsonbResult<QueryV
         JsonbItem::String(value) => Ok(QueryValue::String(Cow::Owned(value.into_owned()))),
         JsonbItem::Raw(raw) => Ok(QueryValue::from_owned(raw.to_owned())),
         JsonbItem::Owned(owned) => Ok(QueryValue::from_owned(owned)),
-        JsonbItem::Extension(value) => {
-            OwnedJsonb::from_item(JsonbItem::Extension(value)).map(QueryValue::from_owned)
-        }
+        JsonbItem::Extension(value) => match value.as_extension_value()? {
+            ExtensionValue::Binary(value) => Ok(QueryValue::Bytes(Cow::Owned(value.to_vec()))),
+            _ => OwnedJsonb::from_item(JsonbItem::Extension(value)).map(QueryValue::from_owned),
+        },
     }
 }
 
@@ -58,6 +62,20 @@ impl<'a> RawJsonb<'a> {
             },
             _ => None,
         }
+    }
+
+    pub(super) fn raw_binary_bytes(self) -> Option<&'a [u8]> {
+        match JsonbItem::from_raw_jsonb(self).ok()? {
+            JsonbItem::Extension(value) => match value.as_extension_value().ok()? {
+                ExtensionValue::Binary(value) => Some(value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub(super) fn raw_bytes(self) -> Option<&'a [u8]> {
+        self.raw_binary_bytes().or_else(|| self.raw_str_bytes())
     }
 
     pub(super) fn raw_array_values(self) -> ValR<Vec<QueryValue<'static>>, QueryValue<'static>> {
@@ -158,6 +176,15 @@ impl<'a> RawJsonb<'a> {
     ) -> ValR<QueryValue<'static>, QueryValue<'static>> {
         match self.jsonb_item_type().map_err(jsonb_error)? {
             JsonbItemType::Array(len) => {
+                if let Some(range) = index.as_range_object_owned()? {
+                    return self.raw_range(range.start.as_ref()..range.end.as_ref());
+                }
+
+                if let Some(needle) = index.as_array_values_owned()? {
+                    let values = self.raw_array_values()?;
+                    return Ok(array_subsequence_indices(&values, &needle));
+                }
+
                 let Some(index_value) = index.as_isize().ok().flatten() else {
                     return Err(jaq_core::Error::index(
                         QueryValue::from_owned(self.to_owned()),
@@ -195,6 +222,26 @@ impl<'a> RawJsonb<'a> {
                 }
                 Ok(QueryValue::Null)
             }
+            JsonbItemType::String => {
+                if let Some(range) = index.as_range_object_owned()? {
+                    return self.raw_range(range.start.as_ref()..range.end.as_ref());
+                }
+                Err(jaq_core::Error::index(
+                    QueryValue::from_owned(self.to_owned()),
+                    index.clone().into_owned_static(),
+                ))
+            }
+            JsonbItemType::Extension => {
+                if self.raw_binary_bytes().is_some() {
+                    if let Some(range) = index.as_range_object_owned()? {
+                        return self.raw_range(range.start.as_ref()..range.end.as_ref());
+                    }
+                }
+                Err(jaq_core::Error::index(
+                    QueryValue::from_owned(self.to_owned()),
+                    index.clone().into_owned_static(),
+                ))
+            }
             JsonbItemType::Null => Ok(QueryValue::Null),
             _ => Err(jaq_core::Error::index(
                 QueryValue::from_owned(self.to_owned()),
@@ -231,6 +278,13 @@ impl<'a> RawJsonb<'a> {
                     .map_err(jsonb_error)?
                     .ok_or_else(|| str_error("cannot use value as string"))?;
                 string_range(value, range)
+            }
+            JsonbItemType::Extension => {
+                let value = self
+                    .as_binary()
+                    .map_err(jsonb_error)?
+                    .ok_or_else(|| str_error("cannot use value as string"))?;
+                bytes_range(Cow::Owned(value), range)
             }
             _ => Err(jaq_core::Error::typ(
                 QueryValue::from_owned(self.to_owned()),

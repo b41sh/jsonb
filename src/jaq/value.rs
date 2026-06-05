@@ -33,19 +33,12 @@ use crate::Number;
 use crate::Value;
 
 use super::access::abs_index;
+use super::access::array_subsequence_indices;
+use super::access::bytes_range;
 use super::access::jsonb_error;
 use super::access::range_bound;
 use super::access::str_error;
 use super::access::string_range;
-
-fn range_from_object<'a, 'b>(index: &'b QueryValue<'a>) -> Option<Range<&'b QueryValue<'a>>> {
-    let QueryValue::Object(object) = index else {
-        return None;
-    };
-    let start = object.get(&QueryValue::from("start".to_string()));
-    let end = object.get(&QueryValue::from("end".to_string()));
-    Some(start..end)
-}
 
 fn repeat_string<'a>(value: Cow<'a, str>, count: Number) -> ValR<QueryValue<'a>> {
     let Some(count) = count.as_i64() else {
@@ -56,6 +49,17 @@ fn repeat_string<'a>(value: Cow<'a, str>, count: Number) -> ValR<QueryValue<'a>>
     }
     let count = usize::try_from(count).map_err(str_error)?;
     Ok(QueryValue::String(Cow::Owned(value.repeat(count))))
+}
+
+fn repeat_bytes<'a>(value: Cow<'a, [u8]>, count: Number) -> ValR<QueryValue<'a>> {
+    let Some(count) = count.as_i64() else {
+        return Err(jaq_core::Error::typ(QueryValue::Number(count), "integer"));
+    };
+    if count <= 0 {
+        return Ok(QueryValue::Null);
+    }
+    let count = usize::try_from(count).map_err(str_error)?;
+    Ok(QueryValue::Bytes(Cow::Owned(value.repeat(count))))
 }
 
 fn split_string<'a>(value: Cow<'a, str>, separator: Cow<'a, str>) -> QueryValue<'a> {
@@ -73,6 +77,40 @@ fn split_string<'a>(value: Cow<'a, str>, separator: Cow<'a, str>) -> QueryValue<
             .collect()
     };
     QueryValue::Array(Rc::new(values))
+}
+
+fn split_bytes<'a>(value: Cow<'a, [u8]>, separator: Cow<'a, [u8]>) -> QueryValue<'a> {
+    fn find_bytes(value: &[u8], separator: &[u8]) -> Option<usize> {
+        value
+            .windows(separator.len())
+            .position(|window| window == separator)
+    }
+
+    let values = if value.is_empty() {
+        Vec::new()
+    } else if separator.is_empty() {
+        value
+            .iter()
+            .map(|value| QueryValue::Bytes(Cow::Owned(vec![*value])))
+            .collect()
+    } else {
+        let mut values = Vec::new();
+        let mut remaining = value.as_ref();
+        while let Some(index) = find_bytes(remaining, separator.as_ref()) {
+            values.push(QueryValue::Bytes(Cow::Owned(remaining[..index].to_vec())));
+            remaining = &remaining[index + separator.len()..];
+        }
+        values.push(QueryValue::Bytes(Cow::Owned(remaining.to_vec())));
+        values
+    };
+    QueryValue::Array(Rc::new(values))
+}
+
+fn integer_number(value: &Number) -> Option<i128> {
+    value
+        .as_i64()
+        .map(i128::from)
+        .or_else(|| value.as_u64().map(|value| value as i128))
 }
 
 fn merge_object<'a>(
@@ -184,6 +222,21 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
             Self::Owned(owned) => owned.as_raw().raw_index(index).map(QueryValue::from_static),
             Self::Null => Ok(Self::Null),
             Self::Array(values) => {
+                if let Some(range) = index.as_range_object_owned()? {
+                    return Self::Array(values).range(range.start.as_ref()..range.end.as_ref());
+                }
+
+                if let Some(needle) = index.as_array_values_owned()? {
+                    let values = values
+                        .iter()
+                        .cloned()
+                        .map(QueryValue::into_owned_static)
+                        .collect::<Vec<_>>();
+                    return Ok(Self::from_static(array_subsequence_indices(
+                        &values, &needle,
+                    )));
+                }
+
                 let Some(index_value) = index.as_isize().ok().flatten() else {
                     return Err(jaq_core::Error::index(Self::Array(values), index.clone()));
                 };
@@ -196,6 +249,18 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
                     .map(QueryValue::into_owned_static)
                     .map(QueryValue::from_static)
                     .unwrap_or(Self::Null))
+            }
+            Self::String(value) => {
+                if let Some(range) = index.as_range_object_owned()? {
+                    return Self::String(value).range(range.start.as_ref()..range.end.as_ref());
+                }
+                Err(jaq_core::Error::index(Self::String(value), index.clone()))
+            }
+            Self::Bytes(value) => {
+                if let Some(range) = index.as_range_object_owned()? {
+                    return Self::Bytes(value).range(range.start.as_ref()..range.end.as_ref());
+                }
+                Err(jaq_core::Error::index(Self::Bytes(value), index.clone()))
             }
             Self::Object(values) => Ok(values.get(index).cloned().unwrap_or(Self::Null)),
             value => Err(jaq_core::Error::index(value, index.clone())),
@@ -222,6 +287,7 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
                 )))
             }
             Self::String(value) => string_range(value, range).map(QueryValue::from_static),
+            Self::Bytes(value) => bytes_range(value, range).map(QueryValue::from_static),
             value => Err(jaq_core::Error::typ(value, "rangeable (array or string)")),
         }
     }
@@ -260,9 +326,12 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
         f: impl Fn(Self) -> I,
     ) -> ValX<'b, Self> {
         let self_value = self.materialize_current()?;
-        if matches!(self_value, Self::String(_) | Self::Array(_)) {
-            if let Some(range) = range_from_object(index) {
-                return self_value.map_range(range, opt, f);
+        if matches!(
+            self_value,
+            Self::String(_) | Self::Bytes(_) | Self::Array(_)
+        ) {
+            if let Some(range) = index.as_range_object_owned()? {
+                return self_value.map_range(range.start.as_ref()..range.end.as_ref(), opt, f);
             }
         };
 
@@ -365,6 +434,29 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
                     .collect::<String>();
                 Ok(Self::String(Cow::Owned(result)))
             }
+            Self::Bytes(value) => {
+                let start = match range_bound(range.start, value.len(), 0) {
+                    Ok(start) => start,
+                    Err(error) => {
+                        return opt.fail(Self::Bytes(value), |_| jaq_core::Exn::from(error))
+                    }
+                };
+                let end = match range_bound(range.end, value.len(), value.len()) {
+                    Ok(end) => end,
+                    Err(error) => {
+                        return opt.fail(Self::Bytes(value), |_| jaq_core::Exn::from(error))
+                    }
+                };
+                let take = end.saturating_sub(start);
+                let mut bytes = value.into_owned();
+                let selected = Self::Bytes(Cow::Owned(bytes[start..start + take].to_vec()));
+                let replacement = match f(selected).next().transpose()? {
+                    Some(value) => value.into_bytes_value().map_err(jaq_core::Exn::from)?,
+                    None => Vec::new(),
+                };
+                bytes.splice(start..start + take, replacement);
+                Ok(Self::Bytes(Cow::Owned(bytes)))
+            }
             value => opt.fail(value, |value| {
                 jaq_core::Exn::from(jaq_core::Error::typ(value, "rangeable (array or string)"))
             }),
@@ -378,6 +470,9 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
     fn into_string(self) -> Self {
         match self {
             Self::String(_) => self,
+            Self::Bytes(value) => {
+                Self::String(Cow::Owned(String::from_utf8_lossy(&value).into_owned()))
+            }
             value => Self::String(Cow::Owned(value.to_string())),
         }
     }
@@ -416,16 +511,20 @@ impl<'a> jaq_std::ValT for QueryValue<'a> {
     fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::String(value) => Some(value.as_bytes()),
-            Self::Raw(raw) => raw.raw_str_bytes(),
-            Self::Owned(owned) => owned.as_raw().raw_str_bytes(),
+            Self::Bytes(value) => Some(value.as_ref()),
+            Self::Raw(raw) => raw.raw_bytes(),
+            Self::Owned(owned) => owned.as_raw().raw_bytes(),
             _ => None,
         }
     }
 
     fn as_sub_str(&self, sub: &[u8]) -> Self {
-        match std::str::from_utf8(sub) {
-            Ok(value) => Self::String(Cow::Owned(value.to_string())),
-            Err(_) => Self::String(Cow::Owned(String::from_utf8_lossy(sub).into_owned())),
+        match self {
+            Self::Bytes(_) => Self::Bytes(Cow::Owned(sub.to_vec())),
+            _ => match std::str::from_utf8(sub) {
+                Ok(value) => Self::String(Cow::Owned(value.to_string())),
+                Err(_) => Self::String(Cow::Owned(String::from_utf8_lossy(sub).into_owned())),
+            },
         }
     }
 
@@ -451,6 +550,11 @@ impl<'a> Add for QueryValue<'a> {
                     (Self::String(left), Self::String(right)) => Ok(Self::String(Cow::Owned(
                         format!("{}{}", left.as_ref(), right.as_ref()),
                     ))),
+                    (Self::Bytes(left), Self::Bytes(right)) => {
+                        let mut bytes = left.into_owned();
+                        bytes.extend_from_slice(&right);
+                        Ok(Self::Bytes(Cow::Owned(bytes)))
+                    }
                     (Self::Array(left), Self::Array(right)) => Ok(Self::Array(Rc::new(
                         left.iter().chain(right.iter()).cloned().collect(),
                     ))),
@@ -504,6 +608,8 @@ impl<'a> Mul for QueryValue<'a> {
             _ => match (self.materialize_current()?, rhs.materialize_current()?) {
                 (Self::String(value), Self::Number(count))
                 | (Self::Number(count), Self::String(value)) => repeat_string(value, count),
+                (Self::Bytes(value), Self::Number(count))
+                | (Self::Number(count), Self::Bytes(value)) => repeat_bytes(value, count),
                 (Self::Object(mut left), Self::Object(right)) => {
                     merge_object(Rc::make_mut(&mut left), &right)?;
                     Ok(Self::Object(left))
@@ -527,6 +633,7 @@ impl<'a> Div for QueryValue<'a> {
             ))),
             _ => match (self.materialize_current()?, rhs.materialize_current()?) {
                 (Self::String(left), Self::String(right)) => Ok(split_string(left, right)),
+                (Self::Bytes(left), Self::Bytes(right)) => Ok(split_bytes(left, right)),
                 (left, right) => Err(jaq_core::Error::math(left, jaq_core::ops::Math::Div, right)),
             },
         }
@@ -541,14 +648,17 @@ impl<'a> Rem for QueryValue<'a> {
             self.as_number().ok().flatten(),
             rhs.as_number().ok().flatten(),
         ) {
-            (Some(left), Some(right))
-                if matches!(left, Number::Float64(_)) || matches!(right, Number::Float64(_)) =>
-            {
-                Ok(Self::Number(Number::Float64(
+            (Some(left), Some(right)) => match (integer_number(&left), integer_number(&right)) {
+                (Some(_), Some(0)) => Err(jaq_core::Error::math(
+                    Self::Number(left),
+                    jaq_core::ops::Math::Rem,
+                    Self::Number(right),
+                )),
+                (Some(_), Some(_)) => left.rem(right).map(Self::Number).map_err(jsonb_error),
+                _ => Ok(Self::Number(Number::Float64(
                     left.as_f64() % right.as_f64(),
-                )))
-            }
-            (Some(left), Some(right)) => left.rem(right).map(Self::Number).map_err(jsonb_error),
+                ))),
+            },
             _ => {
                 let left = self.materialize_current()?;
                 let right = rhs.materialize_current()?;

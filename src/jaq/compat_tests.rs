@@ -100,6 +100,17 @@ fn jaq_json_funs_compat() {
     give("null", "0.0 / 0.0 | tojson", r#""NaN""#);
     give("null", "1.0 / 0.0 | tojson", r#""Infinity""#);
     give("null", "-1.0 / 0.0 | tojson", r#""-Infinity""#);
+    give("null", "0 / 0 | tojson", r#""NaN""#);
+    give("null", "1 / 0 | tojson", r#""Infinity""#);
+    give("null", "-1 / 0 | tojson", r#""-Infinity""#);
+    give("null", "try (3 % 0) catch .", r#""cannot calculate 3 % 0""#);
+    give(
+        "null",
+        "try (-2 % 0) catch .",
+        r#""cannot calculate -2 % 0""#,
+    );
+    give("null", "2.1 % 0 | tojson", r#""NaN""#);
+    give("null", "3 % 2.1 | . * 1000 | round", "900");
 
     give("1.0", "tonumber", "1.0");
     give(r#""1.0""#, "tonumber", "1.0");
@@ -120,6 +131,12 @@ fn jaq_json_funs_compat() {
     give(r#""\"str\"""#, "try toboolean catch -7", "-7");
     give(r#""[3, 4]""#, "try toboolean catch -7", "-7");
     give(r#""{\"a\": 1}""#, "try toboolean catch -7", "-7");
+
+    give(
+        "null",
+        r#"("%FF" | @urid) == ([255] | tobytes | tostring)"#,
+        "true",
+    );
 }
 
 // Ported from jaq/jaq-json/tests/defs.rs.
@@ -215,6 +232,26 @@ fn jaq_core_path_compat() {
     gives(r#""asdf""#, ".[0]?", &[]);
     give("1", "[1, 2, 3][.]", "2");
     gives(r#"{"a": 1, "b": 2}"#, r#".["b", "a"]"#, &["2", "1"]);
+    give("[0, 1, 2, 1, 2, 3]", ".[[1, 2]]", "[1,3]");
+    give(r#"{"a": [1, 2, 1, 2], "b": [1, 2]}"#, ".a[.b]", "[0,2]");
+    give(
+        r#"{"a": [1, 2, 1, 2], "b": [1, 2]}"#,
+        "(.a + [3])[.b]",
+        "[0,2]",
+    );
+    give("[0, 1]", ".[[]]", "[]");
+    give("[0, 1, 2, 3]", r#".[{"start":1,"end":3}]"#, "[1,2]");
+    give(
+        r#"{"a": [0, 1, 2, 3], "r": {"start": 1, "end": 3}}"#,
+        ".a[.r]",
+        "[1,2]",
+    );
+    give(r#""abcd""#, r#".[{"start":1,"end":3}]"#, r#""bc""#);
+    give(
+        "null",
+        r#"[[65], "B", 67, 68] | tobytes | .[{"start":1,"end":3}] | tostring"#,
+        r#""BC""#,
+    );
 
     gives("[0, 1, 2]", ".[]", &["0", "1", "2"]);
     gives(r#"{"a": [1, 2]}"#, ".a[]", &["1", "2"]);
@@ -275,6 +312,11 @@ fn jaq_core_path_compat() {
     give("[0, 1, 2]", ".[-2:-1] |= [5]+.", "[0,5,1,2]");
     give("[0, 1, 2]", ".[-2:-1,-1] |= [5,6]+.", "[0,5,6,5,6,1,2]");
     give("[0, 1, 2]", ".[:2,3.0]? |= [.[] | .+1]", "[1,2,2]");
+    give(
+        r#"{"a": [0, 1, 2, 3], "r": {"start": 1, "end": 3}}"#,
+        ".a[.r] |= [9]",
+        r#"{"a":[0,9,3],"r":{"end":3,"start":1}}"#,
+    );
 
     give(r#"{"a": 1}"#, ".a |= (.,.+1)", r#"{"a":1}"#);
     gives("1", ". |= {}[]", &[]);

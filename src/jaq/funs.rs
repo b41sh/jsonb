@@ -132,9 +132,11 @@ fn length(value: &QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'stati
                 .map(|value| QueryValue::from(value.chars().count()))
                 .ok_or_else(|| str_error("string expected")),
             JsonbItemType::Array(len) | JsonbItemType::Object(len) => Ok(QueryValue::from(len)),
-            JsonbItemType::Boolean | JsonbItemType::Extension => {
-                Err(str_error(format!("{value} has no length")))
-            }
+            JsonbItemType::Extension => match raw.as_binary().map_err(jsonb_error)? {
+                Some(value) => Ok(QueryValue::from(value.len())),
+                None => Err(str_error(format!("{value} has no length"))),
+            },
+            JsonbItemType::Boolean => Err(str_error(format!("{value} has no length"))),
         };
     }
 
@@ -142,6 +144,7 @@ fn length(value: &QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'stati
         QueryValue::Null => Ok(QueryValue::from(0usize)),
         QueryValue::Number(number) => Ok(QueryValue::Number(number_abs(number.clone()))),
         QueryValue::String(value) => Ok(QueryValue::from(value.chars().count())),
+        QueryValue::Bytes(value) => Ok(QueryValue::from(value.len())),
         QueryValue::Array(values) => Ok(QueryValue::from(values.len())),
         QueryValue::Object(values) => Ok(QueryValue::from(values.len())),
         QueryValue::Bool(_) => Err(str_error(format!("{value} has no length"))),
@@ -236,6 +239,10 @@ fn contains(value: &QueryValue<'_>, needle: &QueryValue<'_>) -> bool {
         return value.contains(&needle);
     }
 
+    if let (QueryValue::Bytes(value), QueryValue::Bytes(needle)) = (value, needle) {
+        return bytes_contains(value.as_ref(), needle.as_ref());
+    }
+
     if let (Ok(values), Ok(needles)) = (array_values(value), array_values(needle)) {
         return needles
             .iter()
@@ -254,6 +261,13 @@ fn contains(value: &QueryValue<'_>, needle: &QueryValue<'_>) -> bool {
     value.clone().into_owned_static() == needle.clone().into_owned_static()
 }
 
+fn bytes_contains(value: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    value.windows(needle.len()).any(|window| window == needle)
+}
+
 fn indices(
     value: &QueryValue<'_>,
     needle: &QueryValue<'_>,
@@ -269,6 +283,19 @@ fn indices(
             }
         }
         return Ok(result);
+    }
+
+    if let (QueryValue::Bytes(value), QueryValue::Bytes(needle)) = (value, needle) {
+        if needle.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Ok(value
+            .windows(needle.len())
+            .enumerate()
+            .filter_map(|(index, window)| {
+                (window == needle.as_ref()).then(|| QueryValue::from(index))
+            })
+            .collect());
     }
 
     let values = match array_values(value) {
@@ -428,8 +455,8 @@ fn to_bytes(value: &QueryValue<'_>) -> std::result::Result<Vec<u8>, QueryValue<'
         return Ok(vec![byte]);
     }
 
-    if let Some(value) = value.as_str_owned() {
-        return Ok(value.into_bytes());
+    if let Some(value) = value.as_bytes_owned() {
+        return Ok(value);
     }
 
     match value {
@@ -454,7 +481,7 @@ fn to_bytes(value: &QueryValue<'_>) -> std::result::Result<Vec<u8>, QueryValue<'
 
 fn tobytes(value: QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'static>> {
     to_bytes(&value)
-        .map(|bytes| QueryValue::String(Cow::Owned(String::from_utf8_lossy(&bytes).into_owned())))
+        .map(|bytes| QueryValue::Bytes(Cow::Owned(bytes)))
         .map_err(|value| str_error(format!("cannot convert {value} to bytes")))
 }
 
@@ -563,7 +590,33 @@ mod tests {
         assert_eq!(run_filter("-2.5 | length", "null"), ["2.5"]);
         assert_eq!(
             run_filter(r#"[[65], "B", 67] | tobytes"#, "null"),
+            [r#""414243""#]
+        );
+        assert_eq!(
+            run_filter(r#"[[65], "B", 67] | tobytes | tostring"#, "null"),
             [r#""ABC""#]
+        );
+        assert_eq!(
+            run_filter(r#"[[65], "B", 67] | tobytes | length"#, "null"),
+            ["3"]
+        );
+        assert_eq!(
+            run_filter(r#"[[65], "B", 67] | tobytes | .[1:3] | tostring"#, "null"),
+            [r#""BC""#]
+        );
+        assert_eq!(
+            run_filter(
+                r#"[[65], "B", 67] | tobytes | contains([66] | tobytes)"#,
+                "null"
+            ),
+            ["true"]
+        );
+        assert_eq!(
+            run_filter(
+                r#"[[65], "B", 65] | tobytes | indices([65] | tobytes)"#,
+                "null"
+            ),
+            ["[0,2]"]
         );
     }
 

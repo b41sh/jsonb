@@ -18,6 +18,7 @@ use std::rc::Rc;
 use jaq_core::val::Range;
 use jaq_core::val::ValR;
 
+use crate::core::JsonbItemType;
 use crate::core::QueryValue;
 use crate::Error;
 
@@ -70,6 +71,56 @@ pub(super) fn string_range<'a>(
     )))
 }
 
+pub(super) fn bytes_range<'a>(
+    value: Cow<'a, [u8]>,
+    range: Range<&QueryValue<'a>>,
+) -> ValR<QueryValue<'static>, QueryValue<'static>> {
+    let start = range_bound(range.start, value.len(), 0)?;
+    let end = range_bound(range.end, value.len(), value.len())?;
+    let take = end.saturating_sub(start);
+    Ok(QueryValue::Bytes(Cow::Owned(
+        value
+            .into_owned()
+            .into_iter()
+            .skip(start)
+            .take(take)
+            .collect(),
+    )))
+}
+
+pub(super) fn array_subsequence_indices(
+    values: &[QueryValue<'static>],
+    needle: &[QueryValue<'static>],
+) -> QueryValue<'static> {
+    if needle.is_empty() {
+        return QueryValue::Array(Rc::new(Vec::new()));
+    }
+    QueryValue::Array(Rc::new(
+        values
+            .windows(needle.len())
+            .enumerate()
+            .filter_map(|(index, window)| (window == needle).then(|| QueryValue::from(index)))
+            .collect(),
+    ))
+}
+
+fn range_object_entries(
+    entries: impl IntoIterator<Item = (QueryValue<'static>, QueryValue<'static>)>,
+) -> Range<QueryValue<'static>> {
+    let mut start = None;
+    let mut end = None;
+    let start_key = QueryValue::from("start".to_string());
+    let end_key = QueryValue::from("end".to_string());
+    for (key, value) in entries {
+        if key == start_key {
+            start = Some(value);
+        } else if key == end_key {
+            end = Some(value);
+        }
+    }
+    start..end
+}
+
 impl<'a> QueryValue<'a> {
     pub(super) fn raw_value(&'a self) -> Option<crate::RawJsonb<'a>> {
         match self {
@@ -80,7 +131,75 @@ impl<'a> QueryValue<'a> {
     }
 
     pub(super) fn as_str_owned(&self) -> Option<String> {
-        self.as_key_string().ok().flatten()
+        self.as_string()
+            .ok()
+            .flatten()
+            .map(|value| value.into_owned())
+    }
+
+    pub(super) fn as_bytes_owned(&self) -> Option<Vec<u8>> {
+        match self {
+            QueryValue::String(value) => Some(value.as_bytes().to_vec()),
+            QueryValue::Bytes(value) => Some(value.to_vec()),
+            QueryValue::Raw(raw) => raw.raw_bytes().map(|value| value.to_vec()),
+            QueryValue::Owned(owned) => owned.as_raw().raw_bytes().map(|value| value.to_vec()),
+            _ => None,
+        }
+    }
+
+    pub(super) fn as_array_values_owned(
+        &self,
+    ) -> ValR<Option<Vec<QueryValue<'static>>>, QueryValue<'static>> {
+        match self {
+            QueryValue::Array(values) => Ok(Some(
+                values
+                    .iter()
+                    .cloned()
+                    .map(QueryValue::into_owned_static)
+                    .collect(),
+            )),
+            QueryValue::Raw(raw) => match raw.jsonb_item_type().map_err(jsonb_error)? {
+                JsonbItemType::Array(_) => raw.raw_array_values().map(Some),
+                _ => Ok(None),
+            },
+            QueryValue::Owned(owned) => {
+                match owned.as_raw().jsonb_item_type().map_err(jsonb_error)? {
+                    JsonbItemType::Array(_) => owned.as_raw().raw_array_values().map(Some),
+                    _ => Ok(None),
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    pub(super) fn as_range_object_owned(
+        &self,
+    ) -> ValR<Option<Range<QueryValue<'static>>>, QueryValue<'static>> {
+        match self {
+            QueryValue::Object(values) => Ok(Some(range_object_entries(values.iter().map(
+                |(key, value)| {
+                    (
+                        key.clone().into_owned_static(),
+                        value.clone().into_owned_static(),
+                    )
+                },
+            )))),
+            QueryValue::Raw(raw) => match raw.jsonb_item_type().map_err(jsonb_error)? {
+                JsonbItemType::Object(_) => Ok(Some(range_object_entries(
+                    raw.raw_key_values()?.into_iter(),
+                ))),
+                _ => Ok(None),
+            },
+            QueryValue::Owned(owned) => {
+                match owned.as_raw().jsonb_item_type().map_err(jsonb_error)? {
+                    JsonbItemType::Object(_) => Ok(Some(range_object_entries(
+                        owned.as_raw().raw_key_values()?.into_iter(),
+                    ))),
+                    _ => Ok(None),
+                }
+            }
+            _ => Ok(None),
+        }
     }
 
     pub(super) fn materialize(self) -> ValR<QueryValue<'static>, QueryValue<'static>> {
@@ -105,6 +224,13 @@ impl<'a> QueryValue<'a> {
     pub(super) fn into_string_value(self) -> ValR<String, QueryValue<'a>> {
         match self.materialize_current()? {
             QueryValue::String(value) => Ok(value.into_owned()),
+            value => Err(jaq_core::Error::typ(value, "string")),
+        }
+    }
+
+    pub(super) fn into_bytes_value(self) -> ValR<Vec<u8>, QueryValue<'a>> {
+        match self.materialize_current()? {
+            QueryValue::Bytes(value) => Ok(value.into_owned()),
             value => Err(jaq_core::Error::typ(value, "string")),
         }
     }

@@ -42,6 +42,8 @@ pub enum QueryValue<'a> {
     Number(Number),
     /// UTF-8 string.
     String(Cow<'a, str>),
+    /// Byte string.
+    Bytes(Cow<'a, [u8]>),
     /// Materialized array.
     Array(Rc<Vec<QueryValue<'a>>>),
     /// Materialized object. jaq allows arbitrary keys; JSONB output validates string keys.
@@ -88,6 +90,12 @@ impl<'a> QueryValue<'a> {
                         .map(|(key, value)| (key.as_str(), value.as_raw())),
                 )
             }
+            Self::Bytes(value) => {
+                let value = Value::Binary(value.as_ref());
+                let mut buf = Vec::new();
+                value.write_to_vec(&mut buf);
+                Ok(OwnedJsonb::new(buf))
+            }
             value => {
                 let value = value.into_jsonb_value()?;
                 let mut buf = Vec::new();
@@ -123,8 +131,42 @@ impl<'a> QueryValue<'a> {
     }
 
     pub(crate) fn as_key_string(&self) -> Result<Option<String>> {
-        self.as_string()
-            .map(|value| value.map(|value| value.into_owned()))
+        match self {
+            Self::Bytes(value) => String::from_utf8(value.to_vec())
+                .map(Some)
+                .map_err(|_| Error::Message("byte string is not a valid object key".to_string())),
+            _ => self
+                .as_string()
+                .map(|value| value.map(|value| value.into_owned())),
+        }
+    }
+
+    pub(crate) fn as_bytes_lossless(&self) -> Option<Cow<'_, [u8]>> {
+        match self {
+            Self::String(value) => Some(Cow::Borrowed(value.as_bytes())),
+            Self::Bytes(value) => Some(Cow::Borrowed(value.as_ref())),
+            Self::Raw(raw) => raw.as_binary().ok().flatten().map(Cow::Owned).or_else(|| {
+                raw.as_str().ok().flatten().map(|value| match value {
+                    Cow::Borrowed(value) => Cow::Borrowed(value.as_bytes()),
+                    Cow::Owned(value) => Cow::Owned(value.into_bytes()),
+                })
+            }),
+            Self::Owned(owned) => owned
+                .as_raw()
+                .as_binary()
+                .ok()
+                .flatten()
+                .map(Cow::Owned)
+                .or_else(|| {
+                    owned
+                        .as_raw()
+                        .as_str()
+                        .ok()
+                        .flatten()
+                        .map(|value| Cow::Owned(value.into_owned().into_bytes()))
+                }),
+            _ => None,
+        }
     }
 
     pub(crate) fn as_isize(&self) -> Result<Option<isize>> {
@@ -152,6 +194,7 @@ impl<'a> QueryValue<'a> {
             Self::Bool(value) => QueryValue::Bool(value),
             Self::Number(value) => QueryValue::Number(value),
             Self::String(value) => QueryValue::String(Cow::Owned(value.into_owned())),
+            Self::Bytes(value) => QueryValue::Bytes(Cow::Owned(value.into_owned())),
             Self::Array(values) => QueryValue::Array(Rc::new(
                 values
                     .iter()
@@ -181,6 +224,7 @@ impl<'a> QueryValue<'a> {
             QueryValue::Bool(value) => Self::Bool(value),
             QueryValue::Number(value) => Self::Number(value),
             QueryValue::String(value) => Self::String(Cow::Owned(value.into_owned())),
+            QueryValue::Bytes(value) => Self::Bytes(Cow::Owned(value.into_owned())),
             QueryValue::Array(values) => Self::Array(Rc::new(
                 values
                     .iter()
@@ -208,6 +252,7 @@ impl<'a> QueryValue<'a> {
             Self::Bool(value) => Ok(Value::Bool(value)),
             Self::Number(value) => Ok(Value::Number(value)),
             Self::String(value) => Ok(Value::String(Cow::Owned(value.into_owned()))),
+            Self::Bytes(_) => Err(Error::InvalidCast),
             Self::Array(values) => values
                 .iter()
                 .cloned()
@@ -234,6 +279,7 @@ impl<'a> QueryValue<'a> {
             Self::Bool(_) => 1,
             Self::Number(_) => 2,
             Self::String(_) => 3,
+            Self::Bytes(_) => 3,
             Self::Object(_) => 4,
             Self::Array(_) => 5,
             Self::Raw(raw) => raw
@@ -297,6 +343,7 @@ impl<'a> QueryValue<'a> {
             Self::Number(value) => number_string(value),
             Self::String(value) => serde_json::to_string(value.as_ref())
                 .unwrap_or_else(|_| format!("{:?}", value.as_ref())),
+            Self::Bytes(value) => byte_string(value.as_ref()),
             Self::Array(values) => {
                 let values = values
                     .iter()
@@ -358,6 +405,9 @@ impl Ord for QueryValue<'_> {
             (Self::Bool(left), Self::Bool(right)) => left.cmp(right),
             (Self::Number(left), Self::Number(right)) => left.cmp(right),
             (Self::String(left), Self::String(right)) => left.cmp(right),
+            (Self::Bytes(left), Self::Bytes(right)) => left.cmp(right),
+            (Self::String(left), Self::Bytes(right)) => left.as_bytes().cmp(right.as_ref()),
+            (Self::Bytes(left), Self::String(right)) => left.as_ref().cmp(right.as_bytes()),
             (Self::Array(left), Self::Array(right)) => left.cmp(right),
             (Self::Object(left), Self::Object(right)) => left.cmp(right),
             (Self::Raw(left), Self::Raw(right)) => left.cmp(right),
@@ -374,15 +424,28 @@ impl Ord for QueryValue<'_> {
                     .ok()
                     .flatten()
                     .cmp(&other.as_number().ok().flatten()),
-                3 => self
-                    .as_string()
-                    .ok()
-                    .flatten()
-                    .cmp(&other.as_string().ok().flatten()),
+                3 => self.as_bytes_lossless().cmp(&other.as_bytes_lossless()),
                 _ => self.to_json_string().cmp(&other.to_json_string()),
             },
         }
     }
+}
+
+fn byte_string(bytes: &[u8]) -> String {
+    let mut result = String::from("b\"");
+    for byte in bytes {
+        match *byte {
+            b'\\' => result.push_str("\\\\"),
+            b'"' => result.push_str("\\\""),
+            b'\n' => result.push_str("\\n"),
+            b'\r' => result.push_str("\\r"),
+            b'\t' => result.push_str("\\t"),
+            0x20..=0x7e => result.push(*byte as char),
+            value => result.push_str(&format!("\\x{value:02x}")),
+        }
+    }
+    result.push('"');
+    result
 }
 
 impl From<bool> for QueryValue<'_> {
