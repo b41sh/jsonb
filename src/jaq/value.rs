@@ -218,7 +218,7 @@ impl<'a> jaq_core::ValT for QueryValue<'a> {
 
     fn index(self, index: &Self) -> ValR<Self> {
         match self {
-            Self::Raw(raw) => raw.raw_index(index).map(QueryValue::from_static),
+            Self::Raw(raw) => raw.raw_index_borrowed(index),
             Self::Owned(owned) => owned.as_raw().raw_index(index).map(QueryValue::from_static),
             Self::Null => Ok(Self::Null),
             Self::Array(values) => {

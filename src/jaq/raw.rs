@@ -43,11 +43,11 @@ pub(super) fn item_to_query_value<'a>(item: JsonbItem<'a>) -> JsonbResult<QueryV
         JsonbItem::Null => Ok(QueryValue::Null),
         JsonbItem::Boolean(value) => Ok(QueryValue::Bool(value)),
         JsonbItem::Number(value) => value.as_number().map(QueryValue::Number),
-        JsonbItem::String(value) => Ok(QueryValue::String(Cow::Owned(value.into_owned()))),
-        JsonbItem::Raw(raw) => Ok(QueryValue::from_owned(raw.to_owned())),
+        JsonbItem::String(value) => Ok(QueryValue::String(value)),
+        JsonbItem::Raw(raw) => Ok(QueryValue::Raw(raw)),
         JsonbItem::Owned(owned) => Ok(QueryValue::from_owned(owned)),
         JsonbItem::Extension(value) => match value.as_extension_value()? {
-            ExtensionValue::Binary(value) => Ok(QueryValue::Bytes(Cow::Owned(value.to_vec()))),
+            ExtensionValue::Binary(value) => Ok(QueryValue::Bytes(Cow::Borrowed(value))),
             _ => OwnedJsonb::from_item(JsonbItem::Extension(value)).map(QueryValue::from_owned),
         },
     }
@@ -174,21 +174,34 @@ impl<'a> RawJsonb<'a> {
         self,
         index: &QueryValue<'b>,
     ) -> ValR<QueryValue<'static>, QueryValue<'static>> {
+        self.raw_index_borrowed(index)
+            .map(QueryValue::into_owned_static)
+            .map_err(|error| str_error(error.to_string()))
+    }
+
+    pub(super) fn raw_index_borrowed<'b>(
+        self,
+        index: &QueryValue<'b>,
+    ) -> ValR<QueryValue<'a>, QueryValue<'a>> {
         match self.jsonb_item_type().map_err(jsonb_error)? {
             JsonbItemType::Array(len) => {
                 if let Some(range) = index.as_range_object_owned()? {
-                    return self.raw_range(range.start.as_ref()..range.end.as_ref());
+                    return self
+                        .raw_range(range.start.as_ref()..range.end.as_ref())
+                        .map(QueryValue::from_static);
                 }
 
                 if let Some(needle) = index.as_array_values_owned()? {
                     let values = self.raw_array_values()?;
-                    return Ok(array_subsequence_indices(&values, &needle));
+                    return Ok(QueryValue::from_static(array_subsequence_indices(
+                        &values, &needle,
+                    )));
                 }
 
                 let Some(index_value) = index.as_isize().ok().flatten() else {
                     return Err(jaq_core::Error::index(
                         QueryValue::from_owned(self.to_owned()),
-                        index.clone().into_owned_static(),
+                        QueryValue::from_static(index.clone().into_owned_static()),
                     ));
                 };
                 let Some(index) = abs_index(index_value, len) else {
@@ -200,8 +213,7 @@ impl<'a> RawJsonb<'a> {
                 match iter.nth(index) {
                     Some(item) => item
                         .map_err(jsonb_error)
-                        .and_then(|item| item_to_query_value(item).map_err(jsonb_error))
-                        .map(QueryValue::into_owned_static),
+                        .and_then(|item| item_to_query_value(item).map_err(jsonb_error)),
                     None => Ok(QueryValue::Null),
                 }
             }
@@ -209,43 +221,43 @@ impl<'a> RawJsonb<'a> {
                 let Some(key) = index.as_key_string().ok().flatten() else {
                     return Ok(QueryValue::Null);
                 };
-                let iter = ObjectIterator::new(self)
+                let key = Cow::Owned(key);
+                if let Some(value) = self
+                    .get_object_value_by_key_name(&key, |left, right| left == right)
                     .map_err(jsonb_error)?
-                    .ok_or_else(|| str_error("cannot use value as object"))?;
-                for item in iter {
-                    let (item_key, value) = item.map_err(jsonb_error)?;
-                    if item_key == key {
-                        return item_to_query_value(value)
-                            .map_err(jsonb_error)
-                            .map(QueryValue::into_owned_static);
-                    }
+                {
+                    return item_to_query_value(value).map_err(jsonb_error);
                 }
                 Ok(QueryValue::Null)
             }
             JsonbItemType::String => {
                 if let Some(range) = index.as_range_object_owned()? {
-                    return self.raw_range(range.start.as_ref()..range.end.as_ref());
+                    return self
+                        .raw_range(range.start.as_ref()..range.end.as_ref())
+                        .map(QueryValue::from_static);
                 }
                 Err(jaq_core::Error::index(
                     QueryValue::from_owned(self.to_owned()),
-                    index.clone().into_owned_static(),
+                    QueryValue::from_static(index.clone().into_owned_static()),
                 ))
             }
             JsonbItemType::Extension => {
                 if self.raw_binary_bytes().is_some() {
                     if let Some(range) = index.as_range_object_owned()? {
-                        return self.raw_range(range.start.as_ref()..range.end.as_ref());
+                        return self
+                            .raw_range(range.start.as_ref()..range.end.as_ref())
+                            .map(QueryValue::from_static);
                     }
                 }
                 Err(jaq_core::Error::index(
                     QueryValue::from_owned(self.to_owned()),
-                    index.clone().into_owned_static(),
+                    QueryValue::from_static(index.clone().into_owned_static()),
                 ))
             }
             JsonbItemType::Null => Ok(QueryValue::Null),
             _ => Err(jaq_core::Error::index(
                 QueryValue::from_owned(self.to_owned()),
-                index.clone().into_owned_static(),
+                QueryValue::from_static(index.clone().into_owned_static()),
             )),
         }
     }

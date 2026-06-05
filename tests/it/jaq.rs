@@ -47,7 +47,8 @@ fn try_run_filter(filter: &'static str, input: &str) -> Result<Vec<String>, Stri
         .compile(modules)
         .map_err(|errors| format!("{errors:?}"))?;
 
-    let input = QueryValue::from_owned(input.parse::<OwnedJsonb>().map_err(|err| err.to_string())?);
+    let input_jsonb = input.parse::<OwnedJsonb>().map_err(|err| err.to_string())?;
+    let input = QueryValue::from_raw(input_jsonb.as_raw());
     let ctx = Ctx::<JsonbData>::new(&filter.lut, Vars::new([]));
     filter
         .id
