@@ -727,13 +727,12 @@ mod tests {
             .id
             .run((ctx, input))
             .map(unwrap_valr)
-            .map(|value| {
-                value
-                    .unwrap()
-                    .into_owned_jsonb()
-                    .unwrap()
-                    .as_raw()
-                    .to_string()
+            .map(|value| match value {
+                Ok(value) => match value.into_owned_jsonb() {
+                    Ok(value) => value.as_raw().to_string(),
+                    Err(error) => error.to_string(),
+                },
+                Err(error) => error.to_string(),
             })
             .collect()
     }

@@ -26,7 +26,7 @@ use jsonb::jaq::JsonbData;
 use jsonb::jaq::QueryValue;
 use jsonb::OwnedJsonb;
 
-fn run_filter(filter: &'static str, input: &str) -> Vec<String> {
+fn try_run_filter(filter: &'static str, input: &str) -> Result<Vec<String>, String> {
     let arena = Arena::default();
     let loader = Loader::new(jaq_core::defs().chain(jaq_std::defs()).chain(defs()));
     let modules = loader
@@ -37,7 +37,7 @@ fn run_filter(filter: &'static str, input: &str) -> Vec<String> {
                 code: filter,
             },
         )
-        .unwrap();
+        .map_err(|errors| format!("{errors:?}"))?;
     let filter = Compiler::default()
         .with_funs(
             jaq_core::funs::<JsonbData>()
@@ -45,15 +45,19 @@ fn run_filter(filter: &'static str, input: &str) -> Vec<String> {
                 .chain(funs::<JsonbData>()),
         )
         .compile(modules)
-        .unwrap();
+        .map_err(|errors| format!("{errors:?}"))?;
 
-    let input = QueryValue::from_owned(input.parse::<OwnedJsonb>().unwrap());
+    let input = QueryValue::from_owned(input.parse::<OwnedJsonb>().map_err(|err| err.to_string())?);
     let ctx = Ctx::<JsonbData>::new(&filter.lut, Vars::new([]));
     filter
         .id
         .run((ctx, input))
         .map(unwrap_valr)
-        .map(|value| value.unwrap().to_string())
+        .map(|value| {
+            value
+                .map(|value| value.to_string())
+                .map_err(|err| err.to_string())
+        })
         .collect()
 }
 
@@ -62,9 +66,21 @@ fn give(input: &str, filter: &'static str, output: &str) {
 }
 
 fn gives(input: &str, filter: &'static str, outputs: &[&str]) {
+    let outputs = outputs
+        .iter()
+        .map(|output| output.to_string())
+        .collect::<Vec<_>>();
     assert_eq!(
-        run_filter(filter, input),
-        outputs,
+        try_run_filter(filter, input),
+        Ok(outputs),
+        "input: {input}, filter: {filter}"
+    );
+}
+
+fn fail(input: &str, filter: &'static str, error: &str) {
+    assert_eq!(
+        try_run_filter(filter, input),
+        Err(error.to_string()),
         "input: {input}, filter: {filter}"
     );
 }
@@ -200,6 +216,45 @@ fn jaq_json_funs_compat() {
         "null",
         r#"("%FF" | @urid) == ([255] | tobytes | tostring)"#,
         "true",
+    );
+}
+
+#[test]
+fn jaq_nested_log_field_access() {
+    give(
+        r#"{"payload":{"features":{"category":"standard"}}}"#,
+        ".payload.features.category",
+        r#""standard""#,
+    );
+    give(
+        r#"{
+            "payload": {
+                "features": {
+                    "entity_id": 1001,
+                    "score_vector": [0.413427, 0.750273, -0.008018],
+                    "candidate": {
+                        "item_id": 8194215875,
+                        "score": 0.791828,
+                        "labels": ["label_alpha"]
+                    },
+                    "category": "standard",
+                    "request": {
+                        "item_id": 7701052873,
+                        "score": 0.093594,
+                        "labels": ["label_beta", "label_gamma"]
+                    }
+                }
+            }
+        }"#,
+        ".payload.features.category",
+        r#""standard""#,
+    );
+    give("{}", ".payload.features.category", "null");
+    give(r#"{"payload": null}"#, ".payload.features.category", "null");
+    fail(
+        "{}",
+        ".payload.features.category[]",
+        "cannot use null as iterable (array or object)",
     );
 }
 

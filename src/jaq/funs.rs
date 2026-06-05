@@ -50,7 +50,9 @@ def @json: tojson;
 
 /// JSONB-specific jaq definitions.
 pub fn defs() -> impl Iterator<Item = load::parse::Def<&'static str>> {
-    load::parse(DEFS, |p| p.defs()).unwrap().into_iter()
+    load::parse(DEFS, |p| p.defs())
+        .unwrap_or_default()
+        .into_iter()
 }
 
 /// JSONB-specific jaq native functions.
@@ -148,7 +150,9 @@ fn length(value: &QueryValue<'_>) -> ValR<QueryValue<'static>, QueryValue<'stati
         QueryValue::Array(values) => Ok(QueryValue::from(values.len())),
         QueryValue::Object(values) => Ok(QueryValue::from(values.len())),
         QueryValue::Bool(_) => Err(str_error(format!("{value} has no length"))),
-        QueryValue::Raw(_) | QueryValue::Owned(_) => unreachable!(),
+        QueryValue::Raw(_) | QueryValue::Owned(_) => {
+            Err(str_error(format!("{value} has no length")))
+        }
     }
 }
 
@@ -527,13 +531,12 @@ mod tests {
             .id
             .run((ctx, input))
             .map(unwrap_valr)
-            .map(|value| {
-                value
-                    .unwrap()
-                    .into_owned_jsonb()
-                    .unwrap()
-                    .as_raw()
-                    .to_string()
+            .map(|value| match value {
+                Ok(value) => match value.into_owned_jsonb() {
+                    Ok(value) => value.as_raw().to_string(),
+                    Err(error) => error.to_string(),
+                },
+                Err(error) => error.to_string(),
             })
             .collect()
     }
