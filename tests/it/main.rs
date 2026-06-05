@@ -15,6 +15,7 @@
 mod decode;
 mod encode;
 mod functions;
+mod jaq;
 mod jsonpath_parser;
 mod keypath_parser;
 mod number;
