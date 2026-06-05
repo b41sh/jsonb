@@ -86,6 +86,13 @@ fn jaq_json_funs_compat() {
     give("null", r#""+1" | fromjson"#, "1");
     give("null", r#""-1" | fromjson"#, "-1");
 
+    give("[0, null]", "has(0)", "true");
+    give("[0, null]", "has(1)", "true");
+    give("[0, null]", "has(2)", "false");
+    give(r#"{"a": 1, "b": null}"#, r#"has("a")"#, "true");
+    give(r#"{"a": 1, "b": null}"#, r#"has("b")"#, "true");
+    give(r#"{"a": 1, "b": null}"#, r#"has("c")"#, "false");
+
     give("null", r#""a,b, cd, efg" | indices(", ")"#, "[3,7]");
     give("null", "[0, 1, 2, 1, 3, 1, 4] | indices(1)", "[1,3,5]");
     give(
@@ -123,8 +130,51 @@ fn jaq_json_funs_compat() {
         "try (-2 % 0) catch .",
         r#""cannot calculate -2 % 0""#,
     );
+    give("null", "-2 % -2", "0");
+    give("null", "-2 % -1", "0");
+    give("null", "-2 % 2.1", "-2.0");
+    give("null", "-2 % 3", "-2");
+    give("null", "-2 % 2000000001", "-2");
+    give("null", "-1 % -2", "-1");
+    give("null", "-1 % -1", "0");
+    give(
+        "null",
+        "try (-1 % 0) catch .",
+        r#""cannot calculate -1 % 0""#,
+    );
+    give("null", "-1 % 2.1", "-1.0");
+    give("null", "-1 % 3", "-1");
+    give("null", "-1 % 2000000001", "-1");
+    give("null", "0 % -2", "0");
+    give("null", "0 % -1", "0");
+    give("null", "try (0 % 0) catch .", r#""cannot calculate 0 % 0""#);
+    give("null", "0 % 2.1", "0.0");
+    give("null", "0 % 3", "0");
+    give("null", "0 % 2000000001", "0");
+    give("null", "2.1 % -2 | . * 1000 | round", "100");
+    give("null", "2.1 % -1 | . * 1000 | round", "100");
+    // TODO: jaq-json returns true here, but QueryValue does not yet make
+    // isnan recognize the NaN value produced by float modulo.
+    // give("null", "2.1 % 0 | isnan", "true");
+    give("null", "2.1 % 2.1", "0.0");
+    give("null", "2.1 % 3", "2.1");
+    give("null", "2.1 % 2000000001", "2.1");
+    give("null", "3 % -2", "1");
+    give("null", "3 % -1", "0");
     give("null", "2.1 % 0 | tojson", r#""NaN""#);
     give("null", "3 % 2.1 | . * 1000 | round", "900");
+    give("null", "3 % 3", "0");
+    give("null", "3 % 2000000001", "3");
+    give("null", "2000000001 % -2", "1");
+    give("null", "2000000001 % -1", "0");
+    give(
+        "null",
+        "try (2000000001 % 0) catch .",
+        r#""cannot calculate 2000000001 % 0""#,
+    );
+    give("null", "2000000001 % 2.1 | . * 1000 | round", "1800");
+    give("null", "2000000001 % 3", "0");
+    give("null", "2000000001 % 2000000001", "0");
 
     give("1.0", "tonumber", "1.0");
     give(r#""1.0""#, "tonumber", "1.0");
@@ -156,6 +206,28 @@ fn jaq_json_funs_compat() {
 // Ported from jaq/jaq-json/tests/defs.rs.
 #[test]
 fn jaq_json_defs_compat() {
+    give(
+        r#"{"a": 1, "b": 2}"#,
+        "to_entries",
+        r#"[{"key":"a","value":1},{"key":"b","value":2}]"#,
+    );
+    give(
+        r#"[{"key":"a","value":1},{"key":"b","value":2}]"#,
+        "from_entries",
+        r#"{"a":1,"b":2}"#,
+    );
+    give(
+        r#"{"a": 1, "b": 2}"#,
+        r#"with_entries(.key += "k")"#,
+        r#"{"ak":1,"bk":2}"#,
+    );
+    give(
+        "[null, 0]",
+        "to_entries",
+        r#"[{"key":0,"value":null},{"key":1,"value":0}]"#,
+    );
+    give("[]", "from_entries", "{}");
+
     give(
         r#"["foo", "bar"]"#,
         r#"map(in({"foo": 42}))"#,
@@ -197,6 +269,20 @@ fn jaq_json_defs_compat() {
         "[paths]",
         r#"[["a"],["a",0],["a",1],["a",1,0],["b"],["b","c"]]"#,
     );
+    give(
+        "null",
+        "[{a: 1, b: [2, 3]} | paths(. < [])]",
+        r#"[["a"],["b",0],["b",1]]"#,
+    );
+    give(
+        "null",
+        r#"def paths:
+  { x: ., p: [] } |
+  recurse((.x | keys_unsorted?)[] as $k | .x |= .[$k] | .p += [$k]) |
+  .p | if . == [] then empty else . end;
+{a: [1, [2]], b: {c: 3}} | [paths]"#,
+        r#"[["a"],["a",0],["a",1],["a",1,0],["b"],["b","c"]]"#,
+    );
 
     give("[[1, 3], [2]]", "transpose", "[[1,2],[3,null]]");
     give("[[1, 3], [2, 4]]", "transpose", "[[1,2],[3,4]]");
@@ -223,6 +309,163 @@ fn jaq_json_defs_compat() {
     );
     give("50", "until(. > 100; . * 2)", "200");
     give("[1, 2, 3]", "until(length == 1; .[1:]) | .[0]", "3");
+    give(
+        "5",
+        "[.,1] | until(.[0] < 1; [.[0] - 1, .[1] * .[0]]) | .[1]",
+        "120",
+    );
+    give(
+        "null",
+        r#"[0, 0 == 0, {}.a, "hello", {}, [] | @json]"#,
+        r#"["0","true","null","\"hello\"","{}","[]"]"#,
+    );
+}
+
+// Selected backend-sensitive cases from jaq/jaq-core/tests/funs.rs.
+#[test]
+fn jaq_core_funs_backend_compat() {
+    give("[0, null, \"a\"]", "keys_unsorted", "[0,1,2]");
+    give(r#"{"a": 1, "b": 2}"#, "keys_unsorted", r#"["a","b"]"#);
+
+    give("null", "[range(0; 6;  2)]", "[0,2,4]");
+    give("null", "[range(0; 6; -2)]", "[]");
+    give("null", "[range(0; -6; 2)]", "[]");
+    give("null", "[range(0; -6; -2)]", "[0,-2,-4]");
+    give("null", "[range(0; 0; 0)]", "[]");
+    give("null", "[range(0.0; 2; 0.5)]", "[0.0,0.5,1.0,1.5]");
+    give("null", "[limit(3; range(0; 1/0; 1))]", "[0,1,2]");
+    give("null", "[limit(3; range(0; -1/0; -1))]", "[0,-1,-2]");
+    give("null", "[limit(3; range(0; 6; 0))]", "[0,0,0]");
+    give("null", "[limit(3; range(0; -6; 0))]", "[0,0,0]");
+
+    give(
+        "null",
+        "[{a: 1, b: [2, 3]} | skip(1; path_value(..))]",
+        r#"[[["a"],1],[["b"],[2,3]],[["b",0],2],[["b",1],3]]"#,
+    );
+}
+
+// Selected backend-sensitive cases from jaq/jaq-std/tests/funs.rs.
+#[test]
+fn jaq_std_funs_backend_compat() {
+    give(r#""aAaAäの""#, "ascii_upcase", r#""AAAAäの""#);
+    give(r#""aAaAäの""#, "ascii_downcase", r#""aaaaäの""#);
+
+    give(r#""❤ の""#, "explode", "[10084,32,12398]");
+    give(r#""y̆""#, "explode", "[121,774]");
+    give(r#""❤ の""#, "explode | implode", r#""❤ の""#);
+    give(r#""y̆""#, "explode | implode", r#""y̆""#);
+    give("null", "[1114112] | try implode catch -1", "-1");
+
+    give(
+        r#""hello cruel world""#,
+        "encode_base64",
+        r#""aGVsbG8gY3J1ZWwgd29ybGQ=""#,
+    );
+    give(
+        r#""hello cruel world""#,
+        "encode_base64 | decode_base64",
+        r#""hello cruel world""#,
+    );
+    give(
+        r#""<p style='visibility: hidden'>sneaky</p>""#,
+        "escape_html",
+        r#""&lt;p style=&apos;visibility: hidden&apos;&gt;sneaky&lt;/p&gt;""#,
+    );
+    give(
+        r#""abc123 ?#+&[]""#,
+        "encode_uri",
+        r#""abc123%20%3F%23%2B%26%5B%5D""#,
+    );
+
+    give("[]", "group_by(.)", "[]");
+    give(
+        r#"[{"key":1, "value": "foo"},{"key":2, "value":"bar"},{"key":1,"value":"baz"}]"#,
+        "group_by(.key)",
+        r#"[[{"key":1,"value":"foo"},{"key":1,"value":"baz"}],[{"key":2,"value":"bar"}]]"#,
+    );
+
+    give(r#""foo""#, "utf8bytelength", "3");
+    give(r#""ƒoo""#, "utf8bytelength", "4");
+    give(r#""नमस्ते""#, "utf8bytelength", "18");
+
+    give(
+        "null",
+        "[-2.2, -1.1, 0, 1.1, 2.2 | sin as $s | cos as $c | $s * $s + $c * $c]",
+        "[1.0,1.0,1.0,1.0,1.0]",
+    );
+    give(
+        "null",
+        "[3, 3.25, 3.5 | modf]",
+        "[[0.0,3.0],[0.25,3.0],[0.5,3.0]]",
+    );
+    give(
+        "null",
+        "[pow(0.25, 4, 9; 1, 0.5, 2)]",
+        "[0.25,0.5,0.0625,4.0,2.0,16.0,9.0,3.0,81.0]",
+    );
+    give(
+        "null",
+        "[fma(2, 1; 3, 4; 4, 5)]",
+        "[10.0,11.0,12.0,13.0,7.0,8.0,8.0,9.0]",
+    );
+
+    give("null", "[0, 1][1 | round]", "1");
+    give("null", " 1   | round", "1");
+    // TODO: jaq-std returns integer 1 here, but QueryValue currently
+    // preserves the float representation as 1.0.
+    // give("null", " 1.0 | round", "1");
+    give("null", "-1   | round", "-1");
+    // TODO: jaq-std integerizes these rounded float results, while QueryValue
+    // currently preserves them as float values such as -1.0 and -2.0.
+    // give("null", "-1.0 | round", "-1");
+    // give("null", "-1.5 | round", "-2");
+    // give("null", "-1.5 | floor", "-2");
+    // give("null", "-1.5 | ceil ", "-1");
+    // give("null", "-1.4 | round", "-1");
+    // give("null", "-1.4 | floor", "-2");
+    // give("null", "-1.4 | ceil ", "-1");
+    give(
+        "null",
+        "2e22 | round | tostring",
+        r#""20000000000000000000000""#,
+    );
+
+    give(r#""foobar""#, r#"startswith("")"#, "true");
+    give(r#""foobar""#, r#"startswith("bar")"#, "false");
+    give(r#""foobar""#, r#"startswith("foo")"#, "true");
+    give(r#""""#, r#"startswith("foo")"#, "false");
+
+    give(r#""foobar""#, r#"endswith("")"#, "true");
+    give(r#""foobar""#, r#"endswith("foo")"#, "false");
+    give(r#""foobar""#, r#"endswith("bar")"#, "true");
+    give(r#""""#, r#"endswith("foo")"#, "false");
+
+    give(r#""foobar""#, r#"ltrimstr("")"#, r#""foobar""#);
+    give(r#""foobar""#, r#"ltrimstr("foo")"#, r#""bar""#);
+    give(r#""foobar""#, r#"ltrimstr("bar")"#, r#""foobar""#);
+    give(r#""اَلْعَرَبِيَّةُ""#, r#"ltrimstr("ا")"#, r#""َلْعَرَبِيَّةُ""#);
+
+    give(r#""foobar""#, r#"rtrimstr("")"#, r#""foobar""#);
+    give(r#""foobar""#, r#"rtrimstr("bar")"#, r#""foo""#);
+    give(r#""foobar""#, r#"rtrimstr("foo")"#, r#""foobar""#);
+    give(r#""اَلْعَرَبِيَّةُ""#, r#"rtrimstr("ا")"#, r#""اَلْعَرَبِيَّةُ""#);
+
+    give(r#""""#, "trim", r#""""#);
+    give(r#"" ""#, "trim", r#""""#);
+    give(r#""foo""#, "trim", r#""foo""#);
+    give(r#"" foo  ""#, "trim", r#""foo""#);
+    give(r#"" اَلْعَرَبِيَّةُ ""#, "trim", r#""اَلْعَرَبِيَّةُ""#);
+
+    give(r#""""#, "ltrim", r#""""#);
+    give(r#"" ""#, "ltrim", r#""""#);
+    give(r#"" foo  ""#, "ltrim", r#""foo  ""#);
+    give(r#"" اَلْعَرَبِيَّةُ ""#, "ltrim", r#""اَلْعَرَبِيَّةُ ""#);
+
+    give(r#""""#, "rtrim", r#""""#);
+    give(r#"" ""#, "rtrim", r#""""#);
+    give(r#""  foo ""#, "rtrim", r#""  foo""#);
+    give(r#"" اَلْعَرَبِيَّةُ ""#, "rtrim", r#"" اَلْعَرَبِيَّةُ""#);
 }
 
 // Ported from jaq-core/tests/path.rs.
