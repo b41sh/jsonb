@@ -99,7 +99,8 @@ pub(super) fn array_subsequence_indices(
         values
             .windows(needle.len())
             .enumerate()
-            .filter_map(|(index, window)| (window == needle).then(|| QueryValue::from(index)))
+            .filter(|&(_, window)| window == needle)
+            .map(|(index, _)| QueryValue::from(index))
             .collect(),
     ))
 }
@@ -185,16 +186,14 @@ impl<'a> QueryValue<'a> {
                 },
             )))),
             QueryValue::Raw(raw) => match raw.jsonb_item_type().map_err(jsonb_error)? {
-                JsonbItemType::Object(_) => Ok(Some(range_object_entries(
-                    raw.raw_key_values()?.into_iter(),
-                ))),
+                JsonbItemType::Object(_) => Ok(Some(range_object_entries(raw.raw_key_values()?))),
                 _ => Ok(None),
             },
             QueryValue::Owned(owned) => {
                 match owned.as_raw().jsonb_item_type().map_err(jsonb_error)? {
-                    JsonbItemType::Object(_) => Ok(Some(range_object_entries(
-                        owned.as_raw().raw_key_values()?.into_iter(),
-                    ))),
+                    JsonbItemType::Object(_) => {
+                        Ok(Some(range_object_entries(owned.as_raw().raw_key_values()?)))
+                    }
                     _ => Ok(None),
                 }
             }

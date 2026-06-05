@@ -292,9 +292,8 @@ fn indices(
         return Ok(value
             .windows(needle.len())
             .enumerate()
-            .filter_map(|(index, window)| {
-                (window == needle.as_ref()).then(|| QueryValue::from(index))
-            })
+            .filter(|&(_, window)| window == needle.as_ref())
+            .map(|(index, _)| QueryValue::from(index))
             .collect());
     }
 
@@ -313,9 +312,8 @@ fn indices(
             return Ok(values
                 .iter()
                 .enumerate()
-                .filter_map(|(index, value)| {
-                    (value == &needle.clone().into_owned_static()).then(|| QueryValue::from(index))
-                })
+                .filter(|&(_, value)| value == &needle.clone().into_owned_static())
+                .map(|(index, _)| QueryValue::from(index))
                 .collect());
         }
     };
@@ -327,7 +325,8 @@ fn indices(
     Ok(values
         .windows(needles.len())
         .enumerate()
-        .filter_map(|(index, window)| (window == needles).then(|| QueryValue::from(index)))
+        .filter(|&(_, window)| window == needles)
+        .map(|(index, _)| QueryValue::from(index))
         .collect())
 }
 
