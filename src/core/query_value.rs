@@ -19,9 +19,15 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::rc::Rc;
 
+use crate::core::ArrayBuilder;
+use crate::core::ExtensionItem;
+use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
+use crate::core::NumberItem;
+use crate::core::ObjectBuilder;
 use crate::error::Result;
 use crate::Error;
+use crate::ExtensionValue;
 use crate::Number;
 use crate::OwnedJsonb;
 use crate::RawJsonb;
@@ -62,46 +68,10 @@ impl<'a> QueryValue<'a> {
     pub fn into_owned_jsonb(self) -> Result<OwnedJsonb> {
         match self {
             Self::Raw(raw) => Ok(raw.to_owned()),
-            Self::Owned(owned) => match Rc::try_unwrap(owned) {
-                Ok(owned) => Ok(owned),
-                Err(owned) => Ok((*owned).clone()),
-            },
-            Self::Array(values) => {
-                let values = values
-                    .iter()
-                    .cloned()
-                    .map(QueryValue::into_owned_jsonb)
-                    .collect::<Result<Vec<_>>>()?;
-                OwnedJsonb::build_array(values.iter().map(|value| value.as_raw()))
-            }
-            Self::Object(values) => {
-                let entries = values
-                    .iter()
-                    .map(|(key, value)| {
-                        let Some(key) = key.as_object_key()? else {
-                            return Err(Error::InvalidObject);
-                        };
-                        Ok((key, value.clone().into_owned_jsonb()?))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                OwnedJsonb::build_object(
-                    entries
-                        .iter()
-                        .map(|(key, value)| (key.as_str(), value.as_raw())),
-                )
-            }
-            Self::Bytes(value) => {
-                let value = Value::Binary(value.as_ref());
-                let mut buf = Vec::new();
-                value.write_to_vec(&mut buf);
-                Ok(OwnedJsonb::new(buf))
-            }
-            value => {
-                let value = value.into_jsonb_value()?;
-                let mut buf = Vec::new();
-                value.write_to_vec(&mut buf);
-                Ok(OwnedJsonb::new(buf))
-            }
+            Self::Owned(owned) => Self::unwrap_owned_jsonb(owned),
+            Self::Array(values) => Self::build_array(Self::unwrap_values(values)),
+            Self::Object(values) => Self::build_object(Self::unwrap_entries(values)),
+            value => OwnedJsonb::from_item(value.into_jsonb_item()?),
         }
     }
 
@@ -246,31 +216,83 @@ impl<'a> QueryValue<'a> {
         }
     }
 
-    fn into_jsonb_value(self) -> Result<Value<'static>> {
+    fn into_jsonb_item(self) -> Result<JsonbItem<'a>> {
         match self {
-            Self::Null => Ok(Value::Null),
-            Self::Bool(value) => Ok(Value::Bool(value)),
-            Self::Number(value) => Ok(Value::Number(value)),
-            Self::String(value) => Ok(Value::String(Cow::Owned(value.into_owned()))),
-            Self::Bytes(_) => Err(Error::InvalidCast),
-            Self::Array(values) => values
-                .iter()
-                .cloned()
-                .map(QueryValue::into_jsonb_value)
-                .collect::<Result<Vec<_>>>()
-                .map(Value::Array),
-            Self::Object(values) => {
-                let mut object = BTreeMap::new();
-                for (key, value) in values.iter() {
-                    let Some(key) = key.as_object_key()? else {
-                        return Err(Error::InvalidObject);
-                    };
-                    object.insert(key, value.clone().into_jsonb_value()?);
-                }
-                Ok(Value::Object(object))
+            Self::Raw(raw) => Ok(JsonbItem::Raw(raw)),
+            Self::Owned(owned) => Self::unwrap_owned_jsonb(owned).map(JsonbItem::Owned),
+            Self::Null => Ok(JsonbItem::Null),
+            Self::Bool(value) => Ok(JsonbItem::Boolean(value)),
+            Self::Number(value) => Ok(JsonbItem::Number(NumberItem::Number(value))),
+            Self::String(value) => Ok(JsonbItem::String(value)),
+            Self::Bytes(Cow::Borrowed(value)) => Ok(JsonbItem::Extension(
+                ExtensionItem::Extension(ExtensionValue::Binary(value)),
+            )),
+            Self::Bytes(Cow::Owned(value)) => {
+                Self::build_binary(value.as_slice()).map(JsonbItem::Owned)
             }
-            Self::Raw(_) | Self::Owned(_) => Err(Error::InvalidCast),
+            Self::Array(values) => {
+                Self::build_array(Self::unwrap_values(values)).map(JsonbItem::Owned)
+            }
+            Self::Object(values) => {
+                Self::build_object(Self::unwrap_entries(values)).map(JsonbItem::Owned)
+            }
         }
+    }
+
+    fn unwrap_owned_jsonb(owned: Rc<OwnedJsonb>) -> Result<OwnedJsonb> {
+        match Rc::try_unwrap(owned) {
+            Ok(owned) => Ok(owned),
+            Err(owned) => Ok((*owned).clone()),
+        }
+    }
+
+    fn unwrap_values(values: Rc<Vec<QueryValue<'a>>>) -> Vec<QueryValue<'a>> {
+        match Rc::try_unwrap(values) {
+            Ok(values) => values,
+            Err(values) => (*values).clone(),
+        }
+    }
+
+    fn unwrap_entries(
+        entries: Rc<BTreeMap<QueryValue<'a>, QueryValue<'a>>>,
+    ) -> BTreeMap<QueryValue<'a>, QueryValue<'a>> {
+        match Rc::try_unwrap(entries) {
+            Ok(entries) => entries,
+            Err(entries) => (*entries).clone(),
+        }
+    }
+
+    fn build_array(values: Vec<QueryValue<'a>>) -> Result<OwnedJsonb> {
+        let mut builder = ArrayBuilder::with_capacity(values.len());
+        for value in values {
+            builder.push_jsonb_item(value.into_jsonb_item()?);
+        }
+        builder.build()
+    }
+
+    fn build_object(entries: BTreeMap<QueryValue<'a>, QueryValue<'a>>) -> Result<OwnedJsonb> {
+        let mut keys = Vec::with_capacity(entries.len());
+        let mut values = Vec::with_capacity(entries.len());
+        for (key, value) in entries {
+            let Some(key) = key.as_object_key()? else {
+                return Err(Error::InvalidObject);
+            };
+            keys.push(key);
+            values.push(value.into_jsonb_item()?);
+        }
+
+        let mut builder = ObjectBuilder::new();
+        for (key, value) in keys.iter().zip(values) {
+            builder.push_jsonb_item(key.as_str(), value)?;
+        }
+        builder.build()
+    }
+
+    fn build_binary(value: &[u8]) -> Result<OwnedJsonb> {
+        let value = Value::Binary(value);
+        let mut buf = Vec::new();
+        value.write_to_vec(&mut buf);
+        Ok(OwnedJsonb::new(buf))
     }
 
     fn json_type_rank(&self) -> u8 {
