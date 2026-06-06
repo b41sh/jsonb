@@ -55,12 +55,27 @@ pub fn defs() -> impl Iterator<Item = load::parse::Def<&'static str>> {
         .into_iter()
 }
 
+/// Complete jaq definitions for JSONB-backed execution.
+pub fn all_defs() -> impl Iterator<Item = load::parse::Def<&'static str>> {
+    jaq_core::defs().chain(jaq_std::defs()).chain(defs())
+}
+
 /// JSONB-specific jaq native functions.
 pub fn funs<D>() -> impl Iterator<Item = Fun<D>>
 where
     D: for<'a> DataT<V<'a> = QueryValue<'a>>,
 {
     base().into_vec().into_iter().map(run)
+}
+
+/// Complete jaq native functions for JSONB-backed execution.
+pub fn all_funs<D>() -> impl Iterator<Item = Fun<D>>
+where
+    D: for<'a> DataT<V<'a> = QueryValue<'a>>,
+{
+    jaq_core::funs::<D>()
+        .chain(jaq_std::funs::<D>())
+        .chain(funs::<D>())
 }
 
 fn base<D>() -> Box<[Filter<RunPtr<D>>]>

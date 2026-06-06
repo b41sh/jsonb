@@ -17,10 +17,19 @@
 mod access;
 mod data;
 mod funs;
+mod json_val;
 mod raw;
 mod value;
 
 pub use crate::core::QueryValue;
 pub use data::JsonbData;
+pub use funs::all_defs;
+pub use funs::all_funs;
 pub use funs::defs;
 pub use funs::funs;
+pub use json_val::jaq_val_to_owned_jsonb;
+pub use json_val::json_val_defs;
+pub use json_val::json_val_funs;
+pub use json_val::raw_jsonb_to_jaq_val;
+pub use json_val::JsonVal;
+pub use json_val::JsonValData;

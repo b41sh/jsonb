@@ -20,15 +20,37 @@ use jaq_core::Compiler;
 use jaq_core::Ctx;
 use jaq_core::Vars;
 
-use jsonb::jaq::defs;
-use jsonb::jaq::funs;
+use jsonb::jaq::all_defs;
+use jsonb::jaq::all_funs;
+use jsonb::jaq::jaq_val_to_owned_jsonb;
+use jsonb::jaq::json_val_defs;
+use jsonb::jaq::json_val_funs;
+use jsonb::jaq::raw_jsonb_to_jaq_val;
+use jsonb::jaq::JsonValData;
 use jsonb::jaq::JsonbData;
 use jsonb::jaq::QueryValue;
 use jsonb::OwnedJsonb;
 
 fn try_run_filter(filter: &'static str, input: &str) -> Result<Vec<String>, String> {
+    try_run_filter_with(filter, input, |value| Ok(value.to_string()))
+}
+
+fn try_run_jsonb_filter(filter: &'static str, input: &str) -> Result<Vec<String>, String> {
+    try_run_filter_with(filter, input, |value| {
+        value
+            .into_owned_jsonb()
+            .map(|value| value.as_raw().to_string())
+            .map_err(|err| err.to_string())
+    })
+}
+
+fn try_run_filter_with(
+    filter: &'static str,
+    input: &str,
+    output: impl Fn(QueryValue<'_>) -> Result<String, String>,
+) -> Result<Vec<String>, String> {
     let arena = Arena::default();
-    let loader = Loader::new(jaq_core::defs().chain(jaq_std::defs()).chain(defs()));
+    let loader = Loader::new(all_defs());
     let modules = loader
         .load(
             &arena,
@@ -39,11 +61,7 @@ fn try_run_filter(filter: &'static str, input: &str) -> Result<Vec<String>, Stri
         )
         .map_err(|errors| format!("{errors:?}"))?;
     let filter = Compiler::default()
-        .with_funs(
-            jaq_core::funs::<JsonbData>()
-                .chain(jaq_std::funs::<JsonbData>())
-                .chain(funs::<JsonbData>()),
-        )
+        .with_funs(all_funs::<JsonbData>())
         .compile(modules)
         .map_err(|errors| format!("{errors:?}"))?;
 
@@ -54,10 +72,39 @@ fn try_run_filter(filter: &'static str, input: &str) -> Result<Vec<String>, Stri
         .id
         .run((ctx, input))
         .map(unwrap_valr)
+        .map(|value| value.map_err(|err| err.to_string()).and_then(&output))
+        .collect()
+}
+
+fn try_run_jaq_json_filter(filter: &'static str, input: &str) -> Result<Vec<String>, String> {
+    let arena = Arena::default();
+    let loader = Loader::new(json_val_defs());
+    let modules = loader
+        .load(
+            &arena,
+            File {
+                path: (),
+                code: filter,
+            },
+        )
+        .map_err(|errors| format!("{errors:?}"))?;
+    let filter = Compiler::default()
+        .with_funs(json_val_funs())
+        .compile(modules)
+        .map_err(|errors| format!("{errors:?}"))?;
+
+    let input_jsonb = input.parse::<OwnedJsonb>().map_err(|err| err.to_string())?;
+    let input = raw_jsonb_to_jaq_val(input_jsonb.as_raw()).map_err(|err| err.to_string())?;
+    let ctx = Ctx::<JsonValData>::new(&filter.lut, Vars::new([]));
+    filter
+        .id
+        .run((ctx, input))
+        .map(unwrap_valr)
         .map(|value| {
             value
-                .map(|value| value.to_string())
                 .map_err(|err| err.to_string())
+                .and_then(|value| jaq_val_to_owned_jsonb(&value).map_err(|err| err.to_string()))
+                .map(|value| value.as_raw().to_string())
         })
         .collect()
 }
@@ -83,6 +130,51 @@ fn fail(input: &str, filter: &'static str, error: &str) {
         try_run_filter(filter, input),
         Err(error.to_string()),
         "input: {input}, filter: {filter}"
+    );
+}
+
+#[test]
+fn jaq_profile_projection_and_array_index_regression() {
+    let input = r#"{"account_balance":8719.17,"address":{"city":"City64","country":"Country4","postal_code":"10664","state":"State4","street":"58337f64a7 St"},"avatar":"avatar1666664.jpg","birthday":"1990-01-01","country_code":"CN","created_at":"2026-06-05 07:12:24.609283","devices":[{"device_id":"device166666401","os":"iOS","type":"mobile"},{"device_id":"device166666402","os":"Windows","type":"laptop"}],"email":"user1666664@example.com","id":"1666664","ip_address":"192.168.104.1","last_purchase":{"amount":1609.23,"date":"2026-06-05 07:12:24.609283","item":"Laptop"},"loyalty_points":"16666640","membership_tier":"Gold","nickname":"user1666664","phone":"******7664","preferences":{"newsletter_opt_in":true,"timezone":"UTC+8"},"purchase_history":[{"amount":799.99,"date":"2023-12-15T10:00:00Z","item":"Phone"},{"amount":199.99,"date":"2023-11-20T15:00:00Z","item":"Headphones"}],"recent_searches":["laptops","smartphones","headphones"],"status":"2","subscription_expiration":"2025-01-01","subscription_status":"active","updated_at":"2026-06-09 07:12:24.609283","valid":true,"wishlist":["Smartwatch","Tablet"]}"#;
+
+    give(
+        input,
+        r#"{account_id: .id, balance: .account_balance, loyalty_points: (.loyalty_points | tonumber), valid, expired: .subscription_status == "inactive"}"#,
+        r#"{"account_id":"1666664","balance":8719.17,"expired":false,"loyalty_points":16666640,"valid":true}"#,
+    );
+    give(input, r#".recent_searches | index("smartphones")"#, "1");
+
+    assert_eq!(
+        try_run_jsonb_filter(
+            r#"{account_id: .id, balance: .account_balance, loyalty_points: (.loyalty_points | tonumber), valid, expired: .subscription_status == "inactive"}"#,
+            input
+        ),
+        Ok(vec![
+            r#"{"account_id":"1666664","balance":8719.17,"expired":false,"loyalty_points":16666640,"valid":true}"#.to_string()
+        ])
+    );
+    assert_eq!(
+        try_run_jsonb_filter(r#".recent_searches | index("smartphones")"#, input),
+        Ok(vec!["1".to_string()])
+    );
+}
+
+#[test]
+fn jaq_json_val_conversion_runs_filters() {
+    let input = r#"{"account_balance":8719.17,"id":"1666664","loyalty_points":"16666640","recent_searches":["laptops","smartphones","headphones"],"subscription_status":"active","valid":true}"#;
+
+    assert_eq!(
+        try_run_jaq_json_filter(
+            r#"{account_id: .id, balance: .account_balance, loyalty_points: (.loyalty_points | tonumber), valid, expired: .subscription_status == "inactive"}"#,
+            input
+        ),
+        Ok(vec![
+            r#"{"account_id":"1666664","balance":8719.17,"expired":false,"loyalty_points":16666640,"valid":true}"#.to_string()
+        ])
+    );
+    assert_eq!(
+        try_run_jaq_json_filter(r#".recent_searches | index("smartphones")"#, input),
+        Ok(vec!["1".to_string()])
     );
 }
 
