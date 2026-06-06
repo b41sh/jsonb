@@ -26,6 +26,7 @@ use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::ExtensionItem;
 use crate::core::JsonbItem;
+use crate::core::JsonbItemType;
 use crate::core::NumberItem;
 use crate::core::ObjectBuilder;
 use crate::core::ObjectIterator;
@@ -99,26 +100,28 @@ fn jsonb_item_to_jaq_val(item: JsonbItem<'_>) -> Result<Val> {
 }
 
 fn raw_container_to_jaq_val(raw: RawJsonb<'_>) -> Result<Val> {
-    if let Some(iter) = ArrayIterator::new(raw)? {
-        let values = iter
-            .map(|item| item.and_then(jsonb_item_to_jaq_val))
-            .collect::<Result<Vec<_>>>()?;
-        return Ok(values.into_iter().collect());
-    }
-
-    if let Some(iter) = ObjectIterator::new(raw)? {
-        let mut values = Map::default();
-        for item in iter {
-            let (key, value) = item?;
-            values.insert(
-                Val::utf8_str(key.as_bytes().to_vec()),
-                jsonb_item_to_jaq_val(value)?,
-            );
+    match raw.jsonb_item_type()? {
+        JsonbItemType::Array(len) => {
+            let iter = ArrayIterator::new_with_len(raw, len);
+            let values = iter
+                .map(|item| item.and_then(jsonb_item_to_jaq_val))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(Val::Arr(jaq_json::Rc::new(values)))
         }
-        return Ok(Val::obj(values));
+        JsonbItemType::Object(len) => {
+            let iter = ObjectIterator::new_with_len(raw, len)?;
+            let mut values = Map::with_capacity_and_hasher(iter.len(), Default::default());
+            for item in iter {
+                let (key, value) = item?;
+                values.insert(
+                    Val::utf8_str(key.as_bytes().to_vec()),
+                    jsonb_item_to_jaq_val(value)?,
+                );
+            }
+            Ok(Val::obj(values))
+        }
+        _ => jsonb_item_to_jaq_val(JsonbItem::from_raw_jsonb(raw)?),
     }
-
-    jsonb_item_to_jaq_val(JsonbItem::from_raw_jsonb(raw)?)
 }
 
 fn number_to_jaq_num(number: Number) -> Num {
