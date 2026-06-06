@@ -67,24 +67,17 @@ pub fn jaq_val_to_owned_jsonb(value: &Val) -> Result<OwnedJsonb> {
         Val::Arr(values) => {
             let mut builder = ArrayBuilder::with_capacity(values.len());
             for value in values.iter() {
-                builder.push_owned_jsonb(jaq_val_to_owned_jsonb(value)?);
+                builder.push_jsonb_item(jaq_val_to_jsonb_item(value)?);
             }
             builder.build()
         }
         Val::Obj(values) => {
-            let mut keys = Vec::with_capacity(values.len());
-            let mut output_values = Vec::with_capacity(values.len());
+            let mut entries = Vec::with_capacity(values.len());
             for (key, value) in values.iter() {
                 let key = jaq_val_to_object_key(key)?;
-                keys.push(key.into_owned());
-                output_values.push(jaq_val_to_owned_jsonb(value)?);
+                entries.push((key.into_owned(), jaq_val_to_jsonb_item(value)?));
             }
-
-            let mut builder = ObjectBuilder::new();
-            for (key, value) in keys.iter().zip(output_values) {
-                builder.push_owned_jsonb(key.as_ref(), value)?;
-            }
-            builder.build()
+            ObjectBuilder::build_from_entries(entries)
         }
         value => OwnedJsonb::from_item(jaq_val_to_jsonb_item(value)?),
     }
