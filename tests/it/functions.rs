@@ -2074,7 +2074,7 @@ fn test_extract_scalar_key_values() {
         ),
     ];
     for ((key_paths, value), (expected_key_paths, expected_value)) in
-        result.into_iter().zip(expected.into_iter())
+        result.into_iter().zip(expected)
     {
         assert_eq!(key_paths, expected_key_paths);
         assert_eq!(value, expected_value);
@@ -2130,7 +2130,7 @@ fn test_extract_scalar_key_values() {
         ),
     ];
     for ((key_paths, value), (expected_key_paths, expected_value)) in
-        result.into_iter().zip(expected.into_iter())
+        result.into_iter().zip(expected)
     {
         assert_eq!(key_paths, expected_key_paths);
         assert_eq!(value, expected_value);
@@ -2167,7 +2167,7 @@ fn test_extract_scalar_key_values() {
         ),
     ];
     for ((key_paths, value), (expected_key_paths, expected_value)) in
-        result.into_iter().zip(expected.into_iter())
+        result.into_iter().zip(expected)
     {
         assert_eq!(key_paths, expected_key_paths);
         assert_eq!(value, expected_value);
@@ -2206,7 +2206,7 @@ fn test_extract_scalar_key_values() {
         ),
     ];
     for ((key_paths, value), (expected_key_paths, expected_value)) in
-        result.into_iter().zip(expected.into_iter())
+        result.into_iter().zip(expected)
     {
         assert_eq!(key_paths, expected_key_paths);
         assert_eq!(value, expected_value);
@@ -2244,7 +2244,7 @@ fn test_extract_scalar_key_values() {
         ),
     ];
     for ((key_paths, value), (expected_key_paths, expected_value)) in
-        result.into_iter().zip(expected.into_iter())
+        result.into_iter().zip(expected)
     {
         assert_eq!(key_paths, expected_key_paths);
         assert_eq!(value, expected_value);
