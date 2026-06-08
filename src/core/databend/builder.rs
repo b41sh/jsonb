@@ -162,7 +162,18 @@ impl<'a> ObjectBuilder<'a> {
     }
 
     pub(crate) fn build(self) -> Result<OwnedJsonb> {
-        build_object_items(self.entries)
+        let mut buf = Vec::new();
+        let header = OBJECT_CONTAINER_TAG | self.entries.len() as u32;
+        buf.write_u32::<BigEndian>(header)?;
+
+        let mut jentry_index = reserve_jentries(&mut buf, self.entries.len() * 8);
+        for key in self.entries.keys() {
+            append_object_key(&mut buf, &mut jentry_index, key);
+        }
+        for (_, item) in self.entries.into_iter() {
+            append_jsonb_item(&mut buf, &mut jentry_index, item)?;
+        }
+        Ok(OwnedJsonb::new(buf))
     }
 
     pub(crate) fn build_from_entries(
@@ -172,34 +183,33 @@ impl<'a> ObjectBuilder<'a> {
         if entries.windows(2).any(|entry| entry[0].0 == entry[1].0) {
             return Err(Error::ObjectDuplicateKey);
         }
-        build_object_items(entries)
+        build_object_vec(entries)
     }
 }
 
-fn build_object_items<'a, K>(
-    entries: impl IntoIterator<Item = (K, JsonbItem<'a>)>,
-) -> Result<OwnedJsonb>
+fn build_object_vec<'a, K>(entries: Vec<(K, JsonbItem<'a>)>) -> Result<OwnedJsonb>
 where
     K: AsRef<str>,
 {
-    let entries = entries.into_iter().collect::<Vec<_>>();
-
     let mut buf = Vec::new();
     let header = OBJECT_CONTAINER_TAG | entries.len() as u32;
     buf.write_u32::<BigEndian>(header)?;
 
     let mut jentry_index = reserve_jentries(&mut buf, entries.len() * 8);
     for (key, _) in entries.iter() {
-        let key = key.as_ref();
-        let key_len = key.len();
-        buf.extend_from_slice(key.as_bytes());
-        let jentry = JEntry::make_string_jentry(key_len);
-        replace_jentry(&mut buf, jentry, &mut jentry_index)
+        append_object_key(&mut buf, &mut jentry_index, key.as_ref());
     }
     for (_, item) in entries.into_iter() {
         append_jsonb_item(&mut buf, &mut jentry_index, item)?;
     }
     Ok(OwnedJsonb::new(buf))
+}
+
+fn append_object_key(buf: &mut Vec<u8>, jentry_index: &mut usize, key: &str) {
+    let key_len = key.len();
+    buf.extend_from_slice(key.as_bytes());
+    let jentry = JEntry::make_string_jentry(key_len);
+    replace_jentry(buf, jentry, jentry_index)
 }
 
 fn append_jsonb_item(buf: &mut Vec<u8>, jentry_index: &mut usize, item: JsonbItem) -> Result<()> {
