@@ -513,7 +513,7 @@ impl ser::SerializeMap for ObjectSerializer<'_> {
             ));
         }
         let mut builder = ObjectBuilder::new();
-        for (key_str, value) in self.keys.iter().zip(self.values.into_iter()) {
+        for (key_str, value) in self.keys.iter().zip(self.values) {
             builder.push_owned_jsonb(key_str, value)?;
         }
         let object_jsonb = builder.build()?;

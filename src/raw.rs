@@ -63,7 +63,7 @@ impl<'a> RawJsonb<'a> {
     ///
     /// The length of the data in bytes.
     pub fn len(&self) -> usize {
-        self.data.as_ref().len()
+        self.data.len()
     }
 
     /// Creates an `OwnedJsonb` from the `RawJsonb` by copying the underlying data.
