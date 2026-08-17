@@ -2044,6 +2044,81 @@ fn test_to_serde_json() {
 }
 
 #[test]
+fn test_visit_scalar_key_paths() {
+    let json = r#"{"user":{"name":"Alice","scores":[85,92]},"empty":{}}"#;
+    let jsonb = json.parse::<OwnedJsonb>().unwrap();
+    let raw_jsonb = jsonb.as_raw();
+
+    let mut paths = Vec::new();
+    raw_jsonb
+        .visit_scalar_key_paths(false, |path| {
+            paths.push(KeyPaths {
+                paths: path.to_vec(),
+            });
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        paths,
+        vec![
+            KeyPaths {
+                paths: vec![KeyPath::Name(Cow::Borrowed("empty"))],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("name")),
+                ],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("scores")),
+                    KeyPath::Index(0),
+                ],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("scores")),
+                    KeyPath::Index(1),
+                ],
+            },
+        ]
+    );
+
+    paths.clear();
+    raw_jsonb
+        .visit_scalar_key_paths(true, |path| {
+            paths.push(KeyPaths {
+                paths: path.to_vec(),
+            });
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        paths,
+        vec![
+            KeyPaths {
+                paths: vec![KeyPath::Name(Cow::Borrowed("empty"))],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("name")),
+                ],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("scores")),
+                ],
+            },
+        ]
+    );
+}
+
+#[test]
 fn test_extract_scalar_key_values() {
     // Test case 1: Simple object with scalar values
     let json = r#"{"name": "John", "age": 30, "active": true}"#;

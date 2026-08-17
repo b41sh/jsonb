@@ -1046,6 +1046,79 @@ impl RawJsonb<'_> {
         Ok(false)
     }
 
+    /// Visits scalar leaf paths without materializing values or allocating a result vector.
+    ///
+    /// When `ignore_array` is true, nested arrays are treated as leaves. Empty objects and
+    /// arrays are also treated as leaves. Root scalar values have no key path and are skipped.
+    pub fn visit_scalar_key_paths<F>(&self, ignore_array: bool, mut visitor: F) -> Result<()>
+    where
+        F: FnMut(&[KeyPath<'_>]) -> Result<()>,
+    {
+        let item = JsonbItem::from_raw_jsonb(*self)?;
+        let mut current_paths = Vec::with_capacity(3);
+        Self::visit_scalar_key_paths_recursive(
+            item,
+            ignore_array,
+            &mut current_paths,
+            &mut visitor,
+        )
+    }
+
+    fn visit_scalar_key_paths_recursive<'a, F>(
+        current_item: JsonbItem<'a>,
+        ignore_array: bool,
+        current_paths: &mut Vec<KeyPath<'a>>,
+        visitor: &mut F,
+    ) -> Result<()>
+    where
+        F: FnMut(&[KeyPath<'a>]) -> Result<()>,
+    {
+        match current_item {
+            JsonbItem::Raw(raw) => {
+                if let Some(mut object_iter) = ObjectIterator::new(raw)? {
+                    if !object_iter.is_empty() {
+                        for object_result in &mut object_iter {
+                            let (key, value) = object_result?;
+                            current_paths.push(KeyPath::Name(Cow::Borrowed(key)));
+                            Self::visit_scalar_key_paths_recursive(
+                                value,
+                                ignore_array,
+                                current_paths,
+                                visitor,
+                            )?;
+                            current_paths.pop();
+                        }
+                        return Ok(());
+                    }
+                } else if !ignore_array {
+                    if let Some(array_iter) = ArrayIterator::new(raw)? {
+                        if !array_iter.is_empty() {
+                            for (index, array_result) in array_iter.enumerate() {
+                                let value = array_result?;
+                                current_paths.push(KeyPath::Index(index as i32));
+                                Self::visit_scalar_key_paths_recursive(
+                                    value,
+                                    ignore_array,
+                                    current_paths,
+                                    visitor,
+                                )?;
+                                current_paths.pop();
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            JsonbItem::Owned(_) => unreachable!(),
+            _ => {}
+        }
+
+        if !current_paths.is_empty() {
+            visitor(current_paths)?;
+        }
+        Ok(())
+    }
+
     /// Extracts all scalar values from a JSONB value along with their key paths.
     ///
     /// This function recursively traverses the JSONB structure (both objects and arrays)
