@@ -1076,7 +1076,7 @@ impl RawJsonb<'_> {
         match current_item {
             JsonbItem::Raw(raw) => {
                 if let Some(mut object_iter) = ObjectIterator::new(raw)? {
-                    if !object_iter.is_empty() {
+                    if object_iter.len() > 0 {
                         for object_result in &mut object_iter {
                             let (key, value) = object_result?;
                             current_paths.push(KeyPath::Name(Cow::Borrowed(key)));
@@ -1092,7 +1092,7 @@ impl RawJsonb<'_> {
                     }
                 } else if !ignore_array {
                     if let Some(array_iter) = ArrayIterator::new(raw)? {
-                        if !array_iter.is_empty() {
+                        if array_iter.len() > 0 {
                             for (index, array_result) in array_iter.enumerate() {
                                 let value = array_result?;
                                 current_paths.push(KeyPath::Index(index as i32));
