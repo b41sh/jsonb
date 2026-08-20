@@ -1050,9 +1050,9 @@ impl RawJsonb<'_> {
     ///
     /// When `ignore_array` is true, nested arrays are treated as leaves. Empty objects and
     /// arrays are also treated as leaves. Root scalar values have no key path and are skipped.
-    pub fn visit_scalar_key_paths<F>(&self, ignore_array: bool, mut visitor: F) -> Result<()>
+    pub fn visit_scalar_key_paths<'a, F>(&'a self, ignore_array: bool, mut visitor: F) -> Result<()>
     where
-        F: FnMut(&[KeyPath<'_>]) -> Result<()>,
+        F: FnMut(&[KeyPath<'a>]) -> Result<()>,
     {
         let item = JsonbItem::from_raw_jsonb(*self)?;
         let mut current_paths = Vec::with_capacity(3);
@@ -1124,9 +1124,9 @@ impl RawJsonb<'_> {
     /// When `ignore_array` is true, nested arrays are treated as leaf values.
     /// Empty objects and arrays are also treated as leaves. Root scalar values
     /// have no key path and are skipped.
-    pub fn visit_scalar_key_values<F>(&self, ignore_array: bool, mut visitor: F) -> Result<()>
+    pub fn visit_scalar_key_values<'a, F>(&'a self, ignore_array: bool, mut visitor: F) -> Result<()>
     where
-        F: FnMut(&[KeyPath<'_>], Value<'_>) -> Result<()>,
+        F: FnMut(&[KeyPath<'a>], Value<'a>) -> Result<()>,
     {
         let item = JsonbItem::from_raw_jsonb(*self)?;
         let mut current_paths = Vec::with_capacity(3);
