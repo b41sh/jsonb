@@ -1119,6 +1119,110 @@ impl RawJsonb<'_> {
         Ok(())
     }
 
+    /// Visits scalar leaf paths and values without allocating a result vector.
+    ///
+    /// When `ignore_array` is true, nested arrays are treated as leaf values.
+    /// Empty objects and arrays are also treated as leaves. Root scalar values
+    /// have no key path and are skipped.
+    pub fn visit_scalar_key_values<F>(&self, ignore_array: bool, mut visitor: F) -> Result<()>
+    where
+        F: FnMut(&[KeyPath<'_>], Value<'_>) -> Result<()>,
+    {
+        let item = JsonbItem::from_raw_jsonb(*self)?;
+        let mut current_paths = Vec::with_capacity(3);
+        Self::visit_scalar_key_values_recursive(
+            item,
+            ignore_array,
+            &mut current_paths,
+            &mut visitor,
+        )
+    }
+
+    fn visit_scalar_key_values_recursive<'a, F>(
+        current_item: JsonbItem<'a>,
+        ignore_array: bool,
+        current_paths: &mut Vec<KeyPath<'a>>,
+        visitor: &mut F,
+    ) -> Result<()>
+    where
+        F: FnMut(&[KeyPath<'a>], Value<'a>) -> Result<()>,
+    {
+        match current_item {
+            JsonbItem::Raw(raw) => {
+                if let Some(mut object_iter) = ObjectIterator::new(raw)? {
+                    if object_iter.len() > 0 {
+                        for object_result in &mut object_iter {
+                            let (key, value) = object_result?;
+                            current_paths.push(KeyPath::Name(Cow::Borrowed(key)));
+                            Self::visit_scalar_key_values_recursive(
+                                value,
+                                ignore_array,
+                                current_paths,
+                                visitor,
+                            )?;
+                            current_paths.pop();
+                        }
+                        return Ok(());
+                    }
+                } else if !ignore_array {
+                    if let Some(array_iter) = ArrayIterator::new(raw)? {
+                        if array_iter.len() > 0 {
+                            for (index, array_result) in array_iter.enumerate() {
+                                let value = array_result?;
+                                current_paths.push(KeyPath::Index(index as i32));
+                                Self::visit_scalar_key_values_recursive(
+                                    value,
+                                    ignore_array,
+                                    current_paths,
+                                    visitor,
+                                )?;
+                                current_paths.pop();
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+                if !current_paths.is_empty() {
+                    visitor(current_paths, raw.to_value()?)?;
+                }
+            }
+            JsonbItem::Owned(_) => unreachable!(),
+            JsonbItem::Null => {
+                if !current_paths.is_empty() {
+                    visitor(current_paths, Value::Null)?;
+                }
+            }
+            JsonbItem::Boolean(value) => {
+                if !current_paths.is_empty() {
+                    visitor(current_paths, Value::Bool(value))?;
+                }
+            }
+            JsonbItem::String(value) => {
+                if !current_paths.is_empty() {
+                    visitor(current_paths, Value::String(value))?;
+                }
+            }
+            JsonbItem::Number(value) => {
+                if !current_paths.is_empty() {
+                    visitor(current_paths, Value::Number(value.as_number()?))?;
+                }
+            }
+            JsonbItem::Extension(value) => {
+                if !current_paths.is_empty() {
+                    let value = match value.as_extension_value()? {
+                        ExtensionValue::Binary(value) => Value::Binary(value),
+                        ExtensionValue::Date(value) => Value::Date(value),
+                        ExtensionValue::Timestamp(value) => Value::Timestamp(value),
+                        ExtensionValue::TimestampTz(value) => Value::TimestampTz(value),
+                        ExtensionValue::Interval(value) => Value::Interval(value),
+                    };
+                    visitor(current_paths, value)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Extracts all scalar values from a JSONB value along with their key paths.
     ///
     /// This function recursively traverses the JSONB structure (both objects and arrays)
@@ -1177,15 +1281,16 @@ impl RawJsonb<'_> {
         &self,
         ignore_array: bool,
     ) -> Result<Vec<(KeyPaths<'_>, Value<'_>)>> {
-        let item = JsonbItem::from_raw_jsonb(*self)?;
         let mut result = Vec::with_capacity(16);
-        let mut current_paths = Vec::with_capacity(3);
-        Self::extract_scalar_key_values_recursive(
-            item,
-            ignore_array,
-            &mut current_paths,
-            &mut result,
-        )?;
+        self.visit_scalar_key_values(ignore_array, |paths, value| {
+            result.push((
+                KeyPaths {
+                    paths: paths.to_vec(),
+                },
+                value,
+            ));
+            Ok(())
+        })?;
         Ok(result)
     }
 
