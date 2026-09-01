@@ -18,10 +18,18 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use ethnum::I256;
+use jsonb::core::JsonbItemType;
+use jsonb::from_raw_jsonb;
+use jsonb::from_slice;
+use jsonb::jsonpath::parse_json_path;
+use jsonb::keypath::parse_key_paths;
+use jsonb::keypath::KeyPath;
+use jsonb::keypath::KeyPaths;
+use jsonb::parse_value;
 use jsonb::Date;
-use jsonb::Decimal64;
 use jsonb::Decimal128;
 use jsonb::Decimal256;
+use jsonb::Decimal64;
 use jsonb::Error;
 use jsonb::Interval;
 use jsonb::Number;
@@ -31,14 +39,6 @@ use jsonb::RawJsonb;
 use jsonb::Timestamp;
 use jsonb::TimestampTz;
 use jsonb::Value;
-use jsonb::core::JsonbItemType;
-use jsonb::from_raw_jsonb;
-use jsonb::from_slice;
-use jsonb::jsonpath::parse_json_path;
-use jsonb::keypath::KeyPath;
-use jsonb::keypath::KeyPaths;
-use jsonb::keypath::parse_key_paths;
-use jsonb::parse_value;
 use nom::AsBytes;
 
 #[test]
@@ -234,48 +234,63 @@ fn test_select_by_path() {
 
     let paths = vec![
         (r#"$.name"#, vec![r#""Fred""#]),
-        (r#"$.phones"#, vec![
-            r#"[{"type":"home","number":3720453},{"type":"work","number":5062051}]"#,
-        ]),
+        (
+            r#"$.phones"#,
+            vec![r#"[{"type":"home","number":3720453},{"type":"work","number":5062051}]"#],
+        ),
         (r#"$.phones.*"#, vec![]),
-        (r#"$.phones[*]"#, vec![
-            r#"{"type":"home","number":3720453}"#,
-            r#"{"type":"work","number":5062051}"#,
-        ]),
-        (r#"$.phones.**"#, vec![
-            r#"[{"type":"home","number":3720453},{"type":"work","number":5062051}]"#,
-            r#"{"type":"home","number":3720453}"#,
-            r#"3720453"#,
-            r#""home""#,
-            r#"{"type":"work","number":5062051}"#,
-            r#"5062051"#,
-            r#""work""#,
-        ]),
-        (r#"$.phones.**{1 to last}"#, vec![
-            r#"{"type":"home","number":3720453}"#,
-            r#"3720453"#,
-            r#""home""#,
-            r#"{"type":"work","number":5062051}"#,
-            r#"5062051"#,
-            r#""work""#,
-        ]),
+        (
+            r#"$.phones[*]"#,
+            vec![
+                r#"{"type":"home","number":3720453}"#,
+                r#"{"type":"work","number":5062051}"#,
+            ],
+        ),
+        (
+            r#"$.phones.**"#,
+            vec![
+                r#"[{"type":"home","number":3720453},{"type":"work","number":5062051}]"#,
+                r#"{"type":"home","number":3720453}"#,
+                r#"3720453"#,
+                r#""home""#,
+                r#"{"type":"work","number":5062051}"#,
+                r#"5062051"#,
+                r#""work""#,
+            ],
+        ),
+        (
+            r#"$.phones.**{1 to last}"#,
+            vec![
+                r#"{"type":"home","number":3720453}"#,
+                r#"3720453"#,
+                r#""home""#,
+                r#"{"type":"work","number":5062051}"#,
+                r#"5062051"#,
+                r#""work""#,
+            ],
+        ),
         (r#"$.phones[0].*"#, vec![r#"3720453"#, r#""home""#]),
         (r#"$.phones[0].type"#, vec![r#""home""#]),
         (r#"$.phones[*].type[*]"#, vec![r#""home""#, r#""work""#]),
-        (r#"$.phones[0 to last].number"#, vec![
-            r#"3720453"#,
-            r#"5062051"#,
-        ]),
-        (r#"$.phones[0 to last]?(4 == 4)"#, vec![
-            r#"{"type":"home","number":3720453}"#,
-            r#"{"type":"work","number":5062051}"#,
-        ]),
-        (r#"$.phones[0 to last]?(@.type == "home")"#, vec![
-            r#"{"type":"home","number":3720453}"#,
-        ]),
-        (r#"$.phones[0 to last]?(@.number == 3720453)"#, vec![
-            r#"{"type":"home","number":3720453}"#,
-        ]),
+        (
+            r#"$.phones[0 to last].number"#,
+            vec![r#"3720453"#, r#"5062051"#],
+        ),
+        (
+            r#"$.phones[0 to last]?(4 == 4)"#,
+            vec![
+                r#"{"type":"home","number":3720453}"#,
+                r#"{"type":"work","number":5062051}"#,
+            ],
+        ),
+        (
+            r#"$.phones[0 to last]?(@.type == "home")"#,
+            vec![r#"{"type":"home","number":3720453}"#],
+        ),
+        (
+            r#"$.phones[0 to last]?(@.number == 3720453)"#,
+            vec![r#"{"type":"home","number":3720453}"#],
+        ),
         (
             r#"$.phones[0 to last]?(@.number == 3720453 || @.type == "work")"#,
             vec![
@@ -287,18 +302,20 @@ fn test_select_by_path() {
             r#"$.phones[0 to last]?(@.number == 3720453 && @.type == "work")"#,
             vec![],
         ),
-        (r#"$.car_no?($.name == "Fred" && $.car_no != null)"#, vec![
-            r#"123"#,
-        ]),
+        (
+            r#"$.car_no?($.name == "Fred" && $.car_no != null)"#,
+            vec![r#"123"#],
+        ),
         (r#"$.car_no"#, vec![r#"123"#]),
         (r#"$.测试\"\uD83D\uDC8E"#, vec![r#""ab""#]),
         // predicates return the result of the filter expression.
         (r#"$.phones[0 to last].number == 3720453"#, vec!["true"]),
         (r#"$.phones[0 to last].type == "workk""#, vec!["false"]),
         (r#"$.name == "Fred" && $.car_no == 123"#, vec!["true"]),
-        (r#"$.phones[*] ? (@.type starts with "ho")"#, vec![
-            r#"{"type":"home","number":3720453}"#,
-        ]),
+        (
+            r#"$.phones[*] ? (@.type starts with "ho")"#,
+            vec![r#"{"type":"home","number":3720453}"#],
+        ),
         // arithmetic functions
         (r#"$.phones[0].number + 3"#, vec![r#"3720456"#]),
         (r#"$.phones[0].number % 10"#, vec![r#"3"#]),
@@ -2041,31 +2058,34 @@ fn test_visit_scalar_key_paths() {
             Ok(())
         })
         .unwrap();
-    assert_eq!(paths, vec![
-        KeyPaths {
-            paths: vec![KeyPath::Name(Cow::Borrowed("empty"))],
-        },
-        KeyPaths {
-            paths: vec![
-                KeyPath::Name(Cow::Borrowed("user")),
-                KeyPath::Name(Cow::Borrowed("name")),
-            ],
-        },
-        KeyPaths {
-            paths: vec![
-                KeyPath::Name(Cow::Borrowed("user")),
-                KeyPath::Name(Cow::Borrowed("scores")),
-                KeyPath::Index(0),
-            ],
-        },
-        KeyPaths {
-            paths: vec![
-                KeyPath::Name(Cow::Borrowed("user")),
-                KeyPath::Name(Cow::Borrowed("scores")),
-                KeyPath::Index(1),
-            ],
-        },
-    ]);
+    assert_eq!(
+        paths,
+        vec![
+            KeyPaths {
+                paths: vec![KeyPath::Name(Cow::Borrowed("empty"))],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("name")),
+                ],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("scores")),
+                    KeyPath::Index(0),
+                ],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("scores")),
+                    KeyPath::Index(1),
+                ],
+            },
+        ]
+    );
 
     paths.clear();
     raw_jsonb
@@ -2076,23 +2096,26 @@ fn test_visit_scalar_key_paths() {
             Ok(())
         })
         .unwrap();
-    assert_eq!(paths, vec![
-        KeyPaths {
-            paths: vec![KeyPath::Name(Cow::Borrowed("empty"))],
-        },
-        KeyPaths {
-            paths: vec![
-                KeyPath::Name(Cow::Borrowed("user")),
-                KeyPath::Name(Cow::Borrowed("name")),
-            ],
-        },
-        KeyPaths {
-            paths: vec![
-                KeyPath::Name(Cow::Borrowed("user")),
-                KeyPath::Name(Cow::Borrowed("scores")),
-            ],
-        },
-    ]);
+    assert_eq!(
+        paths,
+        vec![
+            KeyPaths {
+                paths: vec![KeyPath::Name(Cow::Borrowed("empty"))],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("name")),
+                ],
+            },
+            KeyPaths {
+                paths: vec![
+                    KeyPath::Name(Cow::Borrowed("user")),
+                    KeyPath::Name(Cow::Borrowed("scores")),
+                ],
+            },
+        ]
+    );
 }
 
 #[test]

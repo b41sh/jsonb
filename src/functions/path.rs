@@ -18,10 +18,6 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
-use crate::ExtensionValue;
-use crate::OwnedJsonb;
-use crate::RawJsonb;
-use crate::Value;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
@@ -34,6 +30,10 @@ use crate::jsonpath::JsonPath;
 use crate::jsonpath::Selector;
 use crate::keypath::KeyPath;
 use crate::keypath::KeyPaths;
+use crate::ExtensionValue;
+use crate::OwnedJsonb;
+use crate::RawJsonb;
+use crate::Value;
 
 impl RawJsonb<'_> {
     /// Gets the element at the specified index in a JSONB array.
@@ -1071,9 +1071,9 @@ impl RawJsonb<'_> {
     ///
     /// let jsonb = r#"{"user":{"name":"Alice","scores":[85,92]}}"#.parse::<OwnedJsonb>().unwrap();
     /// let mut paths = Vec::new();
-    /// jsonb
-    ///     .as_raw()
-    ///     .visit_scalar_key_paths(false, |path| {
+    ///
+    /// let raw_jsonb = jsonb.as_raw();
+    /// raw_jsonb.visit_scalar_key_paths(false, |path| {
     ///         paths.push(KeyPaths {
     ///             paths: path.to_vec(),
     ///         });
@@ -1082,11 +1082,7 @@ impl RawJsonb<'_> {
     ///     .unwrap();
     /// assert_eq!(paths.len(), 3);
     /// ```
-    pub fn visit_scalar_key_paths<'a, F>(
-        &'a self,
-        ignore_array: bool,
-        mut visitor: F,
-    ) -> Result<()>
+    pub fn visit_scalar_key_paths<'a, F>(&'a self, ignore_array: bool, mut visitor: F) -> Result<()>
     where
         F: FnMut(&[KeyPath<'a>]) -> Result<()>,
     {
@@ -1176,9 +1172,9 @@ impl RawJsonb<'_> {
     ///
     /// let jsonb = r#"{"user":{"name":"Alice","scores":[85,92]}}"#.parse::<OwnedJsonb>().unwrap();
     /// let mut values = Vec::new();
-    /// jsonb
-    ///     .as_raw()
-    ///     .visit_scalar_key_values(true, |paths, value| {
+    ///
+    /// let raw_jsonb = jsonb.as_raw();
+    /// raw_jsonb.visit_scalar_key_values(true, |paths, value| {
     ///         values.push((paths.len(), value));
     ///         Ok(())
     ///     })
