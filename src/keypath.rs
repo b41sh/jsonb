@@ -139,6 +139,12 @@ impl<'a> KeyPaths<'a> {
 }
 
 impl OwnedKeyPaths {
+    pub fn from_key_path_slice(key_paths: &[KeyPath<'_>]) -> Self {
+        Self {
+            paths: key_paths.iter().map(KeyPath::to_owned).collect(),
+        }
+    }
+
     pub fn as_key_paths(&self) -> KeyPaths<'_> {
         KeyPaths {
             paths: self.paths.iter().map(OwnedKeyPath::as_key_path).collect(),
