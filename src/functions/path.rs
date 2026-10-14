@@ -1364,4 +1364,191 @@ impl RawJsonb<'_> {
         })?;
         Ok(result)
     }
+
+    /// Traverses the whole JSONB structure and reports every node to `visitor`.
+    ///
+    /// Unlike [`RawJsonb::visit_scalar_key_values`], this visitor reports containers as well
+    /// as scalars, so callers can see the full structure of the value:
+    ///
+    /// - The root is reported like any other node, with an empty path. Root scalars, root
+    ///   arrays, and an empty root object are therefore visible.
+    /// - Objects and arrays are reported through `enter_object`/`enter_array` with their
+    ///   length, so empty containers (`len == 0`) can be told apart from missing values.
+    /// - Array elements use the [`JsonbPathSegment::Element`] segment instead of an index,
+    ///   so all elements of an array share the same path. Elements are visited in order.
+    /// - JSON null is reported through `visit_scalar` as `Value::Null`.
+    ///
+    /// Returning [`VisitControl::Skip`] from `enter_object` or `enter_array` skips the
+    /// children of that container, and its `exit_*` callback is not called. The `raw`
+    /// argument is the container's own encoded bytes and is a valid standalone JSONB value,
+    /// so a skipped container can be stored as-is without re-encoding.
+    ///
+    /// Returning an error from any callback stops the traversal and propagates the error.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jsonb::JsonbPathSegment;
+    /// use jsonb::JsonbStructureVisitor;
+    /// use jsonb::OwnedJsonb;
+    /// use jsonb::RawJsonb;
+    /// use jsonb::Value;
+    /// use jsonb::VisitControl;
+    ///
+    /// #[derive(Default)]
+    /// struct Counter {
+    ///     scalars: usize,
+    ///     arrays: usize,
+    /// }
+    ///
+    /// impl<'a> JsonbStructureVisitor<'a> for Counter {
+    ///     fn visit_scalar(
+    ///         &mut self,
+    ///         _path: &[JsonbPathSegment<'a>],
+    ///         _value: Value<'a>,
+    ///     ) -> Result<(), jsonb::Error> {
+    ///         self.scalars += 1;
+    ///         Ok(())
+    ///     }
+    ///
+    ///     fn enter_array(
+    ///         &mut self,
+    ///         _path: &[JsonbPathSegment<'a>],
+    ///         _len: usize,
+    ///         _raw: RawJsonb<'a>,
+    ///     ) -> Result<VisitControl, jsonb::Error> {
+    ///         self.arrays += 1;
+    ///         Ok(VisitControl::Descend)
+    ///     }
+    /// }
+    ///
+    /// let jsonb = r#"[{"k":"v"},{"k2":"v2"}]"#.parse::<OwnedJsonb>().unwrap();
+    /// let mut counter = Counter::default();
+    /// jsonb.as_raw().visit_structure(&mut counter).unwrap();
+    /// assert_eq!(counter.arrays, 1);
+    /// assert_eq!(counter.scalars, 2);
+    /// ```
+    pub fn visit_structure<'a, V>(&'a self, visitor: &mut V) -> Result<()>
+    where
+        V: JsonbStructureVisitor<'a>,
+    {
+        let item = JsonbItem::from_raw_jsonb(*self)?;
+        let mut path = Vec::with_capacity(4);
+        Self::visit_structure_recursive(item, &mut path, visitor)
+    }
+
+    fn visit_structure_recursive<'a, V>(
+        current_item: JsonbItem<'a>,
+        path: &mut Vec<JsonbPathSegment<'a>>,
+        visitor: &mut V,
+    ) -> Result<()>
+    where
+        V: JsonbStructureVisitor<'a>,
+    {
+        let value = match current_item {
+            JsonbItem::Raw(raw) => {
+                if let Some(object_iter) = ObjectIterator::new(raw)? {
+                    if visitor.enter_object(path, object_iter.len(), raw)? == VisitControl::Skip {
+                        return Ok(());
+                    }
+                    for object_result in object_iter {
+                        let (key, value) = object_result?;
+                        path.push(JsonbPathSegment::Key(key));
+                        Self::visit_structure_recursive(value, path, visitor)?;
+                        path.pop();
+                    }
+                    return visitor.exit_object(path);
+                }
+                if let Some(array_iter) = ArrayIterator::new(raw)? {
+                    if visitor.enter_array(path, array_iter.len(), raw)? == VisitControl::Skip {
+                        return Ok(());
+                    }
+                    path.push(JsonbPathSegment::Element);
+                    for array_result in array_iter {
+                        let value = array_result?;
+                        Self::visit_structure_recursive(value, path, visitor)?;
+                    }
+                    path.pop();
+                    return visitor.exit_array(path);
+                }
+                // A raw item that is neither an object nor an array is a scalar container.
+                raw.to_value()?
+            }
+            JsonbItem::Owned(_) => return Err(Error::InvalidJsonb),
+            JsonbItem::Null => Value::Null,
+            JsonbItem::Boolean(value) => Value::Bool(value),
+            JsonbItem::String(value) => Value::String(value),
+            JsonbItem::Number(value) => Value::Number(value.as_number()?),
+            JsonbItem::Extension(value) => match value.as_extension_value()? {
+                ExtensionValue::Binary(value) => Value::Binary(value),
+                ExtensionValue::Date(value) => Value::Date(value),
+                ExtensionValue::Timestamp(value) => Value::Timestamp(value),
+                ExtensionValue::TimestampTz(value) => Value::TimestampTz(value),
+                ExtensionValue::Interval(value) => Value::Interval(value),
+            },
+        };
+        visitor.visit_scalar(path, value)
+    }
+}
+
+/// A segment of the path reported by [`RawJsonb::visit_structure`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JsonbPathSegment<'a> {
+    /// An object field.
+    Key(&'a str),
+    /// The elements of an array. All elements of an array share this segment, so the
+    /// path does not contain the element index.
+    Element,
+}
+
+/// Controls whether [`RawJsonb::visit_structure`] visits the children of a container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisitControl {
+    /// Visit the children of the container.
+    Descend,
+    /// Skip the children of the container. The `exit_*` callback is not called.
+    Skip,
+}
+
+/// Callbacks used by [`RawJsonb::visit_structure`].
+///
+/// Paths are relative to the root; the root itself has an empty path. Path segments and
+/// values may borrow from the visited JSONB with lifetime `'a`.
+pub trait JsonbStructureVisitor<'a> {
+    /// Called for each scalar value, including JSON null.
+    fn visit_scalar(&mut self, path: &[JsonbPathSegment<'a>], value: Value<'a>) -> Result<()>;
+
+    /// Called when an object is reached. `len` is the number of fields, and `raw` is the
+    /// object's encoded bytes. The default visits the children.
+    fn enter_object(
+        &mut self,
+        _path: &[JsonbPathSegment<'a>],
+        _len: usize,
+        _raw: RawJsonb<'a>,
+    ) -> Result<VisitControl> {
+        Ok(VisitControl::Descend)
+    }
+
+    /// Called after all fields of an object have been visited. Not called if
+    /// `enter_object` returned [`VisitControl::Skip`].
+    fn exit_object(&mut self, _path: &[JsonbPathSegment<'a>]) -> Result<()> {
+        Ok(())
+    }
+
+    /// Called when an array is reached. `len` is the number of elements, and `raw` is the
+    /// array's encoded bytes. The default visits the elements.
+    fn enter_array(
+        &mut self,
+        _path: &[JsonbPathSegment<'a>],
+        _len: usize,
+        _raw: RawJsonb<'a>,
+    ) -> Result<VisitControl> {
+        Ok(VisitControl::Descend)
+    }
+
+    /// Called after all elements of an array have been visited. Not called if
+    /// `enter_array` returned [`VisitControl::Skip`].
+    fn exit_array(&mut self, _path: &[JsonbPathSegment<'a>]) -> Result<()> {
+        Ok(())
+    }
 }

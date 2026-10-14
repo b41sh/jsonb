@@ -17,3 +17,7 @@ mod object;
 mod operator;
 mod path;
 mod scalar;
+
+pub use path::JsonbPathSegment;
+pub use path::JsonbStructureVisitor;
+pub use path::VisitControl;

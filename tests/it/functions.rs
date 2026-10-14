@@ -32,6 +32,8 @@ use jsonb::Decimal256;
 use jsonb::Decimal64;
 use jsonb::Error;
 use jsonb::Interval;
+use jsonb::JsonbPathSegment;
+use jsonb::JsonbStructureVisitor;
 use jsonb::Number;
 use jsonb::Object;
 use jsonb::OwnedJsonb;
@@ -39,6 +41,7 @@ use jsonb::RawJsonb;
 use jsonb::Timestamp;
 use jsonb::TimestampTz;
 use jsonb::Value;
+use jsonb::VisitControl;
 use nom::AsBytes;
 
 #[test]
@@ -2190,6 +2193,190 @@ fn test_visit_scalar_key_values() {
 
     let error = raw_jsonb.visit_scalar_key_values(false, |_, _| Err(Error::InvalidJson));
     assert_eq!(error, Err(Error::InvalidJson));
+}
+
+/// Records every `visit_structure` callback as a line, with paths written as `$.a[].b`.
+#[derive(Default)]
+struct StructureRecorder {
+    /// Containers at this path are skipped; their raw bytes are recorded instead.
+    skip_path: Option<&'static str>,
+    /// Fails the traversal when a scalar is visited at this path.
+    fail_path: Option<&'static str>,
+    events: Vec<String>,
+}
+
+impl StructureRecorder {
+    fn format_path(path: &[JsonbPathSegment<'_>]) -> String {
+        let mut formatted = String::from("$");
+        for segment in path {
+            match segment {
+                JsonbPathSegment::Key(key) => {
+                    formatted.push('.');
+                    formatted.push_str(key);
+                }
+                JsonbPathSegment::Element => formatted.push_str("[]"),
+            }
+        }
+        formatted
+    }
+
+    fn enter(
+        &mut self,
+        kind: &str,
+        path: &[JsonbPathSegment<'_>],
+        len: usize,
+        raw: RawJsonb<'_>,
+    ) -> VisitControl {
+        let path = Self::format_path(path);
+        if self.skip_path == Some(path.as_str()) {
+            self.events
+                .push(format!("skip_{kind} {path} {}", raw.to_string()));
+            VisitControl::Skip
+        } else {
+            self.events.push(format!("enter_{kind} {path} {len}"));
+            VisitControl::Descend
+        }
+    }
+}
+
+impl<'a> JsonbStructureVisitor<'a> for StructureRecorder {
+    fn visit_scalar(
+        &mut self,
+        path: &[JsonbPathSegment<'a>],
+        value: Value<'a>,
+    ) -> Result<(), Error> {
+        let path = Self::format_path(path);
+        if self.fail_path == Some(path.as_str()) {
+            return Err(Error::InvalidJson);
+        }
+        self.events.push(format!("scalar {path} {value}"));
+        Ok(())
+    }
+
+    fn enter_object(
+        &mut self,
+        path: &[JsonbPathSegment<'a>],
+        len: usize,
+        raw: RawJsonb<'a>,
+    ) -> Result<VisitControl, Error> {
+        Ok(self.enter("object", path, len, raw))
+    }
+
+    fn exit_object(&mut self, path: &[JsonbPathSegment<'a>]) -> Result<(), Error> {
+        self.events
+            .push(format!("exit_object {}", Self::format_path(path)));
+        Ok(())
+    }
+
+    fn enter_array(
+        &mut self,
+        path: &[JsonbPathSegment<'a>],
+        len: usize,
+        raw: RawJsonb<'a>,
+    ) -> Result<VisitControl, Error> {
+        Ok(self.enter("array", path, len, raw))
+    }
+
+    fn exit_array(&mut self, path: &[JsonbPathSegment<'a>]) -> Result<(), Error> {
+        self.events
+            .push(format!("exit_array {}", Self::format_path(path)));
+        Ok(())
+    }
+}
+
+fn record_structure(json: &str, recorder: StructureRecorder) -> Result<Vec<String>, Error> {
+    let jsonb = json.parse::<OwnedJsonb>().unwrap();
+    let mut recorder = recorder;
+    jsonb.as_raw().visit_structure(&mut recorder)?;
+    Ok(recorder.events)
+}
+
+#[test]
+fn test_visit_structure() {
+    // Root array of objects: elements share the `[]` path segment.
+    assert_eq!(
+        record_structure(r#"[{"k":"v"},{"k2":"v2"}]"#, StructureRecorder::default()).unwrap(),
+        vec![
+            "enter_array $ 2",
+            "enter_object $[] 1",
+            r#"scalar $[].k "v""#,
+            "exit_object $[]",
+            "enter_object $[] 1",
+            r#"scalar $[].k2 "v2""#,
+            "exit_object $[]",
+            "exit_array $",
+        ]
+    );
+
+    // Root scalars and root JSON null are reported with the root path.
+    for (json, expected) in [
+        (r#""abc""#, r#"scalar $ "abc""#),
+        ("123", "scalar $ 123"),
+        ("null", "scalar $ null"),
+    ] {
+        assert_eq!(
+            record_structure(json, StructureRecorder::default()).unwrap(),
+            vec![expected]
+        );
+    }
+
+    // Empty containers, JSON null, and nested arrays.
+    assert_eq!(
+        record_structure(
+            r#"{"a":{},"b":[],"c":null,"d":{"e":[1,[2]]}}"#,
+            StructureRecorder::default()
+        )
+        .unwrap(),
+        vec![
+            "enter_object $ 4",
+            "enter_object $.a 0",
+            "exit_object $.a",
+            "enter_array $.b 0",
+            "exit_array $.b",
+            "scalar $.c null",
+            "enter_object $.d 1",
+            "enter_array $.d.e 2",
+            "scalar $.d.e[] 1",
+            "enter_array $.d.e[] 1",
+            "scalar $.d.e[][] 2",
+            "exit_array $.d.e[]",
+            "exit_array $.d.e",
+            "exit_object $.d",
+            "exit_object $",
+        ]
+    );
+
+    // Skipping a container hides its children and its exit callback, and the raw bytes
+    // are a standalone JSONB value.
+    assert_eq!(
+        record_structure(
+            r#"{"a":1,"d":{"e":[1,[2]]},"z":true}"#,
+            StructureRecorder {
+                skip_path: Some("$.d"),
+                ..Default::default()
+            }
+        )
+        .unwrap(),
+        vec![
+            "enter_object $ 3",
+            "scalar $.a 1",
+            r#"skip_object $.d {"e":[1,[2]]}"#,
+            "scalar $.z true",
+            "exit_object $",
+        ]
+    );
+
+    // An error from a callback stops the traversal.
+    assert_eq!(
+        record_structure(
+            r#"{"a":[1,2]}"#,
+            StructureRecorder {
+                fail_path: Some("$.a[]"),
+                ..Default::default()
+            }
+        ),
+        Err(Error::InvalidJson)
+    );
 }
 
 #[test]

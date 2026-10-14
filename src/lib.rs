@@ -83,6 +83,9 @@ pub use error::Error;
 pub use extension::*;
 #[allow(unused_imports)]
 pub use from::*;
+pub use functions::JsonbPathSegment;
+pub use functions::JsonbStructureVisitor;
+pub use functions::VisitControl;
 pub use number::Decimal128;
 pub use number::Decimal256;
 pub use number::Decimal64;
