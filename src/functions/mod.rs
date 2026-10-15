@@ -20,4 +20,5 @@ mod scalar;
 
 pub use path::JsonbPathSegment;
 pub use path::JsonbStructureVisitor;
+pub use path::OwnedJsonbPathSegment;
 pub use path::VisitControl;

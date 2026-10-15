@@ -85,6 +85,7 @@ pub use extension::*;
 pub use from::*;
 pub use functions::JsonbPathSegment;
 pub use functions::JsonbStructureVisitor;
+pub use functions::OwnedJsonbPathSegment;
 pub use functions::VisitControl;
 pub use number::Decimal128;
 pub use number::Decimal256;

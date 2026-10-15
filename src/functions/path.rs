@@ -1501,6 +1501,35 @@ pub enum JsonbPathSegment<'a> {
     Element,
 }
 
+impl JsonbPathSegment<'_> {
+    pub fn to_owned(&self) -> OwnedJsonbPathSegment {
+        match self {
+            JsonbPathSegment::Key(key) => OwnedJsonbPathSegment::Key(key.to_string()),
+            JsonbPathSegment::Element => OwnedJsonbPathSegment::Element,
+        }
+    }
+}
+
+/// The owned form of [`JsonbPathSegment`].
+///
+/// See [`crate::keypath::encode_canonical_structure_path`] for the canonical string form.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum OwnedJsonbPathSegment {
+    /// An object field.
+    Key(String),
+    /// The elements of an array.
+    Element,
+}
+
+impl OwnedJsonbPathSegment {
+    pub fn as_segment(&self) -> JsonbPathSegment<'_> {
+        match self {
+            OwnedJsonbPathSegment::Key(key) => JsonbPathSegment::Key(key.as_str()),
+            OwnedJsonbPathSegment::Element => JsonbPathSegment::Element,
+        }
+    }
+}
+
 /// Controls whether [`RawJsonb::visit_structure`] visits the children of a container.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VisitControl {

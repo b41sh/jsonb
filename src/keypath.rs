@@ -32,6 +32,8 @@ use nom::Parser;
 use crate::jsonpath::raw_string;
 use crate::jsonpath::string;
 use crate::Error;
+use crate::JsonbPathSegment;
+use crate::OwnedJsonbPathSegment;
 
 /// Represents a set of key path chains.
 /// Compatible with PostgreSQL extracts JSON sub-object paths syntax.
@@ -163,23 +165,7 @@ impl OwnedKeyPaths {
                 OwnedKeyPath::Index(index) => {
                     write!(encoded, "[{index}]").unwrap();
                 }
-                OwnedKeyPath::Name(name) => {
-                    if !encoded.is_empty() {
-                        encoded.push('.');
-                    }
-                    if is_ident(name) {
-                        encoded.push_str(name);
-                    } else {
-                        encoded.push('\'');
-                        for ch in name.chars() {
-                            if ch == '\\' || ch == '\'' {
-                                encoded.push('\\');
-                            }
-                            encoded.push(ch);
-                        }
-                        encoded.push('\'');
-                    }
-                }
+                OwnedKeyPath::Name(name) => push_canonical_name(&mut encoded, name),
             }
         }
         encoded
@@ -189,6 +175,67 @@ impl OwnedKeyPaths {
     /// [`Self::to_canonical_path`].
     pub fn from_canonical_path(path: &str) -> Result<Self, Error> {
         decode_canonical_path(path).ok_or(Error::InvalidKeyPath)
+    }
+}
+
+/// The encoded array element segment of a structure path.
+pub const CANONICAL_ELEMENT_SEGMENT: &str = "[]";
+
+/// Encode a structure path, as reported by [`crate::RawJsonb::visit_structure`],
+/// into the canonical form used by virtual-column storage metadata.
+///
+/// Keys are encoded exactly like [`OwnedKeyPaths::to_canonical_path`], and the
+/// array element segment is encoded as `[]`. A path that only contains keys
+/// therefore has the same encoding in both forms. The root path is encoded as
+/// the empty string.
+///
+/// Examples: `items[].id`, `[][]`, `user.'a.b'`.
+pub fn encode_canonical_structure_path<'a, I>(segments: I) -> String
+where
+    I: IntoIterator<Item = JsonbPathSegment<'a>>,
+{
+    let mut encoded = String::new();
+    for segment in segments {
+        match segment {
+            JsonbPathSegment::Key(name) => push_canonical_name(&mut encoded, name),
+            JsonbPathSegment::Element => encoded.push_str(CANONICAL_ELEMENT_SEGMENT),
+        }
+    }
+    encoded
+}
+
+/// Decode a structure path produced by [`encode_canonical_structure_path`].
+///
+/// Returns `None` for malformed input and for paths that contain array indexes,
+/// which are key paths rather than structure paths. The empty string decodes to
+/// the root path, i.e. an empty segment list.
+pub fn decode_canonical_structure_path(path: &str) -> Option<Vec<OwnedJsonbPathSegment>> {
+    decode_canonical_segments(path)?
+        .into_iter()
+        .map(|segment| match segment {
+            CanonicalSegment::Name(name) => Some(OwnedJsonbPathSegment::Key(name)),
+            CanonicalSegment::Element => Some(OwnedJsonbPathSegment::Element),
+            CanonicalSegment::Index(_) => None,
+        })
+        .collect()
+}
+
+/// Pushes an object key, prefixed by `.` unless it is the first segment.
+fn push_canonical_name(encoded: &mut String, name: &str) {
+    if !encoded.is_empty() {
+        encoded.push('.');
+    }
+    if is_ident(name) {
+        encoded.push_str(name);
+    } else {
+        encoded.push('\'');
+        for ch in name.chars() {
+            if ch == '\\' || ch == '\'' {
+                encoded.push('\\');
+            }
+            encoded.push(ch);
+        }
+        encoded.push('\'');
     }
 }
 
@@ -210,13 +257,38 @@ impl OwnedKeyPath {
     }
 }
 
+/// A segment decoded from the canonical form. Key paths reject `Element`, and
+/// structure paths reject `Index`.
+enum CanonicalSegment {
+    Name(String),
+    Index(i32),
+    Element,
+}
+
 fn decode_canonical_path(path: &str) -> Option<OwnedKeyPaths> {
+    let paths = decode_canonical_segments(path)?
+        .into_iter()
+        .map(|segment| match segment {
+            CanonicalSegment::Name(name) => Some(OwnedKeyPath::Name(name)),
+            CanonicalSegment::Index(index) => Some(OwnedKeyPath::Index(index)),
+            CanonicalSegment::Element => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (!paths.is_empty()).then_some(OwnedKeyPaths { paths })
+}
+
+fn decode_canonical_segments(path: &str) -> Option<Vec<CanonicalSegment>> {
     let bytes = path.as_bytes();
     let mut index = 0;
     let mut paths = Vec::new();
     while index < bytes.len() {
         if bytes[index] == b'[' {
             index += 1;
+            if bytes.get(index) == Some(&b']') {
+                paths.push(CanonicalSegment::Element);
+                index += 1;
+                continue;
+            }
             let start = index;
             if index < bytes.len() && bytes[index] == b'-' {
                 index += 1;
@@ -234,7 +306,7 @@ fn decode_canonical_path(path: &str) -> Option<OwnedKeyPaths> {
                 .ok()?
                 .parse::<i32>()
                 .ok()?;
-            paths.push(OwnedKeyPath::Index(value));
+            paths.push(CanonicalSegment::Index(value));
             index += 1;
             continue;
         }
@@ -270,7 +342,7 @@ fn decode_canonical_path(path: &str) -> Option<OwnedKeyPaths> {
                     index += ch.len_utf8();
                 }
             }
-            paths.push(OwnedKeyPath::Name(name));
+            paths.push(CanonicalSegment::Name(name));
             continue;
         }
 
@@ -287,10 +359,10 @@ fn decode_canonical_path(path: &str) -> Option<OwnedKeyPaths> {
             }
             end += ch.len_utf8();
         }
-        paths.push(OwnedKeyPath::Name(path[index..end].to_string()));
+        paths.push(CanonicalSegment::Name(path[index..end].to_string()));
         index = end;
     }
-    (!paths.is_empty()).then_some(OwnedKeyPaths { paths })
+    Some(paths)
 }
 
 fn is_ident(name: &str) -> bool {
