@@ -153,7 +153,9 @@ pub(crate) fn string(input: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
             }
         }
     }
-    if i > 1 {
+    // Empty quoted keys are valid. Only decode after finding a closing quote;
+    // an unterminated string must not reach the input[i + 1..] slices below.
+    if input.get(i) == Some(&b'"') {
         if escapes == 0 {
             if let Ok(s) = std::str::from_utf8(&input[1..i]) {
                 return Ok((&input[i + 1..], Cow::Borrowed(s)));
