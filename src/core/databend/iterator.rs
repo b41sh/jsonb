@@ -58,6 +58,27 @@ impl<'a> ArrayIterator<'a> {
     }
 }
 
+impl<'a> ArrayIterator<'a> {
+    /// Reads the item at `self.index` and advances past it.
+    fn read_next(&mut self) -> Result<JsonbItem<'a>> {
+        let jentry = self.raw_jsonb.read_jentry(self.jentry_offset)?;
+
+        let item_length = jentry.length as usize;
+        let item_range = Range {
+            start: self.item_offset,
+            end: self.item_offset + item_length,
+        };
+        let data = self.raw_jsonb.slice(item_range)?;
+        let item = jentry_to_jsonb_item(jentry, data);
+
+        self.index += 1;
+        self.jentry_offset += 4;
+        self.item_offset += item_length;
+
+        item
+    }
+}
+
 impl<'a> Iterator for ArrayIterator<'a> {
     type Item = Result<JsonbItem<'a>>;
 
@@ -65,26 +86,12 @@ impl<'a> Iterator for ArrayIterator<'a> {
         if self.index >= self.length {
             return None;
         }
-        let jentry = match self.raw_jsonb.read_jentry(self.jentry_offset) {
-            Ok(jentry) => jentry,
-            Err(err) => return Some(Err(err)),
-        };
-
-        let item_length = jentry.length as usize;
-        let item_range = Range {
-            start: self.item_offset,
-            end: self.item_offset + item_length,
-        };
-        let data = match self.raw_jsonb.slice(item_range) {
-            Ok(data) => data,
-            Err(err) => return Some(Err(err)),
-        };
-        let item = jentry_to_jsonb_item(jentry, data);
-
-        self.index += 1;
-        self.jentry_offset += 4;
-        self.item_offset += item_length;
-
+        let item = self.read_next();
+        if item.is_err() {
+            // Stop after the first error. Retrying would return the same error
+            // forever, and `nth`/`count` would then loop over every remaining index.
+            self.index = self.length;
+        }
         Some(item)
     }
 
@@ -131,6 +138,27 @@ impl<'a> ObjectKeyIterator<'a> {
     }
 }
 
+impl<'a> ObjectKeyIterator<'a> {
+    /// Reads the item at `self.index` and advances past it.
+    fn read_next(&mut self) -> Result<JsonbItem<'a>> {
+        let jentry = self.raw_jsonb.read_jentry(self.jentry_offset)?;
+
+        let key_length = jentry.length as usize;
+        let key_range = Range {
+            start: self.item_offset,
+            end: self.item_offset + key_length,
+        };
+        let data = self.raw_jsonb.slice(key_range)?;
+        let key_item = jentry_to_jsonb_item(jentry, data);
+
+        self.index += 1;
+        self.jentry_offset += 4;
+        self.item_offset += key_length;
+
+        key_item
+    }
+}
+
 impl<'a> Iterator for ObjectKeyIterator<'a> {
     type Item = Result<JsonbItem<'a>>;
 
@@ -138,27 +166,13 @@ impl<'a> Iterator for ObjectKeyIterator<'a> {
         if self.index >= self.length {
             return None;
         }
-        let jentry = match self.raw_jsonb.read_jentry(self.jentry_offset) {
-            Ok(jentry) => jentry,
-            Err(err) => return Some(Err(err)),
-        };
-
-        let key_length = jentry.length as usize;
-        let key_range = Range {
-            start: self.item_offset,
-            end: self.item_offset + key_length,
-        };
-        let data = match self.raw_jsonb.slice(key_range) {
-            Ok(data) => data,
-            Err(err) => return Some(Err(err)),
-        };
-        let key_item = jentry_to_jsonb_item(jentry, data);
-
-        self.index += 1;
-        self.jentry_offset += 4;
-        self.item_offset += key_length;
-
-        Some(key_item)
+        let item = self.read_next();
+        if item.is_err() {
+            // Stop after the first error. Retrying would return the same error
+            // forever, and `nth`/`count` would then loop over every remaining index.
+            self.index = self.length;
+        }
+        Some(item)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -211,6 +225,27 @@ impl<'a> ObjectValueIterator<'a> {
     }
 }
 
+impl<'a> ObjectValueIterator<'a> {
+    /// Reads the item at `self.index` and advances past it.
+    fn read_next(&mut self) -> Result<JsonbItem<'a>> {
+        let jentry = self.raw_jsonb.read_jentry(self.jentry_offset)?;
+
+        let val_length = jentry.length as usize;
+        let val_range = Range {
+            start: self.item_offset,
+            end: self.item_offset + val_length,
+        };
+        let data = self.raw_jsonb.slice(val_range)?;
+        let val_item = jentry_to_jsonb_item(jentry, data);
+
+        self.index += 1;
+        self.jentry_offset += 4;
+        self.item_offset += val_length;
+
+        val_item
+    }
+}
+
 impl<'a> Iterator for ObjectValueIterator<'a> {
     type Item = Result<JsonbItem<'a>>;
 
@@ -218,27 +253,13 @@ impl<'a> Iterator for ObjectValueIterator<'a> {
         if self.index >= self.length {
             return None;
         }
-        let jentry = match self.raw_jsonb.read_jentry(self.jentry_offset) {
-            Ok(jentry) => jentry,
-            Err(err) => return Some(Err(err)),
-        };
-
-        let val_length = jentry.length as usize;
-        let val_range = Range {
-            start: self.item_offset,
-            end: self.item_offset + val_length,
-        };
-        let data = match self.raw_jsonb.slice(val_range) {
-            Ok(data) => data,
-            Err(err) => return Some(Err(err)),
-        };
-        let val_item = jentry_to_jsonb_item(jentry, data);
-
-        self.index += 1;
-        self.jentry_offset += 4;
-        self.item_offset += val_length;
-
-        Some(val_item)
+        let item = self.read_next();
+        if item.is_err() {
+            // Stop after the first error. Retrying would return the same error
+            // forever, and `nth`/`count` would then loop over every remaining index.
+            self.index = self.length;
+        }
+        Some(item)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -299,22 +320,11 @@ impl<'a> ObjectIterator<'a> {
     }
 }
 
-impl<'a> Iterator for ObjectIterator<'a> {
-    type Item = Result<(&'a str, JsonbItem<'a>)>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.length {
-            return None;
-        }
-
-        let key_jentry = match self.raw_jsonb.read_jentry(self.key_jentry_offset) {
-            Ok(jentry) => jentry,
-            Err(err) => return Some(Err(err)),
-        };
-        let val_jentry = match self.raw_jsonb.read_jentry(self.val_jentry_offset) {
-            Ok(jentry) => jentry,
-            Err(err) => return Some(Err(err)),
-        };
+impl<'a> ObjectIterator<'a> {
+    /// Reads the item at `self.index` and advances past it.
+    fn read_next(&mut self) -> Result<(&'a str, JsonbItem<'a>)> {
+        let key_jentry = self.raw_jsonb.read_jentry(self.key_jentry_offset)?;
+        let val_jentry = self.raw_jsonb.read_jentry(self.val_jentry_offset)?;
         let key_length = key_jentry.length as usize;
         let val_length = val_jentry.length as usize;
 
@@ -322,20 +332,14 @@ impl<'a> Iterator for ObjectIterator<'a> {
             start: self.key_offset,
             end: self.key_offset + key_length,
         };
-        let key_data = match self.raw_jsonb.slice(key_range) {
-            Ok(data) => data,
-            Err(err) => return Some(Err(err)),
-        };
+        let key_data = self.raw_jsonb.slice(key_range)?;
         let key = decode_str(key_data);
 
         let val_range = Range {
             start: self.val_offset,
             end: self.val_offset + val_length,
         };
-        let val_data = match self.raw_jsonb.slice(val_range) {
-            Ok(data) => data,
-            Err(err) => return Some(Err(err)),
-        };
+        let val_data = self.raw_jsonb.slice(val_range)?;
         let val_item = jentry_to_jsonb_item(val_jentry, val_data);
 
         self.index += 1;
@@ -344,7 +348,24 @@ impl<'a> Iterator for ObjectIterator<'a> {
         self.key_offset += key_length;
         self.val_offset += val_length;
 
-        Some(key.and_then(|key| val_item.map(|val_item| (key, val_item))))
+        key.and_then(|key| val_item.map(|val_item| (key, val_item)))
+    }
+}
+
+impl<'a> Iterator for ObjectIterator<'a> {
+    type Item = Result<(&'a str, JsonbItem<'a>)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.length {
+            return None;
+        }
+        let item = self.read_next();
+        if item.is_err() {
+            // Stop after the first error. Retrying would return the same error
+            // forever, and `nth`/`count` would then loop over every remaining index.
+            self.index = self.length;
+        }
+        Some(item)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

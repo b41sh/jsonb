@@ -21,16 +21,25 @@ cargo-fuzz needs a nightly toolchain:
 ```sh
 cargo install cargo-fuzz
 cd fuzz
+mkdir -p corpus/raw_jsonb
 cargo +nightly fuzz run raw_jsonb corpus/raw_jsonb seeds/raw_jsonb -- \
-    -max_len=4096 -malloc_limit_mb=512 -max_total_time=600
+    -max_len=4096 -malloc_limit_mb=512 -timeout=10 -max_total_time=600
 ```
 
-- The first directory receives newly discovered inputs; it is git-ignored.
+- The first directory receives newly discovered inputs. It is git-ignored, and
+  libFuzzer exits if it does not exist, so create it before the first run.
   `seeds/<target>` holds the small committed seed corpus.
 - `-malloc_limit_mb` turns any single allocation above the limit into a crash,
   which catches lengths read from the input being trusted for allocation.
+- `-timeout=10` reports any input that runs longer than 10 seconds as a
+  `timeout-*` artifact. libFuzzer's default is 1200 seconds, so without it a
+  hang looks like the fuzzer has gone quiet.
 - Add `-fork=N -ignore_crashes=1` to keep fuzzing on `N` processes after a crash
   and collect every distinct failure.
+
+libFuzzer only prints when it finds new coverage, plus `pulse` lines at
+power-of-two execution counts, so long quiet periods are normal once coverage
+levels off. A growing `corpus/<target>` directory means it is still working.
 
 Crashing inputs are written to `artifacts/<target>/`. To reproduce and shrink one:
 

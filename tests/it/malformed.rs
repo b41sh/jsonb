@@ -677,15 +677,7 @@ fn json_path_slices_outside_the_array_select_nothing() {
 fn path_display_round_trips_special_names() {
     // Names that need quoting or escaping when shown. The parsers reject empty
     // quoted names, so `""` is not included.
-    for name in [
-        r#"st"ore"#,
-        "a b",
-        "a.b",
-        "a\\b",
-        "$x",
-        "1st",
-        "tab\there",
-    ] {
+    for name in [r#"st"ore"#, "a b", "a.b", "a\\b", "$x", "1st", "tab\there"] {
         let quoted = serde_json::to_string(name).unwrap();
         for text in [
             format!("$.{quoted}"),
@@ -710,4 +702,48 @@ fn path_display_round_trips_special_names() {
             "{text} shown as {shown}"
         );
     }
+}
+
+/// Runs `f` on its own thread and fails if it does not finish within 10 seconds.
+fn within_timeout<T: Send + 'static>(name: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || tx.send(f()).unwrap());
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap_or_else(|_| panic!("{name} did not finish within 10 seconds"))
+}
+
+#[test]
+fn iterators_stop_after_an_error() {
+    // An array of 2 whose second element claims 65535 bytes that are not there
+    // (found by fuzzing). Iterators used to return the same error forever, so
+    // `nth(n)` looped `n` times.
+    let bytes = jsonb(&[0x8000_0002, 0x2000_0002, 0x1000_ffff], &[0x50, 0x01]);
+    let result = within_timeout("get_by_index(usize::MAX)", move || {
+        RawJsonb::new(&bytes)
+            .get_by_index(usize::MAX)
+            .map(|v| v.is_some())
+    });
+    assert_eq!(result, Ok(false));
+
+    let bytes = jsonb(&[0x8000_0002, 0x2000_0002, 0x1000_ffff], &[0x50, 0x01]);
+    let result = within_timeout("get_by_index(1)", move || {
+        RawJsonb::new(&bytes).get_by_index(1).map(|v| v.is_some())
+    });
+    assert_eq!(result, Err(Error::InvalidJsonb));
+
+    // The same corruption inside `{"k": <array>}`, reached through a key path.
+    let array = jsonb(&[0x8000_0002, 0x2000_0002, 0x1000_ffff], &[0x50, 0x01]);
+    let mut bytes = jsonb(
+        &[0x4000_0001, 0x1000_0001, 0x5000_0000 | array.len() as u32],
+        b"k",
+    );
+    bytes.extend_from_slice(&array);
+    let path = parse_key_paths(b"{k,1}").unwrap().to_owned();
+    let result = within_timeout("get_by_keypath", move || {
+        let path = path.as_key_paths();
+        RawJsonb::new(&bytes)
+            .get_by_keypath(path.paths.iter())
+            .map(|v| v.is_some())
+    });
+    assert!(result.is_err(), "{result:?}");
 }
