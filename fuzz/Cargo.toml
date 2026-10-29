@@ -1,0 +1,47 @@
+[package]
+name = "jsonb-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Keep this crate out of the parent package so `cargo test` there is unaffected.
+[workspace]
+members = ["."]
+
+[dependencies]
+jaq-json = "2.0.0"
+jsonb = { path = ".." }
+libfuzzer-sys = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[[bin]]
+name = "raw_jsonb"
+path = "fuzz_targets/raw_jsonb.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "json_text"
+path = "fuzz_targets/json_text.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "json_path"
+path = "fuzz_targets/json_path.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "binary_ops"
+path = "fuzz_targets/binary_ops.rs"
+test = false
+doc = false
+bench = false

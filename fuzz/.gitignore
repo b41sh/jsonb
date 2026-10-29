@@ -1,0 +1,5 @@
+target
+artifacts
+coverage
+# Corpus entries that libFuzzer discovers locally; the curated seeds live in `seeds/`.
+corpus
