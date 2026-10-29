@@ -51,8 +51,8 @@ fn it_cmps_decimals() {
         let s1 = format!("{v1}");
         let s2 = format!("{v2}");
 
-        let buf1 = v1.to_vec();
-        let buf2 = v2.to_vec();
+        let buf1 = v1.to_vec().unwrap();
+        let buf2 = v2.to_vec().unwrap();
         let r1 = RawJsonb::new(&buf1);
         let r2 = RawJsonb::new(&buf2);
 
@@ -61,7 +61,7 @@ fn it_cmps_decimals() {
 
         // ignore -0.0 assert
         let zero_val = Value::Number(Number::UInt64(0));
-        let zero_buf = zero_val.to_vec();
+        let zero_buf = zero_val.to_vec().unwrap();
         let zero = RawJsonb::new(&zero_buf);
         if r1.cmp(&zero) != Equal {
             assert_eq!(a, s1);
@@ -2240,7 +2240,7 @@ fn test_parse_decimal() {
     for test in tests {
         let v = parse_value(test.as_bytes()).unwrap();
         let s = format!("{v}");
-        let buf = v.to_vec();
+        let buf = v.to_vec().unwrap();
         let r = RawJsonb::new(&buf);
         let ss = r.to_string();
 
@@ -2251,7 +2251,7 @@ fn test_parse_decimal() {
     for test in tests {
         let v = parse_value_standard_mode(test.as_bytes()).unwrap();
         let s = OrderedFloat(v.as_f64().unwrap());
-        let buf = v.to_vec();
+        let buf = v.to_vec().unwrap();
         let r = RawJsonb::new(&buf);
         let ss = OrderedFloat(r.as_f64().unwrap().unwrap());
         let val: f64 = fast_float2::parse(test).unwrap();
@@ -2284,7 +2284,7 @@ fn test_parse_float() {
     for (expected, test) in tests {
         let v = parse_value(test.as_bytes()).unwrap();
         let s = format!("{v}");
-        let buf = v.to_vec();
+        let buf = v.to_vec().unwrap();
         let r = RawJsonb::new(&buf);
         let ss = r.to_string();
 
@@ -2296,7 +2296,7 @@ fn test_parse_float() {
     for (expected, test) in tests {
         let v = parse_value_standard_mode(test.as_bytes()).unwrap();
         let s = format!("{v}");
-        let buf = v.to_vec();
+        let buf = v.to_vec().unwrap();
         let r = RawJsonb::new(&buf);
         let ss = r.to_string();
 

@@ -123,6 +123,10 @@ const I128_SCALE: usize = 38;
 static I256_DIVIDE_SCALE: std::sync::LazyLock<i256> =
     std::sync::LazyLock::new(|| i256::from(100000000000000000000000000000000000000_i128));
 
+/// 10^76: exclusive upper bound on the magnitude `format_decimal_i256` can split.
+static I256_FORMAT_LIMIT: std::sync::LazyLock<i256> =
+    std::sync::LazyLock::new(|| *I256_DIVIDE_SCALE * *I256_DIVIDE_SCALE);
+
 /// Represents a decimal number with 64-bit precision.
 ///
 /// This structure stores a decimal value as an integer with a scale factor,
@@ -1055,14 +1059,14 @@ impl Ord for Number {
                     let scale_diff = l.scale as i32 - r.scale as i32;
                     if scale_diff > 0 {
                         // l has more decimal places, scale up r
-                        let scale_factor = i256::from(10).pow(scale_diff as u32);
-                        if let Some(r_val) = r.value.checked_mul(scale_factor) {
+                        let scale_factor = i256::from(10).checked_pow(scale_diff as u32);
+                        if let Some(r_val) = scale_factor.and_then(|s| r.value.checked_mul(s)) {
                             return l.value.cmp(&r_val);
                         }
                     } else {
                         // r has more decimal places, scale up l
-                        let scale_factor = i256::from(10).pow((-scale_diff) as u32);
-                        if let Some(l_val) = l.value.checked_mul(scale_factor) {
+                        let scale_factor = i256::from(10).checked_pow((-scale_diff) as u32);
+                        if let Some(l_val) = scale_factor.and_then(|s| l.value.checked_mul(s)) {
                             return l_val.cmp(&r.value);
                         }
                     }
@@ -1286,13 +1290,13 @@ fn adjust_decimal_scales(
     match scale_diff.cmp(&0) {
         Ordering::Greater => {
             // l has more decimal places, scale up r
-            let scale_factor = 10_i128.pow(scale_diff as u32);
+            let scale_factor = 10_i128.checked_pow(scale_diff as u32)?;
             let r_val = r_val.checked_mul(scale_factor)?;
             Some((l_val, r_val))
         }
         Ordering::Less => {
             // r has more decimal places, scale up l
-            let scale_factor = 10_i128.pow((-scale_diff) as u32);
+            let scale_factor = 10_i128.checked_pow((-scale_diff) as u32)?;
             let l_val = l_val.checked_mul(scale_factor)?;
             Some((l_val, r_val))
         }
@@ -1331,6 +1335,65 @@ impl Display for Number {
     }
 }
 
+/// Formats an unsigned 256-bit integer in decimal.
+///
+/// Splits the value into base-10^38 chunks so each fits a `u128`, instead of
+/// relying on `ethnum`'s `Display`, whose raw-pointer code Miri's Stacked
+/// Borrows model rejects.
+fn u256_to_decimal_string(mut value: U256) -> String {
+    let base = U256::from(I128_POWERS_OF_10[I128_SCALE] as u128);
+    let mut chunks = Vec::with_capacity(3);
+    loop {
+        chunks.push((value % base).as_u128());
+        value /= base;
+        if value == U256::ZERO {
+            break;
+        }
+    }
+    let mut out = String::with_capacity(chunks.len() * I128_SCALE);
+    let mut chunks = chunks.into_iter().rev();
+    if let Some(first) = chunks.next() {
+        out.push_str(itoa::Buffer::new().format(first));
+    }
+    for chunk in chunks {
+        let digits = itoa::Buffer::new().format(chunk).to_owned();
+        out.extend(std::iter::repeat_n('0', I128_SCALE - digits.len()));
+        out.push_str(&digits);
+    }
+    out
+}
+
+/// Formats a decimal from its unsigned digit string.
+///
+/// This is the slow path for values the allocation-free formatters cannot
+/// handle, such as a scale beyond the type's precision or a magnitude that does
+/// not fit the fast path's split. Such values only come from corrupted JSONB
+/// bytes or hand-built `Decimal*` structs.
+fn format_decimal_digits(
+    f: &mut impl std::fmt::Write,
+    negative: bool,
+    digits: &str,
+    scale: usize,
+) -> std::fmt::Result {
+    if negative {
+        f.write_str("-")?;
+    }
+    if scale == 0 {
+        return f.write_str(digits);
+    }
+    if digits.len() > scale {
+        let (int_part, frac_part) = digits.split_at(digits.len() - scale);
+        f.write_str(int_part)?;
+        f.write_str(".")?;
+        return f.write_str(frac_part);
+    }
+    f.write_str("0.")?;
+    for _ in digits.len()..scale {
+        f.write_char('0')?;
+    }
+    f.write_str(digits)
+}
+
 /// Helper function to format a decimal i128 value to a formatter without string allocations
 ///
 /// This function efficiently formats a decimal number with the following optimizations:
@@ -1343,6 +1406,10 @@ fn format_decimal_i128(
     value: i128,
     scale: usize,
 ) -> std::fmt::Result {
+    if scale > I128_SCALE || value == i128::MIN {
+        let digits = value.unsigned_abs().to_string();
+        return format_decimal_digits(f, value < 0, &digits, scale);
+    }
     let mut itoa_buf = itoa::Buffer::new();
     if scale == 0 {
         f.write_str(itoa_buf.format(value))
@@ -1382,6 +1449,12 @@ fn format_decimal_i256(
     value: i256,
     scale: usize,
 ) -> std::fmt::Result {
+    // The fast path splits the magnitude into two parts below 10^38, which
+    // requires |value| < 10^76 and a scale within the 76-digit precision.
+    if scale > 2 * I128_SCALE || value == i256::MIN || value.abs() >= *I256_FORMAT_LIMIT {
+        let digits = u256_to_decimal_string(value.unsigned_abs());
+        return format_decimal_digits(f, value < i256::ZERO, &digits, scale);
+    }
     // Handle negative values by writing the minus sign and negating the value
     let value = if value < i256::ZERO {
         f.write_str("-")?;

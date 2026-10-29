@@ -21,6 +21,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::mem::discriminant;
 
+use crate::error::Result;
 use crate::ExtensionValue;
 use rand::distr::Alphanumeric;
 use rand::distr::SampleString;
@@ -420,16 +421,32 @@ impl<'a> Value<'a> {
     }
 
     /// Serializes this value into JSONB bytes, appending to `buf`.
-    pub fn write_to_vec(&self, buf: &mut Vec<u8>) {
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::ValueTooLarge` if a string, binary value, or nested
+    /// array/object is 256 MiB or larger, or if an array/object has 2^29 or
+    /// more elements. `buf` is then restored to its original length.
+    pub fn write_to_vec(&self, buf: &mut Vec<u8>) -> Result<()> {
+        let original_len = buf.len();
         let mut encoder = Encoder::new(buf);
-        encoder.encode(self);
+        let result = encoder.encode(self);
+        if result.is_err() {
+            buf.truncate(original_len);
+        }
+        result
     }
 
     /// Serializes this value into JSONB bytes and returns the buffer.
-    pub fn to_vec(&self) -> Vec<u8> {
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::ValueTooLarge` under the same conditions as
+    /// [`Value::write_to_vec`].
+    pub fn to_vec(&self) -> Result<Vec<u8>> {
         let mut buf = Vec::new();
-        self.write_to_vec(&mut buf);
-        buf
+        self.write_to_vec(&mut buf)?;
+        Ok(buf)
     }
 
     /// Returns the value for a key, case-insensitive, if this value is an object.

@@ -106,7 +106,14 @@ pub struct Interval {
 impl Display for Date {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         let dur = SignedDuration::from_hours(self.value as i64 * 24);
-        let date = date(1970, 1, 1).checked_add(dur).unwrap();
+        // Clamp out-of-range values to jiff's supported dates, like `Timestamp` does.
+        let date = date(1970, 1, 1)
+            .checked_add(dur)
+            .unwrap_or(if self.value < 0 {
+                jiff::civil::Date::MIN
+            } else {
+                jiff::civil::Date::MAX
+            });
         write!(f, "{}", date)
     }
 }
@@ -150,7 +157,12 @@ impl Display for TimestampTz {
             nanos = 0;
         }
         let ts = jiff::Timestamp::new(secs, nanos as i32).unwrap();
-        let tz_offset = Offset::from_seconds(self.offset).expect("invalid timezone offset seconds");
+        // Clamp out-of-range offsets to jiff's supported range, like the timestamp above.
+        let tz_offset = Offset::from_seconds(self.offset).unwrap_or(if self.offset < 0 {
+            Offset::MIN
+        } else {
+            Offset::MAX
+        });
         let tz = tz_offset.to_time_zone();
         let zoned = ts.to_zoned(tz);
 
@@ -173,7 +185,7 @@ impl Display for Interval {
                 if wrote_date_part {
                     write!(f, " ")?;
                 }
-                let abs_val = value.abs();
+                let abs_val = value.unsigned_abs();
                 let unit = if abs_val == 1 { singular } else { plural };
                 if value < 0 {
                     write!(f, "-{} {}", abs_val, unit)?;
@@ -193,17 +205,17 @@ impl Display for Interval {
             if wrote_date_part {
                 write!(f, " ")?;
             }
-            let mut micros = self.micros;
-            if micros < 0 {
+            if self.micros < 0 {
                 write!(f, "-")?;
-                micros = -micros;
             }
-            let hour = micros / MICROS_PER_HOUR;
-            micros -= hour * MICROS_PER_HOUR;
-            let min = micros / MICROS_PER_MINUTE;
-            micros -= min * MICROS_PER_MINUTE;
-            let sec = micros / MICROS_PER_SEC;
-            micros -= sec * MICROS_PER_SEC;
+            // `unsigned_abs` avoids overflow for `i64::MIN`.
+            let mut micros = self.micros.unsigned_abs();
+            let hour = micros / MICROS_PER_HOUR as u64;
+            micros -= hour * MICROS_PER_HOUR as u64;
+            let min = micros / MICROS_PER_MINUTE as u64;
+            micros -= min * MICROS_PER_MINUTE as u64;
+            let sec = micros / MICROS_PER_SEC as u64;
+            micros -= sec * MICROS_PER_SEC as u64;
 
             if hour < 100 {
                 write!(f, "{:02}:{:02}:{:02}", hour, min, sec)?;

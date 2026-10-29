@@ -26,6 +26,8 @@ use serde::de::Visitor;
 
 use super::constants::*;
 use super::jentry::JEntry;
+use super::util::decode_str;
+use crate::constants::enter_container;
 use crate::error::Error;
 use crate::error::Result;
 use crate::extension::ExtensionValue;
@@ -41,6 +43,8 @@ pub struct Deserializer<'de> {
     index: usize,
     current_jentry: Option<JEntry>,
     raw: &'de RawJsonb<'de>,
+    /// Number of arrays and objects currently being deserialized
+    depth: usize,
 }
 
 impl<'de> Deserializer<'de> {
@@ -56,6 +60,7 @@ impl<'de> Deserializer<'de> {
             index: 0,
             current_jentry: None,
             raw: raw_jsonb,
+            depth: 0,
         }
     }
 
@@ -65,6 +70,19 @@ impl<'de> Deserializer<'de> {
     /// the `RawJsonb` data, indicating that all data has been processed.
     pub fn end(&self) -> bool {
         self.index == self.raw.len()
+    }
+
+    /// Runs `f` one array or object level deeper.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::RecursionLimitExceeded` past the nesting limit, or the
+    /// error returned by `f`.
+    fn nested<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.depth = enter_container(self.depth)?;
+        let result = f(self);
+        self.depth -= 1;
+        result
     }
 
     fn read_header(&mut self) -> Result<(u32, usize)> {
@@ -131,28 +149,26 @@ impl<'de> Deserializer<'de> {
         Ok((key_jentries, value_jentries))
     }
 
-    fn read_payload_number(&mut self, length: usize) -> Result<Number> {
+    /// Borrows `length` payload bytes at the current index and advances past them.
+    fn read_payload(&mut self, length: usize) -> Result<&'de [u8]> {
         let start = self.index;
-        let end = self.index + length;
-        let num = Number::decode(&self.raw.data[start..end])?;
+        let end = start.checked_add(length).ok_or(Error::InvalidEOF)?;
+        let data = self.raw.data.get(start..end).ok_or(Error::InvalidEOF)?;
         self.index = end;
-        Ok(num)
+        Ok(data)
+    }
+
+    fn read_payload_number(&mut self, length: usize) -> Result<Number> {
+        Number::decode(self.read_payload(length)?)
     }
 
     fn read_payload_str(&mut self, length: usize) -> Result<Cow<'_, str>> {
-        let start = self.index;
-        let end = self.index + length;
-        let s = unsafe { std::str::from_utf8_unchecked(&self.raw.data[start..end]) };
-        self.index = end;
-        Ok(Cow::Borrowed(s))
+        let data = self.read_payload(length)?;
+        Ok(Cow::Borrowed(decode_str(data)?))
     }
 
     fn read_payload_extension(&mut self, length: usize) -> Result<ExtensionValue<'_>> {
-        let start = self.index;
-        let end = self.index + length;
-        let val = ExtensionValue::decode(&self.raw.data[start..end])?;
-        self.index = end;
-        Ok(val)
+        ExtensionValue::decode(self.read_payload(length)?)
     }
 
     fn read_null(&mut self) -> Result<()> {
@@ -378,7 +394,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                 }
                 ARRAY_CONTAINER_TAG => {
                     let jentries = self.read_array_jentries(header_len)?;
-                    visitor.visit_seq(ArrayDeserializer::new(self, jentries))
+                    self.nested(|de| visitor.visit_seq(ArrayDeserializer::new(de, jentries)))
                 }
                 OBJECT_CONTAINER_TAG => {
                     let (key_jentries, value_jentries) = self.read_object_jentries(header_len)?;
@@ -390,13 +406,15 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                     let key_payload_offset = self.index;
                     let value_payload_offset = self.index + key_length;
 
-                    let value = visitor.visit_map(ObjectDeserializer::new(
-                        self,
-                        key_payload_offset,
-                        key_jentries,
-                        value_payload_offset,
-                        value_jentries,
-                    ))?;
+                    let value = self.nested(|de| {
+                        visitor.visit_map(ObjectDeserializer::new(
+                            de,
+                            key_payload_offset,
+                            key_jentries,
+                            value_payload_offset,
+                            value_jentries,
+                        ))
+                    })?;
                     self.index = origin_index + key_length + value_length;
                     Ok(value)
                 }
@@ -564,7 +582,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         match header_type {
             ARRAY_CONTAINER_TAG => {
                 let jentries = self.read_array_jentries(header_len)?;
-                visitor.visit_seq(ArrayDeserializer::new(self, jentries))
+                self.nested(|de| visitor.visit_seq(ArrayDeserializer::new(de, jentries)))
             }
             SCALAR_CONTAINER_TAG | OBJECT_CONTAINER_TAG => Err(Error::UnexpectedType),
             _ => Err(Error::InvalidJsonb),
@@ -605,13 +623,15 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                 let key_payload_offset = self.index;
                 let value_payload_offset = self.index + key_length;
 
-                let value = visitor.visit_map(ObjectDeserializer::new(
-                    self,
-                    key_payload_offset,
-                    key_jentries,
-                    value_payload_offset,
-                    value_jentries,
-                ))?;
+                let value = self.nested(|de| {
+                    visitor.visit_map(ObjectDeserializer::new(
+                        de,
+                        key_payload_offset,
+                        key_jentries,
+                        value_payload_offset,
+                        value_jentries,
+                    ))
+                })?;
                 self.index = origin_index + key_length + value_length;
                 Ok(value)
             }
@@ -658,12 +678,14 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                 self.set_jentry(key_jentry);
                 let key = self.read_string()?;
                 let value_payload_offset = self.index;
-                let value = visitor.visit_enum(EnumDeserializer::new(
-                    self,
-                    key,
-                    value_jentry,
-                    value_payload_offset,
-                ))?;
+                let value = self.nested(|de| {
+                    visitor.visit_enum(EnumDeserializer::new(
+                        de,
+                        key,
+                        value_jentry,
+                        value_payload_offset,
+                    ))
+                })?;
                 self.index = origin_index + key_length + value_length;
                 Ok(value)
             }
@@ -679,11 +701,23 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         self.deserialize_str(visitor)
     }
 
-    fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value>
+    /// Skips the current value, such as an object field the target type does not know.
+    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value>
     where
         V: Visitor<'de>,
     {
-        todo!()
+        match &self.current_jentry {
+            // Inside an array or object the index points at this value's
+            // payload, whose length the `JEntry` records. Array elements are
+            // read sequentially, so the index must move past it.
+            Some(jentry) => {
+                let length = jentry.length as usize;
+                self.read_payload(length)?;
+            }
+            // At the top level the value spans the rest of the data.
+            None => self.index = self.raw.len(),
+        }
+        visitor.visit_unit()
     }
 
     #[inline]
@@ -860,7 +894,8 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'_, 'de> {
             match header_type {
                 ARRAY_CONTAINER_TAG => {
                     let jentries = self.de.read_array_jentries(header_len)?;
-                    visitor.visit_seq(ArrayDeserializer::new(self.de, jentries))
+                    self.de
+                        .nested(|de| visitor.visit_seq(ArrayDeserializer::new(de, jentries)))
                 }
                 SCALAR_CONTAINER_TAG | OBJECT_CONTAINER_TAG => Err(Error::UnexpectedType),
                 _ => Err(Error::InvalidJsonb),
@@ -890,13 +925,15 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'_, 'de> {
                     let key_payload_offset = self.de.index;
                     let value_payload_offset = self.de.index + key_length;
 
-                    let value = visitor.visit_map(ObjectDeserializer::new(
-                        self.de,
-                        key_payload_offset,
-                        key_jentries,
-                        value_payload_offset,
-                        value_jentries,
-                    ))?;
+                    let value = self.de.nested(|de| {
+                        visitor.visit_map(ObjectDeserializer::new(
+                            de,
+                            key_payload_offset,
+                            key_jentries,
+                            value_payload_offset,
+                            value_jentries,
+                        ))
+                    })?;
                     self.de.index = origin_index + key_length + value_length;
                     Ok(value)
                 }
@@ -909,7 +946,6 @@ impl<'de> de::VariantAccess<'de> for EnumDeserializer<'_, 'de> {
     }
 }
 
-#[repr(transparent)]
 pub(crate) struct Decoder<'a> {
     buf: &'a [u8],
 }
@@ -924,24 +960,25 @@ impl<'a> Decoder<'a> {
         if self.buf.len() < 4 {
             return Err(Error::InvalidJsonb);
         }
-        let value = self.decode_jsonb()?;
+        let value = self.decode_jsonb(0)?;
         Ok(value)
     }
 
     // Read value type from the `Header`
     // `Scalar` has one `JEntry`
     // `Array` and `Object` store the numbers of elements
-    fn decode_jsonb(&mut self) -> Result<Value<'a>> {
+    // `depth` is the number of containers enclosing this value.
+    fn decode_jsonb(&mut self, depth: usize) -> Result<Value<'a>> {
         let container_header = self.buf.read_u32::<BigEndian>()?;
 
         match container_header & CONTAINER_HEADER_TYPE_MASK {
             SCALAR_CONTAINER_TAG => {
                 let encoded = self.buf.read_u32::<BigEndian>()?;
                 let jentry = JEntry::decode_jentry(encoded);
-                self.decode_scalar(jentry)
+                self.decode_scalar(jentry, depth)
             }
-            ARRAY_CONTAINER_TAG => self.decode_array(container_header),
-            OBJECT_CONTAINER_TAG => self.decode_object(container_header),
+            ARRAY_CONTAINER_TAG => self.decode_array(container_header, enter_container(depth)?),
+            OBJECT_CONTAINER_TAG => self.decode_object(container_header, enter_container(depth)?),
             _ => Err(Error::InvalidJsonbHeader),
         }
     }
@@ -951,7 +988,7 @@ impl<'a> Decoder<'a> {
     // `Number` and `String` `JEntry` stores the length or offset of the data,
     // read them and decode to the `Value`
     // `Array` and `Object` need to read nested data from the lower-level `Header`
-    fn decode_scalar(&mut self, jentry: JEntry) -> Result<Value<'a>> {
+    fn decode_scalar(&mut self, jentry: JEntry, depth: usize) -> Result<Value<'a>> {
         match jentry.type_code {
             NULL_TAG => Ok(Value::Null),
             TRUE_TAG => Ok(Value::Bool(true)),
@@ -959,7 +996,7 @@ impl<'a> Decoder<'a> {
             STRING_TAG => {
                 let offset = jentry.length as usize;
                 let string = &self.buf.get(..offset).ok_or(Error::InvalidUtf8)?;
-                let s = unsafe { std::str::from_utf8_unchecked(string) };
+                let s = decode_str(string)?;
                 self.buf = &self.buf[offset..];
                 Ok(Value::String(Cow::Borrowed(s)))
             }
@@ -983,20 +1020,21 @@ impl<'a> Decoder<'a> {
                     ExtensionValue::Interval(v) => Ok(Value::Interval(v)),
                 }
             }
-            CONTAINER_TAG => self.decode_jsonb(),
+            CONTAINER_TAG => self.decode_jsonb(depth),
             _ => Err(Error::InvalidJsonbJEntry),
         }
     }
 
     // Decode the numbers of values from the `Header`,
     // then read all `JEntries`, finally decode the `Value` by `JEntry`
-    fn decode_array(&mut self, container_header: u32) -> Result<Value<'a>> {
+    // `depth` already counts this array.
+    fn decode_array(&mut self, container_header: u32, depth: usize) -> Result<Value<'a>> {
         let length = (container_header & CONTAINER_HEADER_LEN_MASK) as usize;
         let jentries = self.decode_jentries(length)?;
         let mut values: Vec<Value> = Vec::with_capacity(length);
         // decode all values
         for jentry in jentries.into_iter() {
-            let value = self.decode_scalar(jentry)?;
+            let value = self.decode_scalar(jentry, depth)?;
             values.push(value);
         }
 
@@ -1006,7 +1044,8 @@ impl<'a> Decoder<'a> {
 
     // The basic process is the same as that of `Array`
     // but first decode the keys and then decode the values
-    fn decode_object(&mut self, container_header: u32) -> Result<Value<'a>> {
+    // `depth` already counts this object.
+    fn decode_object(&mut self, container_header: u32, depth: usize) -> Result<Value<'a>> {
         let length = (container_header & CONTAINER_HEADER_LEN_MASK) as usize;
         let mut jentries = self.decode_jentries(length * 2)?;
 
@@ -1014,7 +1053,7 @@ impl<'a> Decoder<'a> {
         // decode all keys first
         for _ in 0..length {
             let jentry = jentries.pop_front().unwrap();
-            let key = self.decode_scalar(jentry)?;
+            let key = self.decode_scalar(jentry, depth)?;
             keys.push_back(key);
         }
 
@@ -1022,9 +1061,9 @@ impl<'a> Decoder<'a> {
         // decode all values
         for _ in 0..length {
             let key = keys.pop_front().unwrap();
-            let k = key.as_str().unwrap();
+            let k = key.as_str().ok_or(Error::InvalidJsonb)?;
             let jentry = jentries.pop_front().unwrap();
-            let value = self.decode_scalar(jentry)?;
+            let value = self.decode_scalar(jentry, depth)?;
             obj.insert(k.to_string(), value);
         }
 
@@ -1034,6 +1073,10 @@ impl<'a> Decoder<'a> {
 
     // Decode `JEntries` for `Array` and `Object`
     fn decode_jentries(&mut self, length: usize) -> Result<VecDeque<JEntry>> {
+        // Reject lengths the remaining bytes cannot hold before allocating for them.
+        if length > self.buf.len() / 4 {
+            return Err(Error::InvalidEOF);
+        }
         let mut jentries: VecDeque<JEntry> = VecDeque::with_capacity(length);
         for _ in 0..length {
             let encoded = self.buf.read_u32::<BigEndian>()?;

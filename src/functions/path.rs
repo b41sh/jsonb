@@ -18,6 +18,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 
+use crate::constants::enter_container;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
@@ -575,8 +576,10 @@ impl RawJsonb<'_> {
     pub fn delete_by_index(&self, index: i32) -> Result<OwnedJsonb> {
         let array_iter_opt = ArrayIterator::new(*self)?;
         if let Some(array_iter) = array_iter_opt {
-            let len = array_iter.len() as i32;
-            let index = if index < 0 { len - index.abs() } else { index };
+            // `i64` keeps `len + index` from overflowing for `i32::MIN`.
+            let len = array_iter.len() as i64;
+            let index = i64::from(index);
+            let index = if index < 0 { len + index } else { index };
             if index < 0 || index >= len {
                 Ok(self.to_owned())
             } else {
@@ -1102,6 +1105,8 @@ impl RawJsonb<'_> {
     {
         match current_item {
             JsonbItem::Raw(raw) => {
+                // Each enclosing container pushed one path element.
+                enter_container(current_paths.len())?;
                 if let Some(mut object_iter) = ObjectIterator::new(raw)? {
                     if object_iter.len() > 0 {
                         for object_result in &mut object_iter {
@@ -1215,6 +1220,8 @@ impl RawJsonb<'_> {
     {
         match current_item {
             JsonbItem::Raw(raw) => {
+                // Each enclosing container pushed one path element.
+                enter_container(current_paths.len())?;
                 if let Some(mut object_iter) = ObjectIterator::new(raw)? {
                     if object_iter.len() > 0 {
                         for object_result in &mut object_iter {

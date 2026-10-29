@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 
 use serde::Serialize;
 
+use crate::constants::enter_container;
 use crate::core::ArrayIterator;
 use crate::core::Deserializer;
 use crate::core::JsonbItemType;
@@ -226,6 +227,16 @@ impl PartialEq for RawJsonb<'_> {
 #[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for RawJsonb<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.partial_cmp_with_depth(other, 0)
+    }
+}
+
+impl RawJsonb<'_> {
+    /// Compares two values, where `depth` is the number of enclosing containers.
+    ///
+    /// Returns `None` for incomparable values, including containers nested
+    /// deeper than the recursion limit.
+    pub(crate) fn partial_cmp_with_depth(&self, other: &Self, depth: usize) -> Option<Ordering> {
         let self_type = self.jsonb_item_type().ok()?;
         let other_type = other.jsonb_item_type().ok()?;
 
@@ -237,13 +248,14 @@ impl PartialOrd for RawJsonb<'_> {
 
         match (self_type, other_type) {
             (JsonbItemType::Array(self_len), JsonbItemType::Array(other_len)) => {
+                let depth = enter_container(depth).ok()?;
                 let self_array_iter = ArrayIterator::new(*self).ok()?.unwrap();
                 let mut other_array_iter = ArrayIterator::new(*other).ok()?.unwrap();
                 for (self_res, other_res) in &mut self_array_iter.zip(&mut other_array_iter) {
                     let self_item = self_res.ok()?;
                     let other_item = other_res.ok()?;
 
-                    let ord = self_item.partial_cmp(&other_item)?;
+                    let ord = self_item.partial_cmp_with_depth(&other_item, depth)?;
                     if ord != Ordering::Equal {
                         return Some(ord);
                     }
@@ -251,6 +263,7 @@ impl PartialOrd for RawJsonb<'_> {
                 Some(self_len.cmp(&other_len))
             }
             (JsonbItemType::Object(self_len), JsonbItemType::Object(other_len)) => {
+                let depth = enter_container(depth).ok()?;
                 let self_object_iter = ObjectIterator::new(*self).ok()?.unwrap();
                 let mut other_object_iter = ObjectIterator::new(*other).ok()?.unwrap();
                 for (self_res, other_res) in &mut self_object_iter.zip(&mut other_object_iter) {
@@ -261,7 +274,7 @@ impl PartialOrd for RawJsonb<'_> {
                     if key_ord != Ordering::Equal {
                         return Some(key_ord);
                     }
-                    let val_ord = self_val.partial_cmp(&other_val)?;
+                    let val_ord = self_val.partial_cmp_with_depth(&other_val, depth)?;
                     if val_ord != Ordering::Equal {
                         return Some(val_ord);
                     }

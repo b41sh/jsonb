@@ -16,6 +16,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
+use crate::constants::enter_container;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
@@ -29,6 +30,7 @@ use crate::jsonpath::JsonPath;
 use crate::jsonpath::Path;
 use crate::jsonpath::PathValue;
 use crate::jsonpath::RecursiveLevel;
+use crate::jsonpath::RecursiveLevelEnd;
 use crate::jsonpath::UnaryOperator;
 use crate::number::Number;
 use crate::to_owned_jsonb;
@@ -521,16 +523,23 @@ impl<'a> Selector<'a> {
         Ok(())
     }
 
+    /// Selects `parent_item` and its descendants for `.**`.
+    ///
+    /// `curr_level` is the number of containers enclosing `parent_item`.
     fn recursive_select_values(
         &mut self,
         parent_item: JsonbItem<'a>,
-        curr_level: u8,
+        curr_level: usize,
         recursive_level_opt: &Option<RecursiveLevel>,
     ) -> Result<()> {
-        let (is_match, should_continue) = if let Some(recursive_level) = recursive_level_opt {
-            recursive_level.check_recursive_level(curr_level)
-        } else {
-            (true, true)
+        let (is_match, should_continue) = match (recursive_level_opt, u8::try_from(curr_level)) {
+            (None, _) => (true, true),
+            (Some(recursive_level), Ok(level)) => recursive_level.check_recursive_level(level),
+            // Level bounds are `u8`, so deeper levels only match an open `to last` range.
+            (Some(recursive_level), Err(_)) => {
+                let open_ended = matches!(recursive_level.end, Some(RecursiveLevelEnd::Last));
+                (open_ended, open_ended)
+            }
         };
         if is_match {
             self.items.push_back(parent_item.clone());
@@ -543,44 +552,44 @@ impl<'a> Selector<'a> {
             JsonbItem::Raw(raw) => {
                 let object_val_iter_opt = ObjectValueIterator::new(raw)?;
                 if let Some(mut object_val_iter) = object_val_iter_opt {
+                    let next_level = enter_container(curr_level)?;
                     for result in &mut object_val_iter {
                         let val_item = result?;
-                        self.recursive_select_values(
-                            val_item,
-                            curr_level + 1,
-                            recursive_level_opt,
-                        )?;
+                        self.recursive_select_values(val_item, next_level, recursive_level_opt)?;
                     }
                 }
                 let array_iter_opt = ArrayIterator::new(raw)?;
                 if let Some(mut array_iter) = array_iter_opt {
+                    let next_level = enter_container(curr_level)?;
                     for item_result in &mut array_iter {
                         let item = item_result?;
-                        self.recursive_select_values(item, curr_level + 1, recursive_level_opt)?;
+                        self.recursive_select_values(item, next_level, recursive_level_opt)?;
                     }
                 }
             }
             JsonbItem::Owned(ref owned) => {
                 let object_val_iter_opt = ObjectValueIterator::new(owned.as_raw())?;
                 if let Some(mut object_val_iter) = object_val_iter_opt {
+                    let next_level = enter_container(curr_level)?;
                     for result in &mut object_val_iter {
                         let val_item = result?;
                         let owned_item = OwnedJsonb::from_item(val_item)?;
                         self.recursive_select_values(
                             JsonbItem::Owned(owned_item),
-                            curr_level + 1,
+                            next_level,
                             recursive_level_opt,
                         )?;
                     }
                 }
                 let array_iter_opt = ArrayIterator::new(owned.as_raw())?;
                 if let Some(mut array_iter) = array_iter_opt {
+                    let next_level = enter_container(curr_level)?;
                     for item_result in &mut array_iter {
                         let item = item_result?;
                         let owned_item = OwnedJsonb::from_item(item)?;
                         self.recursive_select_values(
                             JsonbItem::Owned(owned_item),
-                            curr_level + 1,
+                            next_level,
                             recursive_level_opt,
                         )?;
                     }

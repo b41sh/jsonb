@@ -566,14 +566,10 @@ impl RawJsonb<'_> {
     pub fn array_insert(&self, pos: i32, new_val: &RawJsonb) -> Result<OwnedJsonb> {
         let len = self.array_length()?.unwrap_or(1);
 
-        let idx = if pos < 0 { len as i32 - pos.abs() } else { pos };
-        let idx = if idx < 0 {
-            0
-        } else if idx > len as i32 {
-            len
-        } else {
-            idx as usize
-        };
+        // `i64` keeps `len + pos` from overflowing for `i32::MIN`.
+        let pos = i64::from(pos);
+        let idx = if pos < 0 { len as i64 + pos } else { pos };
+        let idx = idx.clamp(0, len as i64) as usize;
 
         let mut builder = ArrayBuilder::with_capacity(len + 1);
         let array_iter_opt = ArrayIterator::new(*self)?;

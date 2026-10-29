@@ -279,7 +279,10 @@ fn test_decode_extension() {
 #[test]
 fn test_decode_corrupted() {
     let json = "{\"a\": 1, \"b\": \"123\"}";
-    let jsonb = jsonb::parse_value(json.as_bytes()).unwrap().to_vec();
+    let jsonb = jsonb::parse_value(json.as_bytes())
+        .unwrap()
+        .to_vec()
+        .unwrap();
     let corrupted = jsonb[0..jsonb.len() - 1].to_vec();
     let value = from_slice(corrupted.as_slice());
     assert!(value.is_err());

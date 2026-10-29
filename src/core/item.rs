@@ -195,6 +195,16 @@ impl PartialEq for JsonbItem<'_> {
 #[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for JsonbItem<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.partial_cmp_with_depth(other, 0)
+    }
+}
+
+impl JsonbItem<'_> {
+    /// Compares two items, where `depth` is the number of enclosing containers.
+    ///
+    /// Returns `None` for incomparable items, including containers nested
+    /// deeper than the recursion limit.
+    pub(crate) fn partial_cmp_with_depth(&self, other: &Self, depth: usize) -> Option<Ordering> {
         let self_type = self.jsonb_item_type().ok()?;
         let other_type = other.jsonb_item_type().ok()?;
 
@@ -217,7 +227,7 @@ impl PartialOrd for JsonbItem<'_> {
 
         match (self_item, other_item) {
             (JsonbItem::Raw(self_raw), JsonbItem::Raw(other_raw)) => {
-                self_raw.partial_cmp(other_raw)
+                self_raw.partial_cmp_with_depth(other_raw, depth)
             }
             // compare null, raw jsonb must not null
             (JsonbItem::Raw(_), JsonbItem::Null) => Some(Ordering::Less),

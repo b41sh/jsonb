@@ -15,6 +15,7 @@
 use std::ops::Range;
 
 use super::constants::*;
+use crate::core::databend::util::decode_str;
 use crate::core::databend::util::jentry_to_jsonb_item;
 use crate::core::JsonbItem;
 use crate::error::Result;
@@ -84,7 +85,7 @@ impl<'a> Iterator for ArrayIterator<'a> {
         self.jentry_offset += 4;
         self.item_offset += item_length;
 
-        Some(Ok(item))
+        Some(item)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -157,7 +158,7 @@ impl<'a> Iterator for ObjectKeyIterator<'a> {
         self.jentry_offset += 4;
         self.item_offset += key_length;
 
-        Some(Ok(key_item))
+        Some(key_item)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -237,7 +238,7 @@ impl<'a> Iterator for ObjectValueIterator<'a> {
         self.jentry_offset += 4;
         self.item_offset += val_length;
 
-        Some(Ok(val_item))
+        Some(val_item)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -325,7 +326,7 @@ impl<'a> Iterator for ObjectIterator<'a> {
             Ok(data) => data,
             Err(err) => return Some(Err(err)),
         };
-        let key = unsafe { std::str::from_utf8_unchecked(key_data) };
+        let key = decode_str(key_data);
 
         let val_range = Range {
             start: self.val_offset,
@@ -343,7 +344,7 @@ impl<'a> Iterator for ObjectIterator<'a> {
         self.key_offset += key_length;
         self.val_offset += val_length;
 
-        Some(Ok((key, val_item)))
+        Some(key.and_then(|key| val_item.map(|val_item| (key, val_item))))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

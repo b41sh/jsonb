@@ -41,6 +41,7 @@ use nom::sequence::terminated;
 use nom::IResult;
 use nom::Parser;
 
+use crate::constants::MAX_JSON_PATH_DEPTH;
 use crate::constants::UNICODE_LEN;
 use crate::error::Error;
 use crate::jsonpath::path::*;
@@ -49,6 +50,7 @@ use crate::util::parse_string;
 
 /// Parsing the input string to JSON Path.
 pub fn parse_json_path(input: &[u8]) -> Result<JsonPath<'_>, Error> {
+    check_paren_depth(input)?;
     match json_path(input) {
         Ok((rest, json_path)) => {
             if !rest.is_empty() {
@@ -59,6 +61,41 @@ pub fn parse_json_path(input: &[u8]) -> Result<JsonPath<'_>, Error> {
         Err(nom::Err::Error(_) | nom::Err::Failure(_)) => Err(Error::InvalidJsonPath),
         Err(nom::Err::Incomplete(_)) => unreachable!(),
     }
+}
+
+/// Rejects input whose parentheses nest deeper than [`MAX_JSON_PATH_DEPTH`].
+///
+/// Every recursive rule of the grammar (`(expr)`, `? (expr)`, `exists(...)`)
+/// consumes a `(`, so this bounds the parser's recursion. Parentheses inside
+/// double-quoted string literals are ignored. A backslash escapes the next byte
+/// both inside strings and in unquoted field names, as in the parser.
+///
+/// # Errors
+///
+/// Returns `Error::RecursionLimitExceeded` if the nesting is too deep.
+fn check_paren_depth(input: &[u8]) -> Result<(), Error> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for &c in input {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            b'\\' => escaped = true,
+            b'"' => in_string = !in_string,
+            b'(' if !in_string => {
+                depth += 1;
+                if depth > MAX_JSON_PATH_DEPTH {
+                    return Err(Error::RecursionLimitExceeded);
+                }
+            }
+            b')' if !in_string => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn json_path(input: &[u8]) -> IResult<&[u8], JsonPath<'_>> {
@@ -153,7 +190,8 @@ pub(crate) fn string(input: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
             }
         }
     }
-    if i > 1 {
+    // `i == input.len()` means the closing quote is missing.
+    if i > 1 && i < input.len() {
         if escapes == 0 {
             if let Ok(s) = std::str::from_utf8(&input[1..i]) {
                 return Ok((&input[i + 1..], Cow::Borrowed(s)));

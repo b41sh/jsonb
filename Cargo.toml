@@ -57,6 +57,9 @@ sqlite = []
 arbitrary_precision = ["serde_json/arbitrary_precision"]
 preserve_order = ["serde_json/preserve_order"]
 
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
 [[bench]]
 name = "parser"
 harness = false
