@@ -17,11 +17,14 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 
 use crate::constants::enter_container;
+use crate::constants::MAX_JSON_PATH_EXTRA_COPY_BYTES;
 use crate::constants::MAX_JSON_PATH_ITEMS;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
+use crate::core::ExtensionItem;
 use crate::core::JsonbItem;
 use crate::core::JsonbItemType;
+use crate::core::NumberItem;
 use crate::core::ObjectValueIterator;
 use crate::error::Result;
 use crate::jsonpath::ArrayIndex;
@@ -97,6 +100,14 @@ pub struct Selector<'a> {
     items: VecDeque<JsonbItem<'a>>,
     /// Work units left for the current evaluation; see [`MAX_JSON_PATH_ITEMS`].
     budget: usize,
+    /// Bytes the current evaluation may still copy; see
+    /// [`MAX_JSON_PATH_EXTRA_COPY_BYTES`].
+    byte_budget: usize,
+}
+
+/// Bytes one evaluation over `root` may copy.
+fn copy_budget(root: RawJsonb<'_>) -> usize {
+    MAX_JSON_PATH_EXTRA_COPY_BYTES.saturating_add(root.len())
 }
 
 impl<'a> Selector<'a> {
@@ -110,6 +121,7 @@ impl<'a> Selector<'a> {
             root_jsonb,
             items: VecDeque::new(),
             budget: MAX_JSON_PATH_ITEMS,
+            byte_budget: copy_budget(root_jsonb),
         }
     }
 
@@ -126,6 +138,39 @@ impl<'a> Selector<'a> {
             }
             None => Err(Error::JsonPathTooComplex),
         }
+    }
+
+    /// Spends the byte budget on copying `item`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::JsonPathTooComplex` once the byte budget is used up.
+    fn charge_copy(&mut self, item: &JsonbItem<'_>) -> Result<()> {
+        let len = match item {
+            JsonbItem::Null | JsonbItem::Boolean(_) => 1,
+            JsonbItem::Number(NumberItem::Raw(data))
+            | JsonbItem::Extension(ExtensionItem::Raw(data)) => data.len(),
+            // Decoded values are at most a few dozen bytes once encoded.
+            JsonbItem::Number(NumberItem::Number(_))
+            | JsonbItem::Extension(ExtensionItem::Extension(_)) => 64,
+            JsonbItem::String(s) => s.len(),
+            JsonbItem::Raw(raw) => raw.len(),
+            JsonbItem::Owned(owned) => owned.len(),
+        };
+        // Each copy also carries a 4-byte header or JEntry.
+        match self.byte_budget.checked_sub(len.saturating_add(4)) {
+            Some(rest) => {
+                self.byte_budget = rest;
+                Ok(())
+            }
+            None => Err(Error::JsonPathTooComplex),
+        }
+    }
+
+    /// Copies `item` into an `OwnedJsonb`, charging the byte budget.
+    fn copy_item(&mut self, item: JsonbItem<'_>) -> Result<OwnedJsonb> {
+        self.charge_copy(&item)?;
+        OwnedJsonb::from_item(item)
     }
 
     /// Appends a selected item, charging it to the budget.
@@ -175,7 +220,7 @@ impl<'a> Selector<'a> {
         self.execute(json_path)?;
         let mut values = Vec::with_capacity(self.items.len());
         while let Some(item) = self.items.pop_front() {
-            let value = OwnedJsonb::from_item(item)?;
+            let value = self.copy_item(item)?;
             values.push(value);
         }
         Ok(values)
@@ -218,6 +263,7 @@ impl<'a> Selector<'a> {
         self.execute(json_path)?;
         let mut builder = ArrayBuilder::with_capacity(self.items.len());
         while let Some(item) = self.items.pop_front() {
+            self.charge_copy(&item)?;
             builder.push_jsonb_item(item);
         }
         builder.build()
@@ -264,7 +310,7 @@ impl<'a> Selector<'a> {
     pub fn select_first(&mut self, json_path: &'a JsonPath<'a>) -> Result<Option<OwnedJsonb>> {
         self.execute(json_path)?;
         if let Some(item) = self.items.pop_front() {
-            let value = OwnedJsonb::from_item(item)?;
+            let value = self.copy_item(item)?;
             Ok(Some(value))
         } else {
             Ok(None)
@@ -320,12 +366,13 @@ impl<'a> Selector<'a> {
         if self.items.len() > 1 {
             let mut builder = ArrayBuilder::with_capacity(self.items.len());
             while let Some(item) = self.items.pop_front() {
+                self.charge_copy(&item)?;
                 builder.push_jsonb_item(item);
             }
             let array = builder.build()?;
             Ok(Some(array))
         } else if let Some(item) = self.items.pop_front() {
-            let value = OwnedJsonb::from_item(item)?;
+            let value = self.copy_item(item)?;
             Ok(Some(value))
         } else {
             Ok(None)
@@ -444,6 +491,7 @@ impl<'a> Selector<'a> {
         // add root jsonb
         let root_item = JsonbItem::Raw(self.root_jsonb);
         self.budget = MAX_JSON_PATH_ITEMS;
+        self.byte_budget = copy_budget(self.root_jsonb);
         self.items.clear();
         self.items.push_front(root_item);
 
@@ -539,7 +587,7 @@ impl<'a> Selector<'a> {
                 if let Some(mut object_val_iter) = object_val_iter_opt {
                     for result in &mut object_val_iter {
                         let val_item = result?;
-                        let owned_item = OwnedJsonb::from_item(val_item)?;
+                        let owned_item = self.copy_item(val_item)?;
                         self.push_item(JsonbItem::Owned(owned_item))?;
                     }
                 }
@@ -603,7 +651,7 @@ impl<'a> Selector<'a> {
                     let next_level = enter_container(curr_level)?;
                     for result in &mut object_val_iter {
                         let val_item = result?;
-                        let owned_item = OwnedJsonb::from_item(val_item)?;
+                        let owned_item = self.copy_item(val_item)?;
                         self.recursive_select_values(
                             JsonbItem::Owned(owned_item),
                             next_level,
@@ -616,7 +664,7 @@ impl<'a> Selector<'a> {
                     let next_level = enter_container(curr_level)?;
                     for item_result in &mut array_iter {
                         let item = item_result?;
-                        let owned_item = OwnedJsonb::from_item(item)?;
+                        let owned_item = self.copy_item(item)?;
                         self.recursive_select_values(
                             JsonbItem::Owned(owned_item),
                             next_level,
@@ -654,7 +702,7 @@ impl<'a> Selector<'a> {
                 if let Some(val_item) =
                     raw.get_object_value_by_key_name(&key_name, |name, key| key.eq(name))?
                 {
-                    let owned_item = OwnedJsonb::from_item(val_item)?;
+                    let owned_item = self.copy_item(val_item)?;
                     self.push_item(JsonbItem::Owned(owned_item))?;
                 }
             }
@@ -686,7 +734,7 @@ impl<'a> Selector<'a> {
                 if let Some(mut array_iter) = array_iter_opt {
                     for item_result in &mut array_iter {
                         let item = item_result?;
-                        let owned_item = OwnedJsonb::from_item(item)?;
+                        let owned_item = self.copy_item(item)?;
                         self.push_item(JsonbItem::Owned(owned_item))?;
                     }
                 }
@@ -728,7 +776,7 @@ impl<'a> Selector<'a> {
                         for (i, item_result) in &mut array_iter.enumerate() {
                             let item = item_result?;
                             if indices.contains(&i) {
-                                let owned_item = OwnedJsonb::from_item(item)?;
+                                let owned_item = self.copy_item(item)?;
                                 self.push_item(JsonbItem::Owned(owned_item))?;
                             }
                         }

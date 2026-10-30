@@ -810,3 +810,63 @@ fn json_path_evaluation_is_bounded() {
     let path = parse_json_path(b"$.**").unwrap();
     assert_eq!(large.as_raw().select_by_path(&path).unwrap().len(), 600_001);
 }
+
+#[test]
+fn json_path_copies_are_bounded() {
+    // Debug builds need more than the default stack to walk 500 levels.
+    with_big_stack(|| {
+        // Every ancestor of the string is selected and copied with it: 125,751
+        // items, within the item budget, but about 300 MB of copies.
+        let doc: OwnedJsonb = format!(
+            "{}\"{}\"{}",
+            "[".repeat(500),
+            "x".repeat(1024),
+            "]".repeat(500)
+        )
+        .parse()
+        .unwrap();
+        let path = parse_json_path(b"$.**.**").unwrap();
+        let raw = doc.as_raw();
+        assert_eq!(
+            raw.select_by_path(&path).err(),
+            Some(Error::JsonPathTooComplex)
+        );
+        assert_eq!(
+            raw.select_array_by_path(&path).err(),
+            Some(Error::JsonPathTooComplex)
+        );
+        assert_eq!(
+            raw.select_value_by_path(&path).err(),
+            Some(Error::JsonPathTooComplex)
+        );
+        // Checks that copy nothing are not limited by the byte budget.
+        assert_eq!(raw.path_exists(&path), Ok(true));
+        // A single `.**` copies 500 KiB, which is allowed.
+        let path = parse_json_path(b"$.**").unwrap();
+        assert_eq!(raw.select_by_path(&path).unwrap().len(), 501);
+    });
+
+    // Any single value can be copied, even one larger than 32 MiB, because
+    // the budget includes the document size.
+    let big: OwnedJsonb = format!(r#"{{"a":"{}","b":1}}"#, "x".repeat(33 << 20))
+        .parse()
+        .unwrap();
+    let raw = big.as_raw();
+    let path = parse_json_path(b"$.a").unwrap();
+    assert_eq!(
+        raw.select_first_by_path(&path).unwrap().unwrap().len(),
+        // Scalar header and JEntry, then the string.
+        8 + (33 << 20)
+    );
+    let path = parse_json_path(b"$").unwrap();
+    assert_eq!(
+        raw.select_first_by_path(&path).unwrap().unwrap().len(),
+        raw.len()
+    );
+    // Copying it twice goes 33 MiB past the document size.
+    let path = parse_json_path(b"$.**").unwrap();
+    assert_eq!(
+        raw.select_by_path(&path).err(),
+        Some(Error::JsonPathTooComplex)
+    );
+}

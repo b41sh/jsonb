@@ -35,6 +35,17 @@ pub(crate) const MAX_JSON_PATH_DEPTH: usize = 64;
 /// which grows past memory for modest `k` on nested documents.
 pub(crate) const MAX_JSON_PATH_ITEMS: usize = 1_000_000;
 
+/// Bytes one JSONPath evaluation may copy beyond the size of the document.
+///
+/// Each selected value is copied out with its whole subtree, so a large value
+/// nested under many selected ancestors is copied once per ancestor: `$.**.**`
+/// on 500 nested arrays around a 1 KiB string copies about 300 MB while
+/// selecting only 125,751 items. Copies made during evaluation count too.
+///
+/// The budget is this many bytes plus the document size, so any single value
+/// in the document, up to the whole document, can always be copied once.
+pub(crate) const MAX_JSON_PATH_EXTRA_COPY_BYTES: usize = 32 * 1024 * 1024;
+
 /// Returns the nesting depth after entering one more array or object.
 ///
 /// # Errors

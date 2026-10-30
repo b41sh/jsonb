@@ -116,7 +116,8 @@ pub enum Error {
     /// cannot represent.
     ValueTooLarge,
     /// Evaluating a JSONPath expression selected or compared more than
-    /// 1,000,000 items, for example through chained `.**` steps.
+    /// 1,000,000 items, for example through chained `.**` steps, or copied
+    /// more than 32 MiB beyond the size of the document.
     JsonPathTooComplex,
 
     Message(String),
