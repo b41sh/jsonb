@@ -747,3 +747,66 @@ fn iterators_stop_after_an_error() {
     });
     assert!(result.is_err(), "{result:?}");
 }
+
+#[test]
+fn json_path_evaluation_is_bounded() {
+    // Chained `.**` steps produce about C(depth + k - 1, k) items: 4 steps on
+    // 100 nested arrays select 4.4 million, the fuzzer's 90 steps far more.
+    let nested: OwnedJsonb = format!("{}{}", "[".repeat(100), "]".repeat(100))
+        .parse()
+        .unwrap();
+    let fuzzed = "$.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.**.* .**.**.**.**.**.**.**.**.**.**.**.* .**.**.**.**.**.**.**.**.**.**.*[1].**[1]";
+    for (doc, path) in [
+        (nested.clone(), "$.**.**.**.**".to_string()),
+        (nested.clone(), fuzzed.to_string()),
+        (r#"{"a":[[[1]]]}"#.parse().unwrap(), fuzzed.to_string()),
+    ] {
+        let result = within_timeout(&path.clone(), move || {
+            let path = parse_json_path(path.as_bytes()).unwrap();
+            let raw = doc.as_raw();
+            [
+                raw.select_by_path(&path).map(|_| ()),
+                raw.select_array_by_path(&path).map(|_| ()),
+                raw.select_first_by_path(&path).map(|_| ()),
+                raw.select_value_by_path(&path).map(|_| ()),
+                raw.path_exists(&path).map(|_| ()),
+            ]
+        });
+        for r in result {
+            assert_eq!(r, Err(Error::JsonPathTooComplex));
+        }
+    }
+
+    // Comparisons check every pair until one matches. No pair matches here,
+    // so 2000 x 2000 values is 4 million comparisons.
+    let list =
+        |range: std::ops::Range<i32>| range.map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+    let values: OwnedJsonb = format!(r#"{{"a":[{}],"b":[{}]}}"#, list(0..2000), list(-2000..0))
+        .parse()
+        .unwrap();
+    let path = parse_json_path(b"$ ? (@.a[*] < @.b[0])").unwrap();
+    assert_eq!(values.as_raw().path_exists(&path), Ok(false));
+    let path = parse_json_path(b"$ ? (@.a[*] < @.b[*])").unwrap();
+    assert_eq!(
+        values.as_raw().path_exists(&path),
+        Err(Error::JsonPathTooComplex)
+    );
+
+    // Ordinary paths on large documents stay well within the budget, and
+    // the budget is reset for every evaluation.
+    let large: OwnedJsonb = format!(
+        "[{}]",
+        (0..300_000)
+            .map(|i| format!("{{\"a\":{i}}}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+    .parse()
+    .unwrap();
+    let path = parse_json_path(b"$[*].a").unwrap();
+    for _ in 0..3 {
+        assert_eq!(large.as_raw().select_by_path(&path).unwrap().len(), 300_000);
+    }
+    let path = parse_json_path(b"$.**").unwrap();
+    assert_eq!(large.as_raw().select_by_path(&path).unwrap().len(), 600_001);
+}

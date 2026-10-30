@@ -27,6 +27,14 @@ pub(crate) const MAX_NESTING_DEPTH: usize = 512;
 /// The JSONPath parser uses far more stack per level than data traversal.
 pub(crate) const MAX_JSON_PATH_DEPTH: usize = 64;
 
+/// Maximum amount of work one JSONPath evaluation may do.
+///
+/// Every selected item, every value a filter path produces, every node `.**`
+/// visits and every pair a comparison checks costs one unit. Without a limit,
+/// chained `.**` steps produce about C(depth + k - 1, k) items for `k` steps,
+/// which grows past memory for modest `k` on nested documents.
+pub(crate) const MAX_JSON_PATH_ITEMS: usize = 1_000_000;
+
 /// Returns the nesting depth after entering one more array or object.
 ///
 /// # Errors

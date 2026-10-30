@@ -17,6 +17,7 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 
 use crate::constants::enter_container;
+use crate::constants::MAX_JSON_PATH_ITEMS;
 use crate::core::ArrayBuilder;
 use crate::core::ArrayIterator;
 use crate::core::JsonbItem;
@@ -94,6 +95,8 @@ pub struct Selector<'a> {
     root_jsonb: RawJsonb<'a>,
     /// A queue holding the JSONB items that match the path criteria during execution.
     items: VecDeque<JsonbItem<'a>>,
+    /// Work units left for the current evaluation; see [`MAX_JSON_PATH_ITEMS`].
+    budget: usize,
 }
 
 impl<'a> Selector<'a> {
@@ -106,7 +109,30 @@ impl<'a> Selector<'a> {
         Self {
             root_jsonb,
             items: VecDeque::new(),
+            budget: MAX_JSON_PATH_ITEMS,
         }
+    }
+
+    /// Spends `units` of the evaluation budget.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::JsonPathTooComplex` once the budget is used up.
+    fn charge(&mut self, units: usize) -> Result<()> {
+        match self.budget.checked_sub(units) {
+            Some(rest) => {
+                self.budget = rest;
+                Ok(())
+            }
+            None => Err(Error::JsonPathTooComplex),
+        }
+    }
+
+    /// Appends a selected item, charging it to the budget.
+    fn push_item(&mut self, item: JsonbItem<'a>) -> Result<()> {
+        self.charge(1)?;
+        self.items.push_back(item);
+        Ok(())
     }
 
     /// Executes the `JsonPath` and collects all matching items into a `Vec<OwnedJsonb>`.
@@ -417,6 +443,7 @@ impl<'a> Selector<'a> {
     fn execute(&mut self, json_path: &'a JsonPath<'a>) -> Result<()> {
         // add root jsonb
         let root_item = JsonbItem::Raw(self.root_jsonb);
+        self.budget = MAX_JSON_PATH_ITEMS;
         self.items.clear();
         self.items.push_front(root_item);
 
@@ -448,7 +475,7 @@ impl<'a> Selector<'a> {
                         let item = self.items.pop_front().unwrap();
                         let res = self.eval_filter_expr(item.clone(), expr)?.unwrap_or(false);
                         if res {
-                            self.items.push_back(item);
+                            self.push_item(item)?;
                         }
                     }
                 }
@@ -503,7 +530,7 @@ impl<'a> Selector<'a> {
                 if let Some(mut object_val_iter) = object_val_iter_opt {
                     for result in &mut object_val_iter {
                         let val_item = result?;
-                        self.items.push_back(val_item);
+                        self.push_item(val_item)?;
                     }
                 }
             }
@@ -513,7 +540,7 @@ impl<'a> Selector<'a> {
                     for result in &mut object_val_iter {
                         let val_item = result?;
                         let owned_item = OwnedJsonb::from_item(val_item)?;
-                        self.items.push_back(JsonbItem::Owned(owned_item));
+                        self.push_item(JsonbItem::Owned(owned_item))?;
                     }
                 }
             }
@@ -541,6 +568,9 @@ impl<'a> Selector<'a> {
                 (open_ended, open_ended)
             }
         };
+        // Charge every visited node, so levels that are walked but not
+        // selected (`.**{100}`) are bounded too.
+        self.charge(1)?;
         if is_match {
             self.items.push_back(parent_item.clone());
         }
@@ -616,7 +646,7 @@ impl<'a> Selector<'a> {
                 if let Some(val_item) =
                     raw.get_object_value_by_key_name(&key_name, |name, key| key.eq(name))?
                 {
-                    self.items.push_back(val_item);
+                    self.push_item(val_item)?;
                 }
             }
             JsonbItem::Owned(ref owned) => {
@@ -625,7 +655,7 @@ impl<'a> Selector<'a> {
                     raw.get_object_value_by_key_name(&key_name, |name, key| key.eq(name))?
                 {
                     let owned_item = OwnedJsonb::from_item(val_item)?;
-                    self.items.push_back(JsonbItem::Owned(owned_item));
+                    self.push_item(JsonbItem::Owned(owned_item))?;
                 }
             }
             _ => {}
@@ -637,7 +667,7 @@ impl<'a> Selector<'a> {
         let jsonb_item_type = parent_item.jsonb_item_type()?;
         if !matches!(jsonb_item_type, JsonbItemType::Array(_)) {
             // In lax mode, bracket wildcard allow Scalar and Object value.
-            self.items.push_back(parent_item);
+            self.push_item(parent_item)?;
             return Ok(());
         };
 
@@ -647,7 +677,7 @@ impl<'a> Selector<'a> {
                 if let Some(mut array_iter) = array_iter_opt {
                     for item_result in &mut array_iter {
                         let item = item_result?;
-                        self.items.push_back(item);
+                        self.push_item(item)?;
                     }
                 }
             }
@@ -657,7 +687,7 @@ impl<'a> Selector<'a> {
                     for item_result in &mut array_iter {
                         let item = item_result?;
                         let owned_item = OwnedJsonb::from_item(item)?;
-                        self.items.push_back(JsonbItem::Owned(owned_item));
+                        self.push_item(JsonbItem::Owned(owned_item))?;
                     }
                 }
             }
@@ -687,7 +717,7 @@ impl<'a> Selector<'a> {
                         for (i, item_result) in &mut array_iter.enumerate() {
                             let item = item_result?;
                             if indices.contains(&i) {
-                                self.items.push_back(item);
+                                self.push_item(item)?;
                             }
                         }
                     }
@@ -699,7 +729,7 @@ impl<'a> Selector<'a> {
                             let item = item_result?;
                             if indices.contains(&i) {
                                 let owned_item = OwnedJsonb::from_item(item)?;
-                                self.items.push_back(JsonbItem::Owned(owned_item));
+                                self.push_item(JsonbItem::Owned(owned_item))?;
                             }
                         }
                     }
@@ -715,7 +745,7 @@ impl<'a> Selector<'a> {
             Expr::UnaryOp { op, operand } => {
                 let res_items = self.eval_unary_arithmetic_func(item.clone(), op, operand)?;
                 for res_item in res_items {
-                    self.items.push_back(res_item);
+                    self.push_item(res_item)?;
                 }
             }
             Expr::BinaryOp { op, left, right } => match op {
@@ -727,7 +757,7 @@ impl<'a> Selector<'a> {
                     let res_items =
                         self.eval_binary_arithmetic_func(item.clone(), op, left, right)?;
                     for res_item in res_items {
-                        self.items.push_back(res_item);
+                        self.push_item(res_item)?;
                     }
                 }
                 _ => {
@@ -737,7 +767,7 @@ impl<'a> Selector<'a> {
                     } else {
                         JsonbItem::Null
                     };
-                    self.items.push_back(res_item);
+                    self.push_item(res_item)?;
                 }
             },
             Expr::ExistsFunc(_) => {
@@ -747,11 +777,11 @@ impl<'a> Selector<'a> {
                 } else {
                     JsonbItem::Null
                 };
-                self.items.push_back(res_item);
+                self.push_item(res_item)?;
             }
             Expr::Value(val) => {
                 let res_item = self.eval_value(val)?;
-                self.items.push_back(res_item);
+                self.push_item(res_item)?;
             }
             Expr::Paths(_) => {
                 return Err(Error::InvalidJsonPath);
@@ -862,8 +892,7 @@ impl<'a> Selector<'a> {
                 | BinaryOperator::StartsWith => {
                     let lhs = self.convert_expr_val(item.clone(), left)?;
                     let rhs = self.convert_expr_val(item.clone(), right)?;
-                    let res = self.eval_compare(op, &lhs, &rhs);
-                    Ok(res)
+                    self.eval_compare(op, &lhs, &rhs)
                 }
                 _ => Ok(None),
             },
@@ -906,7 +935,7 @@ impl<'a> Selector<'a> {
                         let item = self.items.pop_front().unwrap();
                         let res = self.eval_filter_expr(item.clone(), expr)?.unwrap_or(false);
                         if res {
-                            self.items.push_back(item);
+                            self.push_item(item)?;
                         }
                     }
                 }
@@ -958,6 +987,7 @@ impl<'a> Selector<'a> {
                                             continue;
                                         }
                                     };
+                                    self.charge(1)?;
                                     values.push(value);
                                 }
                             } else {
@@ -975,6 +1005,7 @@ impl<'a> Selector<'a> {
                                         continue;
                                     }
                                 };
+                                self.charge(1)?;
                                 values.push(value);
                             }
                             continue;
@@ -983,6 +1014,7 @@ impl<'a> Selector<'a> {
                             continue;
                         }
                     };
+                    self.charge(1)?;
                     values.push(value);
                 }
                 Ok(ExprValue::Values(values))
@@ -996,7 +1028,7 @@ impl<'a> Selector<'a> {
         op: &BinaryOperator,
         lhs: &ExprValue<'a>,
         rhs: &ExprValue<'a>,
-    ) -> Option<bool> {
+    ) -> Result<Option<bool>> {
         let (lvals, rvals) = match (lhs, rhs) {
             (ExprValue::Value(lhs), ExprValue::Value(rhs)) => {
                 (vec![*lhs.clone()], vec![*rhs.clone()])
@@ -1012,13 +1044,15 @@ impl<'a> Selector<'a> {
 
         for lval in lvals.iter() {
             for rval in rvals.iter() {
-                let res = self.compare_value(op, lval.clone(), rval.clone())?;
-                if res {
-                    return Some(true);
+                self.charge(1)?;
+                match self.compare_value(op, lval.clone(), rval.clone()) {
+                    Some(true) => return Ok(Some(true)),
+                    Some(false) => {}
+                    None => return Ok(None),
                 }
             }
         }
-        Some(false)
+        Ok(Some(false))
     }
 
     fn compare_value(
