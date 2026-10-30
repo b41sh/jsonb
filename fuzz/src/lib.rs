@@ -209,12 +209,19 @@ fn check_canonical(raw: RawJsonb<'_>) {
     );
 }
 
+/// A JSON text parser that builds JSONB directly, paired with the one that
+/// builds a `Value` in the same mode.
+type ParserPair = (
+    fn(&[u8]) -> Result<OwnedJsonb, Error>,
+    fn(&[u8]) -> Result<Value<'_>, Error>,
+);
+
 /// Fuzzes arbitrary bytes interpreted as JSON text.
 ///
 /// Both encoders (`parse_owned_jsonb` and `parse_value` + `to_vec`) must agree
 /// byte for byte, and formatting the result must parse back to an equal value.
 pub fn check_json_text(data: &[u8]) {
-    let parsers: [(fn(&[u8]) -> Result<OwnedJsonb, Error>, fn(&[u8]) -> Result<Value<'_>, Error>); 2] = [
+    let parsers: [ParserPair; 2] = [
         (parse_owned_jsonb, parse_value),
         (parse_owned_jsonb_standard_mode, parse_value_standard_mode),
     ];
@@ -239,24 +246,38 @@ pub fn check_json_text(data: &[u8]) {
 
         // Formatting and reparsing keeps the value. The text itself may change
         // once, e.g. `Float64(-0.0)` prints as `-0.0`, which parses back as the
-        // decimal `0.0`, but after that it must be stable.
+        // decimal `0.0`, but after that it must be stable. JSON text has no
+        // NaN or infinity, so those print as `null` and only stability holds.
         let reparse = |text: &str| {
             parse_owned_jsonb(text.as_bytes())
                 .unwrap_or_else(|err| panic!("formatted text {text:?} does not parse: {err}"))
         };
         let text = raw.to_string();
         let reparsed = reparse(&text);
-        assert_eq!(
-            reparsed.as_raw().partial_cmp(&raw),
-            Some(Ordering::Equal),
-            "reparsing {text:?} changed the value"
-        );
+        if !has_non_finite_float(&value) {
+            assert_eq!(
+                reparsed.as_raw().partial_cmp(&raw),
+                Some(Ordering::Equal),
+                "reparsing {text:?} changed the value"
+            );
+        }
         let stable_text = reparsed.to_string();
         assert_eq!(
             reparse(&stable_text).to_string(),
             stable_text,
             "formatting is not stable"
         );
+    }
+}
+
+/// Returns whether `value` contains NaN or an infinity, which JSON text
+/// cannot represent.
+fn has_non_finite_float(value: &Value<'_>) -> bool {
+    match value {
+        Value::Number(Number::Float64(v)) => !v.is_finite(),
+        Value::Array(items) => items.iter().any(has_non_finite_float),
+        Value::Object(object) => object.values().any(has_non_finite_float),
+        _ => false,
     }
 }
 
@@ -299,7 +320,10 @@ pub fn check_path(data: &[u8]) {
         let text = key_paths.to_string();
         let reparsed: KeyPaths<'_> = parse_key_paths(text.as_bytes())
             .unwrap_or_else(|err| panic!("formatted key path {text:?} does not parse: {err}"));
-        assert_eq!(key_paths, reparsed, "key path changed after formatting as {text:?}");
+        assert_eq!(
+            key_paths, reparsed,
+            "key path changed after formatting as {text:?}"
+        );
     }
 }
 

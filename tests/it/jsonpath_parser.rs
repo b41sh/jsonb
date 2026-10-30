@@ -153,3 +153,54 @@ fn test_json_path_number_literals() {
         assert_eq!(parse_json_path(text.as_bytes()).unwrap(), path, "{input}");
     }
 }
+
+#[test]
+fn test_json_path_logical_parentheses() {
+    // Each case is (input, formatted). Parentheses are kept only where the
+    // tree differs from the parser's precedence (`&&` over `||`) and
+    // left-to-right grouping.
+    let cases = [
+        (
+            "$ ? (@.a == 1 || @.b == 2 || @.c == 3)",
+            "$?(@.a == 1 || @.b == 2 || @.c == 3)",
+        ),
+        (
+            "$ ? ((@.a == 1 && @.b == 2) && @.c == 3)",
+            "$?(@.a == 1 && @.b == 2 && @.c == 3)",
+        ),
+        (
+            "$ ? (@.a == 1 || @.b == 2 && @.c == 3)",
+            "$?(@.a == 1 || @.b == 2 && @.c == 3)",
+        ),
+        (
+            "$ ? ((@.a == 1 || @.b == 2) && @.c == 3)",
+            "$?((@.a == 1 || @.b == 2) && @.c == 3)",
+        ),
+        (
+            "$ ? (@.a == 1 && (@.b == 2 || @.c == 3))",
+            "$?(@.a == 1 && (@.b == 2 || @.c == 3))",
+        ),
+        (
+            "$ ? (@.a == 1 || (@.b == 2 || @.c == 3))",
+            "$?(@.a == 1 || (@.b == 2 || @.c == 3))",
+        ),
+        (
+            "$ ? (@.a == 1 && (@.b == 2 && @.c == 3))",
+            "$?(@.a == 1 && (@.b == 2 && @.c == 3))",
+        ),
+    ];
+    for (input, formatted) in cases {
+        let path = parse_json_path(input.as_bytes()).unwrap();
+        let text = path.to_string();
+        assert_eq!(text, formatted, "{input}");
+        assert_eq!(parse_json_path(text.as_bytes()).unwrap(), path, "{input}");
+    }
+
+    // A chain of 120 `||` used to format with 119 nested parentheses, past
+    // the parser's limit of 64 (found by fuzzing).
+    let chain = vec!["$.a - 5"; 120].join(" || ");
+    let path = parse_json_path(chain.as_bytes()).unwrap();
+    let text = path.to_string();
+    assert_eq!(text, chain);
+    assert_eq!(parse_json_path(text.as_bytes()).unwrap(), path);
+}

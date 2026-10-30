@@ -511,22 +511,14 @@ impl Display for Expr<'_> {
                 write!(f, "{v}")?;
             }
             Expr::BinaryOp { op, left, right } => {
-                if let Expr::BinaryOp { op: left_op, .. } = &**left {
-                    if left_op == &BinaryOperator::And || left_op == &BinaryOperator::Or {
-                        write!(f, "({left})")?;
-                    } else {
-                        write!(f, "{left}")?;
-                    }
+                if needs_parens(op, left, false) {
+                    write!(f, "({left})")?;
                 } else {
                     write!(f, "{left}")?;
                 }
                 write!(f, " {op} ")?;
-                if let Expr::BinaryOp { op: right_op, .. } = &**right {
-                    if right_op == &BinaryOperator::And || right_op == &BinaryOperator::Or {
-                        write!(f, "({right})")?;
-                    } else {
-                        write!(f, "{right}")?;
-                    }
+                if needs_parens(op, right, true) {
+                    write!(f, "({right})")?;
                 } else {
                     write!(f, "{right}")?;
                 }
@@ -543,6 +535,32 @@ impl Display for Expr<'_> {
             }
         }
         Ok(())
+    }
+}
+
+/// Returns whether `child`, an operand of `parent`, must be parenthesized for
+/// the formatted text to parse back to the same tree.
+///
+/// The parser gives `&&` higher precedence than `||` and reads both left to
+/// right, so `a || b || c` is `(a || b) || c`. Parenthesizing only where the
+/// tree differs from that keeps long chains flat; wrapping every logical
+/// operand turned a chain of 100 `||` into 100 nested parentheses, past the
+/// parser's nesting limit.
+fn needs_parens(parent: &BinaryOperator, child: &Expr<'_>, is_right: bool) -> bool {
+    let Expr::BinaryOp { op: child, .. } = child else {
+        return false;
+    };
+    let is_logical = |op: &BinaryOperator| matches!(op, BinaryOperator::And | BinaryOperator::Or);
+    if !is_logical(child) {
+        return false;
+    }
+    match parent {
+        // `&&` binds tighter, so it never needs parentheses under `||`.
+        BinaryOperator::Or => child == &BinaryOperator::Or && is_right,
+        BinaryOperator::And => child == &BinaryOperator::Or || is_right,
+        // Comparison and arithmetic operands are never logical expressions
+        // when parsed, so keep the parentheses that mark such a tree.
+        _ => true,
     }
 }
 
