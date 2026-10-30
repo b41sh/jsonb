@@ -108,3 +108,42 @@ fn test_json_path_error() {
         assert!(res.is_err());
     }
 }
+
+#[test]
+fn test_json_path_number_literals() {
+    // Each case is (input, formatted). Literals with a fraction or exponent
+    // used to fail to parse: the integer parser took `1` from `1.5` and left
+    // `.5`, which no rule accepts (found by fuzzing).
+    let cases = [
+        ("$ ? (@ > 1.5)", "$?(@ > 1.5)"),
+        ("$ ? (@ == -1.5e3)", "$?(@ == -1500.0)"),
+        ("$ ? (@ == 1E+3)", "$?(@ == 1000.0)"),
+        ("$ ? (@ == 1.)", "$?(@ == 1.0)"),
+        ("$ ? (@ == .5)", "$?(@ == 0.5)"),
+        ("$ ? (@ == -0.0)", "$?(@ == -0.0)"),
+        (
+            "$ ? (@ == 18446744073709551615)",
+            "$?(@ == 18446744073709551615)",
+        ),
+        (
+            "$ ? (@ == -9223372036854775808)",
+            "$?(@ == -9223372036854775808)",
+        ),
+        (
+            "$ ? (@ == 18446744073709551616)",
+            "$?(@ == 1.8446744073709552e+19)",
+        ),
+        (".0/5", "0.0 / 5"),
+        ("1e16 / 5", "1e+16 / 5"),
+        ("inf / 5", "inf / 5"),
+        // Not number literals: these stay field names.
+        ("0.0", ".0.0"),
+        ("1e.a", ".1e.a"),
+    ];
+    for (input, formatted) in cases {
+        let path = parse_json_path(input.as_bytes()).unwrap();
+        let text = path.to_string();
+        assert_eq!(text, formatted, "{input}");
+        assert_eq!(parse_json_path(text.as_bytes()).unwrap(), path, "{input}");
+    }
+}

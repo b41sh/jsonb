@@ -31,7 +31,10 @@ cargo +nightly fuzz run raw_jsonb corpus/raw_jsonb seeds/raw_jsonb -- \
   libFuzzer exits if it does not exist, so create it before the first run.
   `seeds/<target>` holds the small committed seed corpus.
 - `-dict` points libFuzzer at tokens of the input format so it reaches deeper
-  code sooner. Use the dictionary that matches the target:
+  code sooner. The path is resolved against the directory you run the command
+  from, so run it from `fuzz/` or pass an absolute path; otherwise libFuzzer
+  exits with `ParseDictionaryFile: file does not exist or is empty`. Use the
+  dictionary that matches the target:
 
   | Target | Dictionary |
   |---|---|

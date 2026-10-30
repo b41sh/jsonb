@@ -18,15 +18,16 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::tag_no_case;
 use nom::character::complete::char;
+use nom::character::complete::digit1;
 use nom::character::complete::i32;
-use nom::character::complete::i64;
 use nom::character::complete::multispace0;
-use nom::character::complete::u64;
+use nom::character::complete::one_of;
 use nom::character::complete::u8;
 use nom::combinator::cond;
 use nom::combinator::map;
 use nom::combinator::map_res;
 use nom::combinator::opt;
+use nom::combinator::recognize;
 use nom::combinator::value;
 use nom::error::Error as NomError;
 use nom::error::ErrorKind;
@@ -461,10 +462,54 @@ fn path_value(input: &[u8]) -> IResult<&[u8], PathValue<'_>> {
         value(PathValue::Null, tag("null")),
         value(PathValue::Boolean(true), tag("true")),
         value(PathValue::Boolean(false), tag("false")),
-        map(u64, |v| PathValue::Number(Number::UInt64(v))),
-        map(i64, |v| PathValue::Number(Number::Int64(v))),
-        map(double, |v| PathValue::Number(Number::Float64(v))),
+        map(number, PathValue::Number),
         map(string, PathValue::String),
+    ))
+    .parse(input)
+}
+
+/// Parses a number literal.
+///
+/// The whole literal is recognized before its type is chosen. Trying the
+/// integer parsers first would take `1` from `1.5` and leave `.5`, which no
+/// rule accepts, so literals with a fraction or exponent never parsed.
+fn number(input: &[u8]) -> IResult<&[u8], Number> {
+    alt((
+        map_res(number_literal, |literal: &[u8]| {
+            // `number_literal` only matches ASCII.
+            let literal = std::str::from_utf8(literal).map_err(|_| ErrorKind::Float)?;
+            if !literal.contains(['.', 'e', 'E']) {
+                if let Ok(v) = literal.parse::<u64>() {
+                    return Ok(Number::UInt64(v));
+                }
+                if let Ok(v) = literal.parse::<i64>() {
+                    return Ok(Number::Int64(v));
+                }
+            }
+            literal
+                .parse::<f64>()
+                .map(Number::Float64)
+                .map_err(|_| ErrorKind::Float)
+        }),
+        // `inf`, `infinity` and `nan`.
+        map(double, Number::Float64),
+    ))
+    .parse(input)
+}
+
+/// Recognizes `[+-]digits[.digits][e[+-]digits]` or `[+-].digits[e[+-]digits]`.
+///
+/// Unlike `nom::number::complete::recognize_float`, an `e` without exponent
+/// digits ends the literal instead of failing the whole parse, so `1e` can
+/// still be read as a field name.
+fn number_literal(input: &[u8]) -> IResult<&[u8], &[u8]> {
+    recognize((
+        opt(one_of("+-")),
+        alt((
+            recognize((digit1, opt((char('.'), opt(digit1))))),
+            recognize((char('.'), digit1)),
+        )),
+        opt((one_of("eE"), opt(one_of("+-")), digit1)),
     ))
     .parse(input)
 }
