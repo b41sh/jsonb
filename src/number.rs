@@ -146,8 +146,12 @@ impl Decimal64 {
     /// This is useful when you need to perform floating-point operations,
     /// but note that it may introduce precision loss inherent to floating-point arithmetic.
     pub fn to_float64(&self) -> f64 {
-        let div = 10_f64.powi(self.scale as i32);
-        self.value as f64 / div
+        match i64_to_f64_exact(self.value) {
+            Some(value) => decimal_to_f64(value, self.scale, || {
+                Number::Decimal64(self.clone()).to_string()
+            }),
+            None => decimal_text_to_f64(&Number::Decimal64(self.clone()).to_string()),
+        }
     }
 }
 
@@ -170,8 +174,12 @@ impl Decimal128 {
     /// Note that for very large values, this conversion may lose precision
     /// as f64 has limited precision compared to i128.
     pub fn to_float64(&self) -> f64 {
-        let div = 10_f64.powi(self.scale as i32);
-        self.value as f64 / div
+        match i64::try_from(self.value).ok().and_then(i64_to_f64_exact) {
+            Some(value) => decimal_to_f64(value, self.scale, || {
+                Number::Decimal128(self.clone()).to_string()
+            }),
+            None => decimal_text_to_f64(&Number::Decimal128(self.clone()).to_string()),
+        }
     }
 }
 
@@ -195,9 +203,41 @@ impl Decimal256 {
     /// For extremely large values, significant precision loss may occur
     /// as f64 has much lower precision than i256.
     pub fn to_float64(&self) -> f64 {
-        let div = 10_f64.powi(self.scale as i32);
-        self.value.as_f64() / div
+        match i64::try_from(self.value).ok().and_then(i64_to_f64_exact) {
+            Some(value) => decimal_to_f64(value, self.scale, || {
+                Number::Decimal256(self.clone()).to_string()
+            }),
+            None => decimal_text_to_f64(&Number::Decimal256(self.clone()).to_string()),
+        }
     }
+}
+
+/// Largest power of ten that `f64` represents exactly.
+const MAX_EXACT_F64_POWER_OF_10: u8 = 22;
+
+/// Returns `value` as `f64` if the conversion is exact, i.e. `|value| <= 2^53`.
+fn i64_to_f64_exact(value: i64) -> Option<f64> {
+    (value.unsigned_abs() <= 1 << f64::MANTISSA_DIGITS).then_some(value as f64)
+}
+
+/// Returns the `f64` nearest to `value / 10^scale`, where `value` is exact.
+///
+/// With both operands exact, one IEEE division rounds correctly. Converting a
+/// larger value first and dividing after rounds twice, which can land on the
+/// neighboring `f64`: 12345678901239047 / 100 gave 123456789012390.48 instead
+/// of 123456789012390.47, so equal decimal and float values compared unequal.
+fn decimal_to_f64(value: f64, scale: u8, text: impl FnOnce() -> String) -> f64 {
+    if scale <= MAX_EXACT_F64_POWER_OF_10 {
+        value / 10_f64.powi(i32::from(scale))
+    } else {
+        decimal_text_to_f64(&text())
+    }
+}
+
+/// Parses formatted decimal digits; the standard parser rounds correctly.
+fn decimal_text_to_f64(text: &str) -> f64 {
+    // Decimal formatting only writes an optional `-`, digits and one `.`.
+    text.parse().unwrap_or(f64::NAN)
 }
 
 /// Represents a JSON number with multiple possible internal representations.

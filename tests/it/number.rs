@@ -34,8 +34,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+
+use ethnum::i256;
 use jsonb::RawJsonb;
 use jsonb::{parse_value, parse_value_standard_mode};
+use jsonb::{Decimal128, Decimal256, Decimal64, Number, Value};
 use ordered_float::OrderedFloat;
 
 #[test]
@@ -2302,5 +2306,53 @@ fn test_parse_float() {
 
         assert_eq!(expected, s);
         assert_eq!(expected, ss);
+    }
+}
+
+#[test]
+fn decimal_to_f64_rounds_once() {
+    // Each case is (decimal value, scale, f64 parsed from the same digits).
+    // Converting the unscaled value to f64 before dividing rounded twice for
+    // values above 2^53 and scales above 22 (found by fuzzing).
+    let cases: [(i64, u8, f64); 4] = [
+        (12_345_678_901_239_047, 2, 123456789012390.47),
+        (-12_345_678_901_239_047, 3, -12345678901239.047),
+        (1, 23, 1e-23),
+        (i64::MAX, 0, 9223372036854775807.0),
+    ];
+    for (value, scale, expect) in cases {
+        let decimal = Decimal64 { scale, value };
+        assert_eq!(decimal.to_float64(), expect, "{value}e-{scale}");
+        let decimal = Decimal128 {
+            scale,
+            value: value.into(),
+        };
+        assert_eq!(decimal.to_float64(), expect, "{value}e-{scale}");
+        let decimal = Decimal256 {
+            scale,
+            value: value.into(),
+        };
+        assert_eq!(decimal.to_float64(), expect, "{value}e-{scale}");
+    }
+    let decimal = Decimal256 {
+        scale: 76,
+        value: i256::MAX,
+    };
+    assert_eq!(decimal.to_float64(), 5.789604461865809);
+
+    // So a float and the decimal its text parses back to compare equal.
+    for text in ["1.2345678901239047e14", "12345678901239047e-2", "1e-23"] {
+        let float = parse_value(text.as_bytes()).unwrap();
+        assert!(matches!(float, Value::Number(Number::Float64(_))), "{text}");
+        let float = float.to_vec().unwrap();
+        let reparsed = parse_value(RawJsonb::new(&float).to_string().as_bytes())
+            .unwrap()
+            .to_vec()
+            .unwrap();
+        assert_eq!(
+            RawJsonb::new(&reparsed).partial_cmp(&RawJsonb::new(&float)),
+            Some(Ordering::Equal),
+            "{text}"
+        );
     }
 }
