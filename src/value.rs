@@ -19,6 +19,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::fmt::Write as _;
 use std::mem::discriminant;
 
 use crate::error::Result;
@@ -180,10 +181,11 @@ impl Display for Value<'_> {
                     write!(f, "false")
                 }
             }
+            // JSON has no NaN or infinity; write `null` like `RawJsonb` does.
+            // `Number`'s own `Display` keeps `NaN`/`inf`, which JSONPath needs.
+            Value::Number(Number::Float64(v)) if !v.is_finite() => write!(f, "null"),
             Value::Number(ref v) => write!(f, "{}", v),
-            Value::String(ref v) => {
-                write!(f, "{:?}", v)
-            }
+            Value::String(ref v) => write_json_str(f, v),
             Value::Binary(v) => {
                 write!(f, "\"")?;
                 for c in *v {
@@ -220,9 +222,7 @@ impl Display for Value<'_> {
                     if i > 0 {
                         write!(f, ",")?;
                     }
-                    write!(f, "\"")?;
-                    write!(f, "{k}")?;
-                    write!(f, "\"")?;
+                    write_json_str(f, k)?;
                     write!(f, ":")?;
                     write!(f, "{v}")?;
                 }
@@ -230,6 +230,37 @@ impl Display for Value<'_> {
             }
         }
     }
+}
+
+/// Writes `s` as a JSON string literal, escaping like `serde_json` so that
+/// `Value` and `RawJsonb` format strings the same way.
+///
+/// Rust's `{:?}` output is not JSON: it writes `\0`, `\u{7f}` and `\u{2028}`.
+fn write_json_str(f: &mut Formatter<'_>, s: &str) -> std::fmt::Result {
+    f.write_char('"')?;
+    let mut start = 0;
+    for (i, c) in s.char_indices() {
+        let escaped = match c {
+            '"' => "\\\"",
+            '\\' => "\\\\",
+            '\u{8}' => "\\b",
+            '\u{c}' => "\\f",
+            '\n' => "\\n",
+            '\r' => "\\r",
+            '\t' => "\\t",
+            '\0'..='\u{1f}' => "",
+            _ => continue,
+        };
+        f.write_str(&s[start..i])?;
+        if escaped.is_empty() {
+            write!(f, "\\u{:04x}", u32::from(c))?;
+        } else {
+            f.write_str(escaped)?;
+        }
+        start = i + c.len_utf8();
+    }
+    f.write_str(&s[start..])?;
+    f.write_char('"')
 }
 
 impl<'a> Value<'a> {

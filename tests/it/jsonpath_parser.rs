@@ -204,3 +204,31 @@ fn test_json_path_logical_parentheses() {
     assert_eq!(text, chain);
     assert_eq!(parse_json_path(text.as_bytes()).unwrap(), path);
 }
+
+#[test]
+fn test_json_path_empty_string() {
+    use jsonb::OwnedJsonb;
+
+    // `""` is a valid string literal and a valid quoted name. The quoted-string
+    // parser used to reject it, so comparing with an empty string failed.
+    let doc: OwnedJsonb = r#"{"":{"x":1},"a":"","b":"c"}"#.parse().unwrap();
+    let cases = [
+        (r#"$ ? (@.a == "")"#, r#"$?(@.a == "")"#, true),
+        (r#"$ ? (@.b == "")"#, r#"$?(@.b == "")"#, false),
+        (r#"$."".x"#, r#"$."".x"#, true),
+        (r#"$[""]"#, r#"$[""]"#, true),
+        (r#"$.b starts with """#, r#"$.b starts with """#, true),
+    ];
+    for (input, formatted, exists) in cases {
+        let path = parse_json_path(input.as_bytes()).unwrap();
+        let text = path.to_string();
+        assert_eq!(text, formatted, "{input}");
+        assert_eq!(parse_json_path(text.as_bytes()).unwrap(), path, "{input}");
+        let result = if path.is_predicate() {
+            doc.as_raw().path_match(&path).unwrap() == Some(true)
+        } else {
+            doc.as_raw().path_exists(&path).unwrap()
+        };
+        assert_eq!(result, exists, "{input}");
+    }
+}

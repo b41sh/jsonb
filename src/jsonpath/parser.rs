@@ -190,8 +190,9 @@ pub(crate) fn string(input: &[u8]) -> IResult<&[u8], Cow<'_, str>> {
             }
         }
     }
-    // `i == input.len()` means the closing quote is missing.
-    if i > 1 && i < input.len() {
+    // `i == input.len()` means the closing quote is missing. `i == 1` is the
+    // empty string `""`, a valid key and string literal.
+    if i < input.len() {
         if escapes == 0 {
             if let Ok(s) = std::str::from_utf8(&input[1..i]) {
                 return Ok((&input[i + 1..], Cow::Borrowed(s)));
