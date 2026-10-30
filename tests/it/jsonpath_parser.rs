@@ -136,6 +136,12 @@ fn test_json_path_number_literals() {
         (".0/5", "0.0 / 5"),
         ("1e16 / 5", "1e+16 / 5"),
         ("inf / 5", "inf / 5"),
+        // Overflowing literals become infinities, which `Display` writes with
+        // a sign, so signed `inf`, `infinity` and `nan` must parse too.
+        ("0 > -1e400", "0 > -inf"),
+        ("0 > -inf", "0 > -inf"),
+        ("$ ? (@ == -Infinity)", "$?(@ == -inf)"),
+        ("0 > +nan", "0 > NaN"),
         // Not number literals: these stay field names.
         ("0.0", ".0.0"),
         ("1e.a", ".1e.a"),

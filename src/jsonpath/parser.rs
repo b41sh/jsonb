@@ -33,7 +33,6 @@ use nom::error::Error as NomError;
 use nom::error::ErrorKind;
 use nom::multi::many0;
 use nom::multi::separated_list1;
-use nom::number::complete::double;
 use nom::sequence::delimited;
 use nom::sequence::pair;
 use nom::sequence::preceded;
@@ -491,8 +490,26 @@ fn number(input: &[u8]) -> IResult<&[u8], Number> {
                 .map(Number::Float64)
                 .map_err(|_| ErrorKind::Float)
         }),
-        // `inf`, `infinity` and `nan`.
-        map(double, Number::Float64),
+        // `inf`, `infinity` and `nan`, with an optional sign. `Display`
+        // writes negative infinity as `-inf`, so the sign must be accepted
+        // for formatted paths to parse again.
+        map_res(
+            recognize((
+                opt(one_of("+-")),
+                alt((
+                    tag_no_case("infinity"),
+                    tag_no_case("inf"),
+                    tag_no_case("nan"),
+                )),
+            )),
+            |literal: &[u8]| {
+                std::str::from_utf8(literal)
+                    .ok()
+                    .and_then(|literal| literal.parse::<f64>().ok())
+                    .map(Number::Float64)
+                    .ok_or(ErrorKind::Float)
+            },
+        ),
     ))
     .parse(input)
 }
