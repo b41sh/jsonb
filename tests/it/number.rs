@@ -2356,3 +2356,88 @@ fn decimal_to_f64_rounds_once() {
         );
     }
 }
+
+#[test]
+fn integer_arithmetic_is_exact() {
+    use Number::{Int64, UInt64};
+    // Mixed `Int64`/`UInt64` operands used to be cast to one type first, so
+    // results were silently wrong (found by fuzzing).
+    let cases: [(&str, Number, Number, Option<Number>); 14] = [
+        (
+            "add",
+            UInt64(u64::MAX),
+            Int64(-1),
+            Some(UInt64(u64::MAX - 1)),
+        ),
+        (
+            "add",
+            Int64(-1),
+            UInt64(u64::MAX),
+            Some(UInt64(u64::MAX - 1)),
+        ),
+        (
+            "add",
+            Int64(i64::MIN),
+            UInt64(u64::MAX),
+            Some(UInt64(i64::MAX as u64)),
+        ),
+        ("sub", UInt64(u64::MAX), UInt64(0), Some(UInt64(u64::MAX))),
+        ("sub", UInt64(5), UInt64(10), Some(Int64(-5))),
+        (
+            "sub",
+            UInt64(u64::MAX - 1),
+            Int64(-1),
+            Some(UInt64(u64::MAX)),
+        ),
+        ("sub", Int64(0), UInt64(u64::MAX), None),
+        ("mul", Int64(-1), UInt64(u64::MAX), None),
+        ("mul", Int64(-1), UInt64(1 << 63), Some(Int64(i64::MIN))),
+        ("rem", Int64(i64::MIN), Int64(-1), Some(Int64(0))),
+        ("rem", Int64(-7), UInt64(u64::MAX), Some(Int64(-7))),
+        ("rem", UInt64(u64::MAX), Int64(-2), Some(UInt64(1))),
+        // Two `Int64` operands keep an `Int64` result.
+        ("mul", Int64(i64::MIN), Int64(-1), None),
+        ("add", Int64(i64::MAX), Int64(1), None),
+    ];
+    for (op, a, b, expect) in cases {
+        let got = match op {
+            "add" => a.add(b.clone()),
+            "sub" => a.sub(b.clone()),
+            "mul" => a.mul(b.clone()),
+            _ => a.rem(b.clone()),
+        };
+        match (got, expect) {
+            (Ok(got), Some(expect)) => assert_eq!(
+                format!("{got:?}"),
+                format!("{expect:?}"),
+                "{a:?} {op} {b:?}"
+            ),
+            (Err(_), None) => {}
+            (got, expect) => panic!("{a:?} {op} {b:?}: got {got:?}, expected {expect:?}"),
+        }
+    }
+    assert!(Int64(1).rem(UInt64(0)).is_err());
+}
+
+#[test]
+fn neg_reports_overflow() {
+    // Negating the minimum decimal used to overflow (a panic with overflow
+    // checks); `-(2^63)` as `UInt64` used to be rejected although it fits.
+    let decimal = Number::Decimal64(Decimal64 {
+        scale: 2,
+        value: i64::MIN,
+    });
+    assert!(decimal.neg().is_err());
+    let decimal = Number::Decimal128(Decimal128 {
+        scale: 2,
+        value: i128::MIN,
+    });
+    assert!(decimal.neg().is_err());
+    let negated = Number::UInt64(1 << 63).neg().unwrap();
+    assert_eq!(
+        format!("{negated:?}"),
+        format!("{:?}", Number::Int64(i64::MIN))
+    );
+    assert!(Number::UInt64((1 << 63) + 1).neg().is_err());
+    assert!(Number::Int64(i64::MIN).neg().is_err());
+}

@@ -700,9 +700,10 @@ type ExactOp = fn(i128, i128) -> Option<i128>;
 /// Fuzzes two `Number`s built from arbitrary bytes.
 ///
 /// Arithmetic, conversion, and formatting must not panic. Integer arithmetic
-/// must return the exact result when it fits `i64` or `u64` and an error when
-/// it does not; comparison must be antisymmetric and agree with the
-/// comparable encoding; and formatted numbers must parse back to equal values.
+/// must never return a wrong value, and may fail only when the exact result
+/// does not fit the result type; comparison must be antisymmetric and agree
+/// with the comparable encoding; and formatted numbers must parse back to
+/// equal values.
 pub fn check_number(mut data: &[u8]) {
     let (Some(a), Some(b)) = (read_number(&mut data), read_number(&mut data)) else {
         return;
@@ -728,16 +729,35 @@ pub fn check_number(mut data: &[u8]) {
             let (Some(xi), Some(yi)) = (integer_value(x), integer_value(y)) else {
                 continue;
             };
-            let expect =
-                exact(xi, yi).filter(|v| (i128::from(i64::MIN)..=i128::from(u64::MAX)).contains(v));
-            match (expect, result) {
-                (Some(expect), Ok(got)) => assert_eq!(
+            let expect = exact(xi, yi);
+            match result {
+                // A result is never silently wrong.
+                Ok(got) => assert_eq!(
                     integer_value(&got),
-                    Some(expect),
+                    expect,
                     "{x:?} {name} {y:?} returned {got:?}"
                 ),
-                (None, Err(_)) => {}
-                (expect, got) => panic!("{x:?} {name} {y:?}: got {got:?}, expected {expect:?}"),
+                // An error means the exact result does not fit the result
+                // type: `i64` for two `Int64`, `u64` for two `UInt64`, and
+                // neither for mixed operands.
+                Err(err) => {
+                    let fits = |v: i128, signed: bool| {
+                        if signed {
+                            i64::try_from(v).is_ok()
+                        } else {
+                            u64::try_from(v).is_ok()
+                        }
+                    };
+                    let representable = expect.is_some_and(|v| match (x, y) {
+                        (Number::Int64(_), Number::Int64(_)) => fits(v, true),
+                        (Number::UInt64(_), Number::UInt64(_)) => fits(v, false),
+                        _ => fits(v, true) || fits(v, false),
+                    });
+                    assert!(
+                        !representable,
+                        "{x:?} {name} {y:?} failed with {err:?}, expected {expect:?}"
+                    );
+                }
             }
         }
     }
