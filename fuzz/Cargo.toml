@@ -12,6 +12,7 @@ cargo-fuzz = true
 members = ["."]
 
 [dependencies]
+ethnum = "1.5.2"
 jaq-json = "2.0.0"
 jsonb = { path = ".." }
 libfuzzer-sys = "0.4"
@@ -42,6 +43,13 @@ bench = false
 [[bin]]
 name = "binary_ops"
 path = "fuzz_targets/binary_ops.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "number"
+path = "fuzz_targets/number.rs"
 test = false
 doc = false
 bench = false
