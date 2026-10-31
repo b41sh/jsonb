@@ -712,9 +712,9 @@ type ExactOp = fn(i128, i128) -> Option<i128>;
 ///
 /// Arithmetic, conversion, and formatting must not panic. Integer arithmetic
 /// must never return a wrong value, and may fail only when the exact result
-/// does not fit the result type; comparison must be antisymmetric and agree
-/// with the comparable encoding; and formatted numbers must parse back to
-/// equal values.
+/// does not fit the result type; comparison must be antisymmetric and the
+/// comparable encoding must never reverse it; and formatted numbers must parse
+/// back to equal values.
 pub fn check_number(mut data: &[u8]) {
     let (Some(a), Some(b)) = (read_number(&mut data), read_number(&mut data)) else {
         return;
@@ -783,10 +783,23 @@ pub fn check_number(mut data: &[u8]) {
         let encoded = Value::Number(n.clone()).to_vec().expect("a number encodes");
         RawJsonb::new(&encoded).convert_to_comparable()
     };
-    assert_eq!(
-        order,
-        comparable(&a).cmp(&comparable(&b)),
-        "comparable encoding orders differently: {a:?} vs {b:?}"
+    assert_comparable_order(order, comparable(&a).cmp(&comparable(&b)), || {
+        format!("{a:?} vs {b:?}")
+    });
+}
+
+/// Panics if the comparable encoding orders two values the opposite way from
+/// `order`, their exact comparison.
+///
+/// The encoding may map different values to the same bytes: it converts
+/// numbers to `f64`, so integers beyond 2^53 and long decimals that differ
+/// only past the 17th significant digit encode equally. That loss is known;
+/// reversing an order is not.
+fn assert_comparable_order(order: Ordering, encoded: Ordering, what: impl Fn() -> String) {
+    assert!(
+        encoded == order || encoded == Ordering::Equal,
+        "comparable encoding reverses the order of {}: {order:?} but encoded {encoded:?}",
+        what()
     );
 }
 
@@ -808,11 +821,15 @@ fn check_number_unary(n: &Number) {
         );
     }
     if let Ok(negated) = n.neg() {
-        assert_eq!(
-            negated.neg().map(|back| back.cmp(n)).ok(),
-            Some(Ordering::Equal),
-            "negating {n:?} twice changed it"
-        );
+        // Negating back may overflow (`UInt64(2^63)` negates to `i64::MIN`),
+        // but must not return a different value.
+        if let Ok(back) = negated.neg() {
+            assert_eq!(
+                back.cmp(n),
+                Ordering::Equal,
+                "negating {n:?} twice returned {back:?}"
+            );
+        }
     }
 
     let text = n.to_string();
@@ -832,9 +849,9 @@ fn check_number_unary(n: &Number) {
 ///
 /// Each part is parsed as JSON text when possible, so most inputs reach the
 /// binary operations with valid JSONB; otherwise the raw bytes are used. For
-/// valid values, `concat` and `contains` must match their models, and the
-/// three comparisons (`RawJsonb::partial_cmp`, `Value::cmp`, and the byte
-/// order of `convert_to_comparable`) must agree and form a total order.
+/// valid values, `concat` and `contains` must match their models,
+/// `RawJsonb::partial_cmp` and `Value::cmp` must agree and form a total
+/// order, and the byte order of `convert_to_comparable` must never reverse it.
 pub fn check_binary_ops(data: &[u8]) {
     let mut parts = data.splitn(3, |&b| b == 0);
     let parts = [
@@ -907,11 +924,13 @@ fn check_pair(a: RawJsonb<'_>, a_value: &Value<'_>, b: RawJsonb<'_>, b_value: &V
         Some(a_value.cmp(b_value)),
         "RawJsonb and Value order differ: {a_value} vs {b_value}"
     );
-    assert_eq!(
-        order,
-        Some(a.convert_to_comparable().cmp(&b.convert_to_comparable())),
-        "comparable encoding orders differently: {a_value} vs {b_value}"
-    );
+    if let Some(order) = order {
+        assert_comparable_order(
+            order,
+            a.convert_to_comparable().cmp(&b.convert_to_comparable()),
+            || format!("{a_value} vs {b_value}"),
+        );
+    }
 
     assert_model(
         || format!("concat({a_value}, {b_value})"),

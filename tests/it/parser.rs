@@ -572,3 +572,20 @@ fn test_value_display_non_finite_floats_as_null() {
     let path = jsonb::jsonpath::parse_json_path(b"$ ? (@ > -inf)").unwrap();
     assert_eq!(path.to_string(), "$?(@ > -inf)");
 }
+
+#[test]
+fn test_parse_negative_hex_at_i64_min() {
+    // `-0x8000000000000000` is `i64::MIN`; negating its `i64` cast overflowed
+    // (a panic with overflow checks, found by fuzzing).
+    let value = parse_value(b"-0x8000000000000000").unwrap();
+    assert_eq!(value, Value::Number(Number::Int64(i64::MIN)));
+    let value = parse_value(b"-0x7fffffffffffffff").unwrap();
+    assert_eq!(value, Value::Number(Number::Int64(-i64::MAX)));
+    // One past `i64::MIN` needs a decimal, which only `arbitrary_precision`
+    // keeps exact.
+    #[cfg(feature = "arbitrary_precision")]
+    assert_eq!(
+        parse_value(b"-0x8000000000000001").unwrap().to_string(),
+        "-9223372036854775809"
+    );
+}

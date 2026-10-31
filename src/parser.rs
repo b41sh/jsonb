@@ -921,7 +921,9 @@ impl<'a> Parser<'a> {
                     if negative {
                         // Handle negative values
                         if value <= (i64::MAX as u128 + 1) {
-                            let i_val = -(value as i64);
+                            // Negate in `i128`: `value` may be 2^63, whose
+                            // `i64` cast is `i64::MIN` and cannot be negated.
+                            let i_val = -(value as i128) as i64;
                             return Ok(JsonAst::Number(Number::Int64(i_val)));
                         }
                         #[cfg(feature = "arbitrary_precision")]

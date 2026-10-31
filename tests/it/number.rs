@@ -2441,3 +2441,18 @@ fn neg_reports_overflow() {
     assert!(Number::UInt64((1 << 63) + 1).neg().is_err());
     assert!(Number::Int64(i64::MIN).neg().is_err());
 }
+
+#[test]
+fn comparable_encoding_treats_negative_zero_as_zero() {
+    // `-0.0` compares equal to `0` but used to encode below it.
+    let encode = |text: &str| {
+        let value = parse_value(text.as_bytes()).unwrap().to_vec().unwrap();
+        RawJsonb::new(&value).convert_to_comparable()
+    };
+    let negative_zero = Value::Number(Number::Float64(-0.0)).to_vec().unwrap();
+    let negative_zero = RawJsonb::new(&negative_zero).convert_to_comparable();
+    assert_eq!(negative_zero, encode("0"));
+    assert_eq!(negative_zero, encode("0.0"));
+    assert!(encode("-1e-300") < negative_zero);
+    assert!(negative_zero < encode("1e-300"));
+}
