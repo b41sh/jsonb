@@ -494,7 +494,9 @@ pub fn check_json_text(data: &[u8]) {
             raw.to_string(),
             "Value and RawJsonb format differently"
         );
-        if let Err(err) = serde_json::from_str::<serde_json::Value>(&value_text) {
+        // `IgnoredAny` checks the syntax only; building a `serde_json::Value`
+        // would misread objects with serde_json's private number key.
+        if let Err(err) = serde_json::from_str::<serde::de::IgnoredAny>(&value_text) {
             panic!("formatted text {value_text:?} is not JSON: {err}");
         }
 
@@ -532,6 +534,15 @@ pub fn check_json_text(data: &[u8]) {
 /// rejects. Duplicate object keys are the one input `serde_json` accepts and
 /// standard mode rejects by design.
 fn check_against_serde_json(data: &[u8]) {
+    // With `arbitrary_precision`, serde_json reads an object keyed by this
+    // marker as a number, so its `Value` is not a faithful reference.
+    const SERDE_NUMBER_KEY: &[u8] = b"$serde_json::private::Number";
+    if data
+        .windows(SERDE_NUMBER_KEY.len())
+        .any(|w| w == SERDE_NUMBER_KEY)
+    {
+        return;
+    }
     let Ok(expect) = serde_json::from_slice::<serde_json::Value>(data) else {
         return;
     };
