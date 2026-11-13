@@ -2612,6 +2612,148 @@ fn neg_reports_overflow() {
     assert!(Number::Int64(i64::MIN).neg().is_err());
 }
 
+/// Integers and decimals compare by their exact values, and a float as its
+/// shortest decimal. Converting integers and decimals to `f64` to compare them
+/// with floats made the order intransitive (found by fuzzing): `2^53 + 1`
+/// equaled the float `2^53`, which equals `2^53`, though `2^53 + 1 > 2^53`.
+#[test]
+fn number_order_is_exact_and_transitive() {
+    use Ordering::*;
+    let two_53 = 1u64 << 53;
+    let dec64 = |value: i64, scale: u8| Number::Decimal64(Decimal64 { scale, value });
+    let dec128 = |value: i128, scale: u8| Number::Decimal128(Decimal128 { scale, value });
+    let dec256 = |value: i256, scale: u8| Number::Decimal256(Decimal256 { scale, value });
+    let i256_max_div_1e16 = i256::MAX / i256::from(10_000_000_000_000_000_i64);
+    let float = Number::Float64;
+    let cases = [
+        // Integers that round to the float they are compared with.
+        (Number::UInt64(two_53 + 1), float(two_53 as f64), Greater),
+        (Number::UInt64(two_53), float(two_53 as f64), Equal),
+        (
+            Number::Int64(-(two_53 as i64) - 1),
+            float(-(two_53 as f64)),
+            Less,
+        ),
+        // `u64::MAX as f64` is 2^64, whose shortest decimal is
+        // 18446744073709552000.
+        (Number::UInt64(u64::MAX), float(u64::MAX as f64), Less),
+        (
+            dec128(18446744073709551617, 0),
+            float(u64::MAX as f64),
+            Less,
+        ),
+        (
+            dec128(18446744073709552000, 0),
+            float(u64::MAX as f64),
+            Equal,
+        ),
+        // The float 0.1 is the decimal 0.1, not its binary value
+        // 0.1000000000000000055511151231257827...
+        (dec64(1, 1), float(0.1), Equal),
+        (
+            dec128(1_000_000_000_000_000_055_511_151_231_257_827, 34),
+            float(0.1),
+            Greater,
+        ),
+        (dec64(1, 255), float(1e-255), Equal),
+        (dec64(1, 255), float(5e-324), Greater),
+        (dec256(i256::MAX, 0), float(f64::MAX), Less),
+        // The fuzzed input: 12345678901234567891.0, 1.2345678901234567e19
+        // and 12345678901234567890.
+        (
+            dec128(123456789012345678910, 1),
+            float(1.2345678901234567e19),
+            Greater,
+        ),
+        (
+            Number::UInt64(12345678901234567890),
+            float(1.2345678901234567e19),
+            Greater,
+        ),
+        (
+            dec128(123456789012345678910, 1),
+            Number::UInt64(12345678901234567890),
+            Greater,
+        ),
+        // Decimals whose rescaled values overflow `i256`, which compared as
+        // `f64` and so as equal.
+        (
+            dec256(i256_max_div_1e16 + 1, 0),
+            dec256(i256::MAX, 16),
+            Greater,
+        ),
+        (dec256(i256_max_div_1e16, 0), dec256(i256::MAX, 16), Less),
+        (dec256(i256::ONE, 0), dec256(i256::ONE, 200), Greater),
+        // `NaN` is above every number, as in `OrderedFloat`, and zero has
+        // either sign.
+        (float(f64::NAN), float(f64::INFINITY), Greater),
+        (float(f64::NAN), dec256(i256::MAX, 0), Greater),
+        (float(f64::NAN), float(f64::NAN), Equal),
+        (float(f64::INFINITY), dec256(i256::MAX, 0), Greater),
+        (float(f64::NEG_INFINITY), dec256(i256::MIN, 0), Less),
+        (float(-0.0), Number::Int64(0), Equal),
+        (float(-0.0), dec64(0, 3), Equal),
+        (float(-1e-300), dec64(0, 3), Less),
+    ];
+    for (l, r, expect) in &cases {
+        assert_eq!(l.cmp(r), *expect, "{l:?} vs {r:?}");
+        assert_eq!(r.cmp(l), expect.reverse(), "{r:?} vs {l:?}");
+    }
+
+    // Every triple of these numbers is ordered transitively, and the
+    // comparable encoding, which converts numbers to `f64`, never reverses
+    // their order.
+    let mut numbers: Vec<Number> = cases
+        .iter()
+        .flat_map(|(l, r, _)| [l.clone(), r.clone()])
+        .collect();
+    for v in [two_53 - 1, two_53 + 2, u64::MAX - 1] {
+        numbers.extend([Number::UInt64(v), float(v as f64)]);
+    }
+    numbers.extend([
+        float(f64::from_bits((two_53 as f64).to_bits() + 1)),
+        dec64(i64::MIN, 0),
+    ]);
+    let comparable = |n: &Number| {
+        let encoded = Value::Number(n.clone()).to_vec().unwrap();
+        RawJsonb::new(&encoded).convert_to_comparable()
+    };
+    for x in &numbers {
+        for y in &numbers {
+            let order = x.cmp(y);
+            assert_eq!(order, y.cmp(x).reverse(), "{x:?} vs {y:?}");
+            let encoded = comparable(x).cmp(&comparable(y));
+            assert!(
+                encoded == order || encoded == Equal,
+                "comparable encoding of {x:?} vs {y:?} is {encoded:?}, but they compare {order:?}"
+            );
+            for z in &numbers {
+                if order != Greater && y.cmp(z) != Greater {
+                    assert_ne!(x.cmp(z), Greater, "{x:?} <= {y:?} <= {z:?}");
+                }
+            }
+        }
+    }
+
+    // The same three values as JSONB, from JSON text. Without
+    // `arbitrary_precision`, the first parses as the same float as the second.
+    let raw = |text: &str| text.parse::<jsonb::OwnedJsonb>().unwrap();
+    #[cfg(feature = "arbitrary_precision")]
+    {
+        let a = raw("12345678901234567891.0");
+        let b = raw("1.2345678901234567e19");
+        let c = raw("12345678901234567890");
+        assert_eq!(a.as_raw().partial_cmp(&b.as_raw()), Some(Greater));
+        assert_eq!(c.as_raw().partial_cmp(&b.as_raw()), Some(Greater));
+        assert_eq!(a.as_raw().partial_cmp(&c.as_raw()), Some(Greater));
+    }
+
+    // A decimal in a document still equals the float literal of a JSONPath.
+    let doc = raw(r#"{"a": 1.1}"#);
+    let path = jsonb::jsonpath::parse_json_path(b"$.a ? (@ == 1.1)").unwrap();
+    assert_eq!(doc.as_raw().select_by_path(&path).unwrap().len(), 1);
+}
+
 #[test]
 fn comparable_encoding_treats_negative_zero_as_zero() {
     // `-0.0` compares equal to `0` but used to encode below it.

@@ -1031,12 +1031,15 @@ impl PartialOrd<Number> for &Number {
 impl Ord for Number {
     /// Returns the ordering of the number compared to another number.
     ///
-    /// This method implements precise comparison between different number types:
-    /// - When comparing decimal types with other types, it converts the non-decimal type
-    ///   to a decimal representation to preserve precision
-    /// - When comparing between decimal types of different precision, it upgrades the lower
-    ///   precision decimal to match the higher precision one
-    /// - Only falls back to floating-point comparison as a last resort
+    /// Integers and decimals compare by their exact values. A float compares
+    /// as the shortest decimal that parses back to it, so the float `0.1`
+    /// equals the decimal `0.1`. `NaN` is greater than every other number and
+    /// equal to itself, as in `OrderedFloat`.
+    ///
+    /// Each number thus orders by one exact value, which keeps the order
+    /// transitive. Converting integers and decimals to `f64` to compare them
+    /// with floats did not: `2^53 + 1` equaled the float `2^53`, which equals
+    /// `2^53`, though `2^53 + 1 > 2^53`.
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
@@ -1055,9 +1058,7 @@ impl Ord for Number {
                     {
                         l_val.cmp(&r_val)
                     } else {
-                        let l = OrderedFloat(self.as_f64());
-                        let r = OrderedFloat(other.as_f64());
-                        l.cmp(&r)
+                        self.cmp_exact(other)
                     }
                 }
             }
@@ -1072,9 +1073,7 @@ impl Ord for Number {
                     {
                         l_val.cmp(&r_val)
                     } else {
-                        let l = OrderedFloat(self.as_f64());
-                        let r = OrderedFloat(other.as_f64());
-                        l.cmp(&r)
+                        self.cmp_exact(other)
                     }
                 }
             }
@@ -1098,10 +1097,8 @@ impl Ord for Number {
                             return l_val.cmp(&r.value);
                         }
                     }
-                    // multiply overflow, fallback to used float compare
-                    let l = OrderedFloat(self.as_f64());
-                    let r = OrderedFloat(other.as_f64());
-                    l.cmp(&r)
+                    // The scaled value overflows `i256`.
+                    self.cmp_exact(other)
                 }
             }
 
@@ -1293,12 +1290,221 @@ impl Ord for Number {
                 self.cmp(&Number::Decimal256(r_decimal))
             }
 
-            // Fall back to float comparison for any other combinations
-            (_, _) => {
-                let l = OrderedFloat(self.as_f64());
-                let r = OrderedFloat(other.as_f64());
-                l.cmp(&r)
+            (Number::Float64(l), _) => other.cmp_with_float(*l).reverse(),
+            (_, Number::Float64(r)) => self.cmp_with_float(*r),
+        }
+    }
+}
+
+impl Number {
+    /// Compares this integer or decimal with `float`.
+    ///
+    /// `as_f64` rounds to the nearest float. If that is not `float`, the exact
+    /// value and `float`'s shortest decimal round to different floats, so they
+    /// order like those floats. Only numbers that round to `float` itself
+    /// need the exact comparison.
+    fn cmp_with_float(&self, float: f64) -> Ordering {
+        if float.is_nan() {
+            return Ordering::Less;
+        }
+        match self.as_f64().partial_cmp(&float) {
+            Some(Ordering::Equal) | None => self.cmp_exact(&Number::Float64(float)),
+            Some(order) => order,
+        }
+    }
+
+    /// Compares two numbers by their exact values, taking a float as its
+    /// shortest decimal.
+    ///
+    /// This is slower than the comparisons in `cmp`, which use it only where
+    /// they cannot decide: decimals whose rescaled values overflow, and
+    /// numbers that round to the float they are compared with. Two floats
+    /// compare as floats, which orders them the same way.
+    fn cmp_exact(&self, other: &Number) -> Ordering {
+        if let (Number::Float64(l), Number::Float64(r)) = (self, other) {
+            return OrderedFloat(*l).cmp(&OrderedFloat(*r));
+        }
+        match (ExactDecimal::new(self), ExactDecimal::new(other)) {
+            (Some(l), Some(r)) => l.cmp(&r),
+            // Only non-finite floats have no decimal, and `cmp_with_float`
+            // orders those without coming here.
+            _ => OrderedFloat(self.as_f64()).cmp(&OrderedFloat(other.as_f64())),
+        }
+    }
+}
+
+/// A finite number as its exact value `(-1)^negative * magnitude / 10^scale`.
+struct ExactDecimal {
+    negative: bool,
+    magnitude: U256,
+    /// 0 to 255 for decimals. Floats range from -292, for
+    /// `1.7976931348623157e308`, to under 340, for the smallest floats.
+    scale: i32,
+}
+
+impl ExactDecimal {
+    /// Returns the exact value of `number`, or `None` for `NaN` and the
+    /// infinities.
+    fn new(number: &Number) -> Option<Self> {
+        let (negative, magnitude, scale) = match number {
+            Number::Int64(v) => (*v < 0, U256::from(v.unsigned_abs()), 0),
+            Number::UInt64(v) => (false, U256::from(*v), 0),
+            Number::Decimal64(d) => (d.value < 0, U256::from(d.value.unsigned_abs()), d.scale),
+            Number::Decimal128(d) => (d.value < 0, U256::from(d.value.unsigned_abs()), d.scale),
+            Number::Decimal256(d) => (d.value < i256::ZERO, d.value.unsigned_abs(), d.scale),
+            Number::Float64(v) => return Self::from_f64(*v),
+        };
+        Some(Self {
+            negative,
+            magnitude,
+            scale: i32::from(scale),
+        })
+    }
+
+    /// Returns the shortest decimal that parses back to `value`, which is
+    /// the text `zmij` writes, or `None` for `NaN` and the infinities.
+    fn from_f64(value: f64) -> Option<Self> {
+        if !value.is_finite() {
+            return None;
+        }
+        let mut buf = zmij::Buffer::new();
+        // An optional `-`, digits with an optional `.` fraction, and an
+        // optional exponent: `0.1`, `123.0`, `1e+300`, `-5e-324`. There are
+        // at most 17 significant digits, so the mantissa fits a `u128`.
+        let text = buf.format_finite(value).as_bytes();
+        let (negative, text) = match text.split_first() {
+            Some((b'-', rest)) => (true, rest),
+            _ => (false, text),
+        };
+        let (digits, exponent) = match text.iter().position(|&b| b == b'e') {
+            Some(e) => (&text[..e], &text[e + 1..]),
+            None => (text, &[][..]),
+        };
+        let mut mantissa = 0u128;
+        let mut scale = 0i32;
+        let mut in_fraction = false;
+        for &b in digits {
+            if b == b'.' {
+                in_fraction = true;
+            } else {
+                mantissa = mantissa * 10 + u128::from(b - b'0');
+                scale += i32::from(in_fraction);
             }
+        }
+        let (exponent_negative, exponent_digits) = match exponent.split_first() {
+            Some((b'-', rest)) => (true, rest),
+            Some((b'+', rest)) => (false, rest),
+            _ => (false, exponent),
+        };
+        let exponent = exponent_digits
+            .iter()
+            .fold(0i32, |e, &b| e * 10 + i32::from(b - b'0'));
+        if exponent_negative {
+            scale += exponent;
+        } else {
+            scale -= exponent;
+        }
+        Some(Self {
+            negative,
+            magnitude: U256::from(mantissa),
+            scale,
+        })
+    }
+}
+
+impl Ord for ExactDecimal {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // -1, 0 or 1; zero has either sign, as for `-0.0`.
+        let sign = |d: &Self| match (d.magnitude == U256::ZERO, d.negative) {
+            (true, _) => 0,
+            (false, true) => -1,
+            (false, false) => 1,
+        };
+        let (l, r) = (sign(self), sign(other));
+        if l != r || l == 0 {
+            return l.cmp(&r);
+        }
+        let order = self.cmp_magnitude(other);
+        if l < 0 {
+            order.reverse()
+        } else {
+            order
+        }
+    }
+}
+
+impl PartialOrd for ExactDecimal {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for ExactDecimal {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for ExactDecimal {}
+
+impl ExactDecimal {
+    /// Compares the magnitudes by bringing both to the larger scale.
+    fn cmp_magnitude(&self, other: &Self) -> Ordering {
+        if self.scale == other.scale {
+            return self.magnitude.cmp(&other.magnitude);
+        }
+        let scale = self.scale.max(other.scale);
+        let rescale = |d: &Self| {
+            let mut wide = WideUint::new(d.magnitude);
+            wide.mul_pow10(scale.abs_diff(d.scale));
+            wide
+        };
+        rescale(self).cmp(&rescale(other))
+    }
+}
+
+/// A 2048-bit unsigned integer, in little-endian 64-bit limbs.
+///
+/// That fits every rescaled magnitude in `ExactDecimal::cmp_magnitude`, which
+/// compares a float with an integer or decimal, or two decimals, but never two
+/// floats. The largest is a float mantissa below 2^57 times 10^547, between
+/// scales -292 and 255, which is below 2^1875. Decimal magnitudes are below
+/// 2^256 and need at most 10^340, which gives below 2^1386.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct WideUint([u64; 32]);
+
+impl WideUint {
+    fn new(value: U256) -> Self {
+        let (high, low) = value.into_words();
+        let mut limbs = [0; 32];
+        limbs[0] = low as u64;
+        limbs[1] = (low >> 64) as u64;
+        limbs[2] = high as u64;
+        limbs[3] = (high >> 64) as u64;
+        // The derived `Ord` compares limbs from the first, so store them
+        // most significant first.
+        limbs.reverse();
+        Self(limbs)
+    }
+
+    fn mul_small(&mut self, factor: u64) {
+        let mut carry = 0u128;
+        for limb in self.0.iter_mut().rev() {
+            let product = u128::from(*limb) * u128::from(factor) + carry;
+            *limb = product as u64;
+            carry = product >> 64;
+        }
+        debug_assert_eq!(carry, 0, "WideUint overflow");
+    }
+
+    fn mul_pow10(&mut self, mut exponent: u32) {
+        const POW10_19: u64 = 10_000_000_000_000_000_000;
+        while exponent >= 19 {
+            self.mul_small(POW10_19);
+            exponent -= 19;
+        }
+        if exponent > 0 {
+            self.mul_small(10_u64.pow(exponent));
         }
     }
 }
