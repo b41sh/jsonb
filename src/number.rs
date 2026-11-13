@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
+use crate::eisel_lemire;
 use crate::error::Result;
 use crate::Error;
 
@@ -146,8 +147,7 @@ impl Decimal64 {
     /// This is useful when you need to perform floating-point operations,
     /// but note that it may introduce precision loss inherent to floating-point arithmetic.
     pub fn to_float64(&self) -> f64 {
-        let div = 10_f64.powi(self.scale as i32);
-        self.value as f64 / div
+        decimal_to_f64(self.value.into(), self.scale)
     }
 }
 
@@ -170,8 +170,7 @@ impl Decimal128 {
     /// Note that for very large values, this conversion may lose precision
     /// as f64 has limited precision compared to i128.
     pub fn to_float64(&self) -> f64 {
-        let div = 10_f64.powi(self.scale as i32);
-        self.value as f64 / div
+        decimal_to_f64(self.value, self.scale)
     }
 }
 
@@ -195,9 +194,63 @@ impl Decimal256 {
     /// For extremely large values, significant precision loss may occur
     /// as f64 has much lower precision than i256.
     pub fn to_float64(&self) -> f64 {
-        let div = 10_f64.powi(self.scale as i32);
-        self.value.as_f64() / div
+        if let Ok(value) = i128::try_from(self.value) {
+            return decimal_to_f64(value, self.scale);
+        }
+        // `itoa` stops at `i128`, so wider values parse their decimal text.
+        // The buffer fits the longest `i256` decimal, so formatting succeeds.
+        let mut buf = StackBuf::<DECIMAL_TEXT_CAPACITY>::new();
+        match format_decimal_i256(&mut buf, self.value, self.scale.into()) {
+            // Decimal formatting only writes an optional `-`, digits and one `.`.
+            Ok(()) => fast_float2::parse(buf.as_bytes()).unwrap_or(f64::NAN),
+            Err(_) => f64::NAN,
+        }
     }
+}
+
+/// Largest power of ten that `f64` represents exactly.
+const MAX_EXACT_F64_POWER_OF_10: u8 = 22;
+
+/// Longest `<digits>e-<scale>` text: a sign, the 39 digits of an `i128`,
+/// `e-`, and a three-digit `u8` scale.
+const SCIENTIFIC_TEXT_CAPACITY: usize = 1 + 39 + 2 + 3;
+
+/// Returns the `f64` nearest to `value / 10^scale`.
+///
+/// When `|value| <= 2^53` and `10^scale` are both exact in `f64`, one IEEE
+/// division rounds correctly. Converting a larger value first and dividing
+/// after rounds twice, which can land on the neighboring `f64`:
+/// 12345678901239047 / 100 gave 123456789012390.48 instead of
+/// 123456789012390.47, so equal decimal and float values compared unequal.
+/// Other values go through Eisel-Lemire, or failing that parse
+/// `<digits>e-<scale>`; both round once.
+fn decimal_to_f64(value: i128, scale: u8) -> f64 {
+    if value.unsigned_abs() <= 1 << f64::MANTISSA_DIGITS && scale <= MAX_EXACT_F64_POWER_OF_10 {
+        // Converting through `i64` avoids the slower `i128` to `f64` routine;
+        // the value is exact in both.
+        return value as i64 as f64 / 10_f64.powi(i32::from(scale));
+    }
+    // Eisel-Lemire computes the rounding from the integers directly; it gives
+    // up on rare near-halfway products, and does not take mantissas above
+    // `u64`, which then parse their text.
+    if let Ok(mantissa) = u64::try_from(value.unsigned_abs()) {
+        if let Some(float) = eisel_lemire::decimal_to_f64(value < 0, mantissa, scale) {
+            return float;
+        }
+    }
+    // Fallback: parse `<digits>e-<scale>`. Exponent notation needs no decimal
+    // point or leading zeros, so only two integers are written.
+    let mut digits = itoa::Buffer::new();
+    let digits = digits.format(value).as_bytes();
+    let mut exponent = itoa::Buffer::new();
+    let exponent = exponent.format(scale).as_bytes();
+    let mut text = [0; SCIENTIFIC_TEXT_CAPACITY];
+    let (mantissa, rest) = text.split_at_mut(digits.len());
+    mantissa.copy_from_slice(digits);
+    rest[..2].copy_from_slice(b"e-");
+    rest[2..2 + exponent.len()].copy_from_slice(exponent);
+    let len = digits.len() + 2 + exponent.len();
+    fast_float2::parse(&text[..len]).unwrap_or(f64::NAN)
 }
 
 impl Number {
@@ -264,15 +317,17 @@ fn write_json_f64(v: f64, buf: &mut Vec<u8>) {
     }
 }
 
+/// Longest formatted decimal: a sign, 77 digits of an `i256`, `0.`, and up to
+/// 255 leading fractional zeros from the scale.
+const DECIMAL_TEXT_CAPACITY: usize = 1 + 77 + 2 + 255;
+
 /// A fixed-capacity buffer that formatting writes into without allocating.
 /// Writing more than `N` bytes fails.
-#[cfg(feature = "arbitrary_precision")]
 struct StackBuf<const N: usize> {
     buf: [u8; N],
     len: usize,
 }
 
-#[cfg(feature = "arbitrary_precision")]
 impl<const N: usize> StackBuf<N> {
     fn new() -> Self {
         Self {
@@ -286,7 +341,6 @@ impl<const N: usize> StackBuf<N> {
     }
 }
 
-#[cfg(feature = "arbitrary_precision")]
 impl<const N: usize> std::fmt::Write for StackBuf<N> {
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
         let end = self.len + s.len();
@@ -438,8 +492,10 @@ impl Serialize for Number {
                     serialize_struct.end()
                 }
             }
-            // Without arbitrary_precision, decimals serialize as `as_f64`,
-            // the same value `Number::write_json` writes.
+            // Without arbitrary_precision, decimals serialize as the nearest
+            // `f64`. Converting the unscaled value first and dividing after
+            // rounded twice, so a decimal could serialize as a neighboring
+            // float of the one `as_f64` returns.
             #[cfg(not(feature = "arbitrary_precision"))]
             Number::Decimal64(_) | Number::Decimal128(_) | Number::Decimal256(_) => {
                 serializer.serialize_f64(self.as_f64())
@@ -583,27 +639,26 @@ impl Number {
                 .checked_neg()
                 .map(Number::Int64)
                 .ok_or(Error::Message("Int64 overflow".to_string())),
-            Number::UInt64(v) => {
-                if let Ok(v) = i64::try_from(*v) {
-                    v.checked_neg()
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    Err(Error::Message("Int64 overflow".to_string()))
-                }
-            }
+            // `-2^63` is the one negated `u64` above `i64::MAX` that fits.
+            Number::UInt64(v) => Self::from_integer_result(Some(-i128::from(*v)), false),
             Number::Float64(v) => Ok(Number::Float64(*v * -1.0)),
             Number::Decimal64(v) => {
+                let Some(neg_value) = v.value.checked_neg() else {
+                    return Err(Error::Message("Decimal64 overflow".to_string()));
+                };
                 let neg_dec = Decimal64 {
                     scale: v.scale,
-                    value: -v.value,
+                    value: neg_value,
                 };
                 Ok(Number::Decimal64(neg_dec))
             }
             Number::Decimal128(v) => {
+                let Some(neg_value) = v.value.checked_neg() else {
+                    return Err(Error::Message("Decimal128 overflow".to_string()));
+                };
                 let neg_dec = Decimal128 {
                     scale: v.scale,
-                    value: -v.value,
+                    value: neg_value,
                 };
                 Ok(Number::Decimal128(neg_dec))
             }
@@ -624,39 +679,10 @@ impl Number {
     ///
     /// This method returns an error if the sum would overflow.
     pub fn add(&self, other: Number) -> Result<Number> {
+        if let Some((a, b, both_signed)) = self.integer_operands(&other) {
+            return Self::from_integer_result(a.checked_add(b), both_signed);
+        }
         match (self, other) {
-            (Number::Int64(a), Number::Int64(b)) => a
-                .checked_add(b)
-                .map(Number::Int64)
-                .ok_or(Error::Message("Int64 overflow".to_string())),
-            (Number::UInt64(a), Number::UInt64(b)) => a
-                .checked_add(b)
-                .map(Number::UInt64)
-                .ok_or(Error::Message("UInt64 overflow".to_string())),
-            (Number::Int64(a), Number::UInt64(b)) => {
-                if *a < 0 {
-                    a.checked_add(b as i64)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    (*a as u64)
-                        .checked_add(b)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
-            (Number::UInt64(a), Number::Int64(b)) => {
-                if b < 0 {
-                    (*a as i64)
-                        .checked_add(b)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    a.checked_add(b as u64)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
             (Number::Float64(a), Number::Float64(b)) => Ok(Number::Float64(a + b)),
             (a, b) => {
                 let a_float = a.as_f64();
@@ -670,23 +696,10 @@ impl Number {
     ///
     /// This method returns an error if the difference would overflow.
     pub fn sub(&self, other: Number) -> Result<Number> {
+        if let Some((a, b, both_signed)) = self.integer_operands(&other) {
+            return Self::from_integer_result(a.checked_sub(b), both_signed);
+        }
         match (self, other) {
-            (Number::Int64(a), Number::Int64(b)) => a
-                .checked_sub(b)
-                .map(Number::Int64)
-                .ok_or(Error::Message("Int64 overflow".to_string())),
-            (Number::UInt64(a), Number::UInt64(b)) => (*a as i64)
-                .checked_sub(b as i64)
-                .map(Number::Int64)
-                .ok_or(Error::Message("UInt64 overflow".to_string())),
-            (Number::Int64(a), Number::UInt64(b)) => a
-                .checked_sub(b as i64)
-                .map(Number::Int64)
-                .ok_or(Error::Message("Int64 overflow".to_string())),
-            (Number::UInt64(a), Number::Int64(b)) => (*a as i64)
-                .checked_sub(b)
-                .map(Number::Int64)
-                .ok_or(Error::Message("Int64 overflow".to_string())),
             (Number::Float64(a), Number::Float64(b)) => Ok(Number::Float64(a - b)),
             (a, b) => {
                 let a_float = a.as_f64();
@@ -700,39 +713,10 @@ impl Number {
     ///
     /// This method returns an error if the product would overflow.
     pub fn mul(&self, other: Number) -> Result<Number> {
+        if let Some((a, b, both_signed)) = self.integer_operands(&other) {
+            return Self::from_integer_result(a.checked_mul(b), both_signed);
+        }
         match (self, other) {
-            (Number::Int64(a), Number::Int64(b)) => a
-                .checked_mul(b)
-                .map(Number::Int64)
-                .ok_or(Error::Message("Int64 overflow".to_string())),
-            (Number::UInt64(a), Number::UInt64(b)) => a
-                .checked_mul(b)
-                .map(Number::UInt64)
-                .ok_or(Error::Message("UInt64 overflow".to_string())),
-            (Number::Int64(a), Number::UInt64(b)) => {
-                if *a < 0 {
-                    a.checked_mul(b as i64)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    (*a as u64)
-                        .checked_mul(b)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
-            (Number::UInt64(a), Number::Int64(b)) => {
-                if b < 0 {
-                    (*a as i64)
-                        .checked_mul(b)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    a.checked_mul(b as u64)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
             (Number::Float64(a), Number::Float64(b)) => Ok(Number::Float64(a * b)),
             (a, b) => {
                 let a_float = a.as_f64();
@@ -758,53 +742,13 @@ impl Number {
     ///
     /// This method returns an error if the divisor is zero.
     pub fn rem(&self, other: Number) -> Result<Number> {
+        if let Some((a, b, both_signed)) = self.integer_operands(&other) {
+            if b == 0 {
+                return Err(Error::Message("Division by zero".to_string()));
+            }
+            return Self::from_integer_result(a.checked_rem(b), both_signed);
+        }
         match (self, other) {
-            (Number::Int64(a), Number::Int64(b)) => {
-                if b == 0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                a.checked_rem(b)
-                    .map(Number::Int64)
-                    .ok_or(Error::Message("Int64 overflow".to_string()))
-            }
-            (Number::UInt64(a), Number::UInt64(b)) => {
-                if b == 0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                a.checked_rem(b)
-                    .map(Number::UInt64)
-                    .ok_or(Error::Message("UInt64 overflow".to_string()))
-            }
-            (Number::Int64(a), Number::UInt64(b)) => {
-                if b == 0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                if *a < 0 {
-                    a.checked_rem(b as i64)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    (*a as u64)
-                        .checked_rem(b)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
-            (Number::UInt64(a), Number::Int64(b)) => {
-                if b == 0 {
-                    return Err(Error::Message("Division by zero".to_string()));
-                }
-                if b < 0 {
-                    (*a as i64)
-                        .checked_rem(b)
-                        .map(Number::Int64)
-                        .ok_or(Error::Message("Int64 overflow".to_string()))
-                } else {
-                    a.checked_rem(b as u64)
-                        .map(Number::UInt64)
-                        .ok_or(Error::Message("UInt64 overflow".to_string()))
-                }
-            }
             (Number::Float64(a), Number::Float64(b)) => {
                 if b == 0.0 {
                     return Err(Error::Message("Division by zero".to_string()));
@@ -819,6 +763,46 @@ impl Number {
                 }
                 Ok(Number::Float64(a_float % b_float))
             }
+        }
+    }
+}
+
+impl Number {
+    /// Returns the exact values of this number and `other` if both are
+    /// integers, and whether both are `Int64`.
+    fn integer_operands(&self, other: &Number) -> Option<(i128, i128, bool)> {
+        let value = |n: &Number| match n {
+            Number::Int64(v) => Some(i128::from(*v)),
+            Number::UInt64(v) => Some(i128::from(*v)),
+            _ => None,
+        };
+        let both_signed = matches!((self, other), (Number::Int64(_), Number::Int64(_)));
+        Some((value(self)?, value(other)?, both_signed))
+    }
+
+    /// Builds the result of integer arithmetic from its exact value.
+    ///
+    /// Two `Int64` operands give an `Int64` result. Otherwise a non-negative
+    /// result is a `UInt64` and a negative one an `Int64`. A value outside
+    /// those ranges, or no value at all, is an overflow. Computing in `i128`
+    /// first keeps mixed `Int64`/`UInt64` operands from being cast to the
+    /// wrong type, which made `u64::MAX + (-1)` return `-2`.
+    fn from_integer_result(value: Option<i128>, both_signed: bool) -> Result<Number> {
+        let overflow = || {
+            let ty = if both_signed { "Int64" } else { "UInt64" };
+            Error::Message(format!("{ty} overflow"))
+        };
+        let value = value.ok_or_else(overflow)?;
+        if both_signed {
+            return i64::try_from(value)
+                .map(Number::Int64)
+                .map_err(|_| overflow());
+        }
+        match u64::try_from(value) {
+            Ok(v) => Ok(Number::UInt64(v)),
+            Err(_) => i64::try_from(value)
+                .map(Number::Int64)
+                .map_err(|_| overflow()),
         }
     }
 }
